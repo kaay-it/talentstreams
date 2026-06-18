@@ -23,20 +23,75 @@ export type Profile = {
 
 const SHEET_RANGE = "A1:Z1000"
 
-function getEnv() {
+/**
+ * Normalize a private key value coming from an env var.
+ * Handles: surrounding quotes, escaped "\n" newlines (the common case on
+ * Windows / Vercel), and trims stray whitespace.
+ */
+function normalizePrivateKey(raw: string): string {
+  let key = raw.trim()
+  // Strip wrapping quotes if the whole JSON value was pasted with them.
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1)
+  }
+  // Convert literal "\n" sequences into real newlines.
+  key = key.replace(/\\n/g, "\n")
+  return key
+}
+
+function isValidPrivateKey(key: string): boolean {
+  return key.includes("-----BEGIN") && key.includes("PRIVATE KEY-----")
+}
+
+/**
+ * Resolve the service-account email + private key.
+ * Two supported ways to provide them:
+ *  1. GOOGLE_SERVICE_ACCOUNT_JSON = the entire service-account JSON file content
+ *     (most foolproof — no risk of confusing private_key with private_key_id).
+ *  2. GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY as separate vars.
+ */
+function resolveCredentials(): { email: string; privateKey: string } | null {
+  const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+  if (json && json.trim()) {
+    try {
+      const parsed = JSON.parse(json.trim())
+      const email = parsed.client_email as string | undefined
+      const rawKey = parsed.private_key as string | undefined
+      if (email && rawKey) {
+        return { email, privateKey: normalizePrivateKey(rawKey) }
+      }
+    } catch {
+      // fall through to individual vars
+    }
+  }
+
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
   const key = process.env.GOOGLE_PRIVATE_KEY
-  const sheetId = process.env.GOOGLE_SHEET_ID
+  if (email && key) {
+    return { email, privateKey: normalizePrivateKey(key) }
+  }
+  return null
+}
 
-  if (!email || !key || !sheetId) {
+function getEnv() {
+  const sheetId = process.env.GOOGLE_SHEET_ID
+  const creds = resolveCredentials()
+
+  if (!creds || !sheetId) {
     throw new Error(
-      "Missing Google Sheets configuration. Required env vars: GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY, GOOGLE_SHEET_ID.",
+      "Missing Google Sheets configuration. Provide GOOGLE_SHEET_ID plus either " +
+        "GOOGLE_SERVICE_ACCOUNT_JSON (full JSON) or GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY.",
     )
   }
 
-  // Private keys stored in env usually have escaped newlines.
-  const privateKey = key.replace(/\\n/g, "\n")
-  return { email, privateKey, sheetId }
+  if (!isValidPrivateKey(creds.privateKey)) {
+    throw new Error(
+      'Private key does not look like a PEM block. Use the "private_key" field ' +
+        'from the service-account JSON (starts with "-----BEGIN PRIVATE KEY-----"), NOT "private_key_id".',
+    )
+  }
+
+  return { email: creds.email, privateKey: creds.privateKey, sheetId }
 }
 
 async function getSheetsClient() {
@@ -112,9 +167,11 @@ export async function getProfile(id: string): Promise<Profile | null> {
   return profiles.find((p) => p.id === id) ?? null
 }
 
-/** Whether Google Sheets credentials are configured. */
+/** Whether Google Sheets credentials are configured AND the key looks valid. */
 export function isSheetsConfigured(): boolean {
-  return Boolean(
-    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID,
-  )
+  const sheetId = process.env.GOOGLE_SHEET_ID
+  if (!sheetId) return false
+  const creds = resolveCredentials()
+  if (!creds) return false
+  return isValidPrivateKey(creds.privateKey)
 }
