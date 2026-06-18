@@ -1,25 +1,22 @@
 import Link from "next/link"
-import { getProfiles, isSheetsConfigured, type Profile } from "@/lib/sheets"
-import { ArrowRight, Sheet, ShieldCheck, Zap, AlertCircle } from "lucide-react"
+import { getSheetTable, isSheetsConfigured, type SheetTable } from "@/lib/sheets"
+import { ArrowRight, Sheet, ShieldCheck, Zap, AlertCircle, ExternalLink } from "lucide-react"
 
 export const dynamic = "force-dynamic"
 
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w.charAt(0).toUpperCase())
-    .join("")
+/** Heuristic: does this header/value look like a URL column? */
+function isLink(value: string): boolean {
+  return /^https?:\/\//i.test(value)
 }
 
 export default async function HomePage() {
-  let profiles: Profile[] = []
+  let table: SheetTable = { headers: [], rows: [] }
   let loadError: string | null = null
   const configured = isSheetsConfigured()
 
   if (configured) {
     try {
-      profiles = await getProfiles()
+      table = await getSheetTable()
     } catch (e) {
       loadError = e instanceof Error ? e.message : "Не удалось загрузить данные."
     }
@@ -51,12 +48,12 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Directory */}
-      <section className="mx-auto w-full max-w-5xl px-4 py-16 md:py-24">
+      {/* Полная таблица */}
+      <section className="mx-auto w-full max-w-6xl px-4 py-16 md:py-24">
         <div className="mb-8 flex items-end justify-between">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground">Доступные страницы</h2>
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">Данные таблицы</h2>
           {configured && !loadError && (
-            <span className="text-sm text-muted-foreground">{profiles.length} шт.</span>
+            <span className="text-sm text-muted-foreground">{table.rows.length} строк</span>
           )}
         </div>
 
@@ -72,47 +69,71 @@ export default async function HomePage() {
           </div>
         )}
 
-        {configured && !loadError && profiles.length === 0 && (
+        {configured && !loadError && table.rows.length === 0 && (
           <p className="rounded-xl border bg-card p-6 text-muted-foreground">
-            В таблице пока нет строк с профилями. Добавьте строки с колонками id и name.
+            В таблице пока нет данных.
           </p>
         )}
 
-        {configured && !loadError && profiles.length > 0 && (
-          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {profiles.map((p) => (
-              <li key={p.id}>
-                <Link
-                  href={`/${p.id}`}
-                  className="group flex h-full flex-col rounded-xl border bg-card p-5 transition-colors hover:border-primary"
-                >
-                  <div className="flex items-center gap-3">
-                    {p.avatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={p.avatar || "/placeholder.svg"}
-                        alt={`Фото ${p.name}`}
-                        className="size-12 rounded-lg object-cover"
-                      />
-                    ) : (
-                      <div className="flex size-12 items-center justify-center rounded-lg bg-accent text-sm font-semibold text-accent-foreground">
-                        {initials(p.name)}
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-card-foreground">{p.name}</p>
-                      {p.title && <p className="truncate text-sm text-muted-foreground">{p.title}</p>}
-                    </div>
-                  </div>
-                  {p.bio && <p className="mt-4 line-clamp-2 text-sm text-muted-foreground">{p.bio}</p>}
-                  <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary">
-                    Открыть
-                    <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+        {configured && !loadError && table.rows.length > 0 && (
+          <div className="overflow-x-auto rounded-xl border bg-card">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50 text-left">
+                  {table.headers.map((h, i) => (
+                    <th
+                      key={i}
+                      className="whitespace-nowrap px-4 py-3 font-medium text-muted-foreground"
+                    >
+                      {h || `Колонка ${i + 1}`}
+                    </th>
+                  ))}
+                  <th className="px-4 py-3 font-medium text-muted-foreground">Страница</th>
+                </tr>
+              </thead>
+              <tbody>
+                {table.rows.map((row, ri) => (
+                  <tr key={row.id || ri} className="border-b last:border-0 hover:bg-muted/30">
+                    {row.cells.map((cell, ci) => (
+                      <td
+                        key={ci}
+                        className="px-4 py-3 align-top text-card-foreground"
+                      >
+                        {cell && isLink(cell) ? (
+                          <a
+                            href={cell}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                          >
+                            Ссылка
+                            <ExternalLink className="size-3.5" />
+                          </a>
+                        ) : (
+                          <span className="block max-w-xs truncate" title={cell}>
+                            {cell || "—"}
+                          </span>
+                        )}
+                      </td>
+                    ))}
+                    <td className="px-4 py-3 align-top">
+                      {row.id ? (
+                        <Link
+                          href={`/${row.id}`}
+                          className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                        >
+                          Открыть
+                          <ArrowRight className="size-3.5" />
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </main>

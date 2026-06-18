@@ -150,6 +150,35 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "")
 }
 
+/** The full sheet as headers + raw row values, preserving every column. */
+export type SheetTable = {
+  headers: string[]
+  rows: { id: string; cells: string[] }[]
+}
+
+/**
+ * Fetch the entire sheet verbatim: the header row plus every data row.
+ * Nothing is dropped or remapped — useful for showing all columns as-is.
+ * The first column is treated as the row id (for linking to /[id]).
+ */
+export async function getSheetTable(): Promise<SheetTable> {
+  const { sheetId } = getEnv()
+  const sheets = await getSheetsClient()
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: SHEET_RANGE,
+  })
+  const values = (res.data.values as string[][]) ?? []
+  if (!values.length) return { headers: [], rows: [] }
+
+  const headers = values[0].map((h) => (h ?? "").trim())
+  const rows = values.slice(1).map((row) => {
+    const cells = headers.map((_, i) => (row[i] ?? "").toString().trim())
+    return { id: cells[0] ?? "", cells }
+  })
+  return { headers, rows }
+}
+
 /** Fetch every profile row from the sheet. */
 export async function getProfiles(): Promise<Profile[]> {
   const { sheetId } = getEnv()
