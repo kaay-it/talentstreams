@@ -43,32 +43,20 @@ function isValidPrivateKey(key: string): boolean {
   return key.includes("-----BEGIN") && key.includes("PRIVATE KEY-----")
 }
 
-/**
- * Resolve the service-account email + private key.
- * Two supported ways to provide them:
- *  1. GOOGLE_SERVICE_ACCOUNT_JSON = the entire service-account JSON file content
- *     (most foolproof — no risk of confusing private_key with private_key_id).
- *  2. GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY as separate vars.
- */
+/** Resolve the service-account email + private key from GOOGLE_SERVICE_ACCOUNT_JSON. */
 function resolveCredentials(): { email: string; privateKey: string } | null {
   const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
-  if (json && json.trim()) {
-    try {
-      const parsed = JSON.parse(json.trim())
-      const email = parsed.client_email as string | undefined
-      const rawKey = parsed.private_key as string | undefined
-      if (email && rawKey) {
-        return { email, privateKey: normalizePrivateKey(rawKey) }
-      }
-    } catch {
-      // fall through to individual vars
-    }
-  }
+  if (!json?.trim()) return null
 
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
-  const key = process.env.GOOGLE_PRIVATE_KEY
-  if (email && key) {
-    return { email, privateKey: normalizePrivateKey(key) }
+  try {
+    const parsed = JSON.parse(json.trim())
+    const email = parsed.client_email as string | undefined
+    const rawKey = parsed.private_key as string | undefined
+    if (email && rawKey) {
+      return { email, privateKey: normalizePrivateKey(rawKey) }
+    }
+  } catch {
+    // invalid JSON
   }
   return null
 }
@@ -76,11 +64,9 @@ function resolveCredentials(): { email: string; privateKey: string } | null {
 function getEnv() {
   const sheetId = process.env.GOOGLE_SHEET_ID
   const creds = resolveCredentials()
-
   if (!creds || !sheetId) {
     throw new Error(
-      "Missing Google Sheets configuration. Provide GOOGLE_SHEET_ID plus either " +
-        "GOOGLE_SERVICE_ACCOUNT_JSON (full JSON) or GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY.",
+      "Missing Google Sheets configuration. Provide GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON.",
     )
   }
 
@@ -90,7 +76,6 @@ function getEnv() {
         'from the service-account JSON (starts with "-----BEGIN PRIVATE KEY-----"), NOT "private_key_id".',
     )
   }
-
   return { email: creds.email, privateKey: creds.privateKey, sheetId }
 }
 
@@ -111,7 +96,7 @@ function rowsToProfiles(rows: string[][]): Profile[] {
 
   const headers = rows[0].map((h) => (h ?? "").trim().toLowerCase())
   const dataRows = rows.slice(1)
-
+  console.log(dataRows)
   return dataRows
     .map((row) => {
       const record: Record<string, string> = {}

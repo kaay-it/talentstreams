@@ -12,9 +12,11 @@ function isLink(value: string): boolean {
 export default async function HomePage() {
   let table: SheetTable = { headers: [], rows: [] }
   let loadError: string | null = null
+  console.log("START")
   const configured = isSheetsConfigured()
 
   if (configured) {
+    console.log("Inside configured")
     try {
       table = await getSheetTable()
     } catch (e) {
@@ -171,8 +173,7 @@ function SetupNotice() {
             Добавьте переменные окружения в проект, затем создайте таблицу с заголовками в первой строке.
           </p>
           <ul className="grid gap-1 font-mono text-xs text-muted-foreground">
-            <li>GOOGLE_SERVICE_ACCOUNT_EMAIL</li>
-            <li>GOOGLE_PRIVATE_KEY</li>
+            <li>GOOGLE_SERVICE_ACCOUNT_JSON</li>
             <li>GOOGLE_SHEET_ID</li>
           </ul>
           <p className="text-muted-foreground">
