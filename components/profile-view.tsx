@@ -72,7 +72,7 @@ export function ProfileView({ profile }: { profile: Profile }) {
             </div>
 
             <h1 className="text-balance text-2xl font-semibold tracking-tight text-card-foreground md:text-3xl">
-              {profile.name}
+              {profile.name || profile.id}
             </h1>
             {profile.title && <p className="mt-1 text-pretty text-base text-muted-foreground">{profile.title}</p>}
 

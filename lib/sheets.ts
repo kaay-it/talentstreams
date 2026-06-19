@@ -141,39 +141,81 @@ async function fetchSheetValues(sheetId: string, range: string): Promise<string[
 
 const KNOWN_KEYS = ["id", "name", "title", "bio", "email", "phone", "website", "location", "avatar"]
 
+const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
+  id: "id",
+  name: "name",
+  кандидат: "name",
+  title: "title",
+  роль: "title",
+  bio: "bio",
+  резюме: "bio",
+  email: "email",
+  phone: "phone",
+  website: "website",
+  location: "location",
+  avatar: "avatar",
+}
+
+function mapHeader(header: string): string {
+  const key = header.trim().toLowerCase()
+  return HEADER_ALIASES[key] ?? key
+}
+
+function getIdColumnIndex(headers: string[]): number {
+  const idx = headers.findIndex((h) => h.trim().toLowerCase() === "id")
+  return idx >= 0 ? idx : 0
+}
+
+function rowToRecord(headers: string[], row: string[]): Record<string, string> {
+  const record: Record<string, string> = {}
+  headers.forEach((header, i) => {
+    const rawKey = header.trim().toLowerCase()
+    if (!rawKey) return
+    const value = (row[i] ?? "").trim()
+    const field = mapHeader(header)
+    if (KNOWN_KEYS.includes(field)) {
+      record[field] = value
+    } else {
+      record[rawKey] = value
+    }
+  })
+  return record
+}
+
+function resolveRowId(headers: string[], row: string[], record: Record<string, string>): string {
+  const idCol = getIdColumnIndex(headers)
+  return record.id || (row[idCol] ?? "").trim() || slugify(record.name || "")
+}
+
+function buildProfile(headers: string[], row: string[]): Profile {
+  const record = rowToRecord(headers, row)
+  const extra: Record<string, string> = {}
+  for (const [k, v] of Object.entries(record)) {
+    if (!KNOWN_KEYS.includes(k) && v) extra[k] = v
+  }
+
+  return {
+    id: resolveRowId(headers, row, record),
+    name: record.name || "",
+    title: record.title || "",
+    bio: record.bio || "",
+    email: record.email || "",
+    phone: record.phone || "",
+    website: record.website || "",
+    location: record.location || "",
+    avatar: record.avatar || "",
+    extra,
+  }
+}
+
 function rowsToProfiles(rows: string[][]): Profile[] {
   if (!rows.length) return []
 
-  const headers = rows[0].map((h) => (h ?? "").trim().toLowerCase())
-  const dataRows = rows.slice(1)
-  return dataRows
-    .map((row) => {
-      const record: Record<string, string> = {}
-      headers.forEach((header, i) => {
-        if (!header) return
-        record[header] = (row[i] ?? "").trim()
-      })
-
-      const extra: Record<string, string> = {}
-      for (const [k, v] of Object.entries(record)) {
-        if (!KNOWN_KEYS.includes(k) && v) extra[k] = v
-      }
-
-      const profile: Profile = {
-        id: record.id || slugify(record.name || ""),
-        name: record.name || "",
-        title: record.title || "",
-        bio: record.bio || "",
-        email: record.email || "",
-        phone: record.phone || "",
-        website: record.website || "",
-        location: record.location || "",
-        avatar: record.avatar || "",
-        extra,
-      }
-      return profile
-    })
-    .filter((p) => p.id && p.name)
+  const headers = rows[0].map((h) => (h ?? "").trim())
+  return rows
+    .slice(1)
+    .map((row) => buildProfile(headers, row))
+    .filter((p) => p.id)
 }
 
 function slugify(value: string): string {
@@ -203,7 +245,8 @@ export async function getSheetTable(): Promise<SheetTable> {
   const headers = values[0].map((h) => (h ?? "").trim())
   const rows = values.slice(1).map((row) => {
     const cells = headers.map((_, i) => (row[i] ?? "").toString().trim())
-    return { id: cells[0] ?? "", cells }
+    const record = rowToRecord(headers, row)
+    return { id: resolveRowId(headers, row, record), cells }
   })
   return { headers, rows }
 }
@@ -217,8 +260,16 @@ export async function getProfiles(): Promise<Profile[]> {
 
 /** Fetch a single profile by its id. Returns null if not found. */
 export async function getProfile(id: string): Promise<Profile | null> {
-  const profiles = await getProfiles()
-  return profiles.find((p) => p.id === id) ?? null
+  const { sheetId } = getEnv()
+  const values = await fetchSheetValues(sheetId, SHEET_RANGE)
+  if (!values.length) return null
+
+  const headers = values[0].map((h) => (h ?? "").trim())
+  for (const row of values.slice(1)) {
+    const profile = buildProfile(headers, row)
+    if (profile.id === id) return profile
+  }
+  return null
 }
 
 /** Whether Google Sheets credentials are configured AND the key looks valid. */
