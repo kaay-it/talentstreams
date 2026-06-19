@@ -12,11 +12,9 @@ function isLink(value: string): boolean {
 export default async function HomePage() {
   let table: SheetTable = { headers: [], rows: [] }
   let loadError: string | null = null
-  console.log("START")
   const configured = isSheetsConfigured()
 
   if (configured) {
-    console.log("Inside configured")
     try {
       table = await getSheetTable()
     } catch (e) {
