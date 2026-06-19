@@ -1,5 +1,5 @@
 import "server-only"
-import { google } from "googleapis"
+import { createSign } from "crypto"
 
 /**
  * A single profile/visiting-card record.
@@ -79,14 +79,64 @@ function getEnv() {
   return { email: creds.email, privateKey: creds.privateKey, sheetId }
 }
 
-async function getSheetsClient() {
-  const { email, privateKey } = getEnv()
-  const auth = new google.auth.JWT({
-    email,
-    key: privateKey,
-    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+async function getAccessToken(email: string, privateKey: string): Promise<string> {
+  const now = Math.floor(Date.now() / 1000)
+  const header = { alg: "RS256", typ: "JWT" }
+  const payload = {
+    iss: email,
+    scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600,
+  }
+
+  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url")
+  const unsigned = `${encode(header)}.${encode(payload)}`
+  const sign = createSign("RSA-SHA256")
+  sign.update(unsigned)
+  const signature = sign.sign(privateKey, "base64url")
+  const jwt = `${unsigned}.${signature}`
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt,
+    }),
   })
-  return google.sheets({ version: "v4", auth })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Google OAuth token request failed (${res.status}): ${body}`)
+  }
+
+  const data = (await res.json()) as { access_token?: string }
+  if (!data.access_token) {
+    throw new Error("Google OAuth token response did not include access_token.")
+  }
+  return data.access_token
+}
+
+async function fetchSheetValues(sheetId: string, range: string): Promise<string[][]> {
+  const { email, privateKey } = getEnv()
+  const token = await getAccessToken(email, privateKey)
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/` +
+    encodeURIComponent(range)
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    next: { revalidate: 0 },
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Google Sheets API request failed (${res.status}): ${body}`)
+  }
+
+  const data = (await res.json()) as { values?: string[][] }
+  return data.values ?? []
 }
 
 const KNOWN_KEYS = ["id", "name", "title", "bio", "email", "phone", "website", "location", "avatar"]
@@ -96,7 +146,6 @@ function rowsToProfiles(rows: string[][]): Profile[] {
 
   const headers = rows[0].map((h) => (h ?? "").trim().toLowerCase())
   const dataRows = rows.slice(1)
-  console.log(dataRows)
   return dataRows
     .map((row) => {
       const record: Record<string, string> = {}
@@ -148,12 +197,7 @@ export type SheetTable = {
  */
 export async function getSheetTable(): Promise<SheetTable> {
   const { sheetId } = getEnv()
-  const sheets = await getSheetsClient()
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: SHEET_RANGE,
-  })
-  const values = (res.data.values as string[][]) ?? []
+  const values = await fetchSheetValues(sheetId, SHEET_RANGE)
   if (!values.length) return { headers: [], rows: [] }
 
   const headers = values[0].map((h) => (h ?? "").trim())
@@ -167,12 +211,8 @@ export async function getSheetTable(): Promise<SheetTable> {
 /** Fetch every profile row from the sheet. */
 export async function getProfiles(): Promise<Profile[]> {
   const { sheetId } = getEnv()
-  const sheets = await getSheetsClient()
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: SHEET_RANGE,
-  })
-  return rowsToProfiles((res.data.values as string[][]) ?? [])
+  const values = await fetchSheetValues(sheetId, SHEET_RANGE)
+  return rowsToProfiles(values)
 }
 
 /** Fetch a single profile by its id. Returns null if not found. */
