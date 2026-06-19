@@ -171,8 +171,7 @@ function SetupNotice() {
             Добавьте переменные окружения в проект, затем создайте таблицу с заголовками в первой строке.
           </p>
           <ul className="grid gap-1 font-mono text-xs text-muted-foreground">
-            <li>GOOGLE_SERVICE_ACCOUNT_EMAIL</li>
-            <li>GOOGLE_PRIVATE_KEY</li>
+            <li>GOOGLE_SERVICE_ACCOUNT_JSON</li>
             <li>GOOGLE_SHEET_ID</li>
           </ul>
           <p className="text-muted-foreground">
