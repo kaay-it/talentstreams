@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "TalentStreams",
-  description: "Цифровые визитки и персональные страницы, собираемые из ваших данных.",
+  description: "Еженедельные подборки проверенных кандидатов для работодателей Центральной Азии.",
 }
 
 export default function RootLayout({
