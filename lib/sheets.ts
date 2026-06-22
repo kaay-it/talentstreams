@@ -16,7 +16,8 @@ export type Profile = {
   phone: string
   website: string
   location: string
-  avatar: string
+  /** One or more stream tags from a multi-select dropdown in the sheet. */
+  stream: string[]
   /** Any additional columns from the sheet, keyed by header name. */
   extra: Record<string, string>
 }
@@ -139,7 +140,7 @@ async function fetchSheetValues(sheetId: string, range: string): Promise<string[
   return data.values ?? []
 }
 
-const KNOWN_KEYS = ["id", "name", "title", "bio", "email", "phone", "website", "location", "avatar"]
+const KNOWN_KEYS = ["id", "name", "title", "bio", "email", "phone", "website", "location", "stream"]
 
 const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   id: "id",
@@ -153,7 +154,8 @@ const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   phone: "phone",
   website: "website",
   location: "location",
-  avatar: "avatar",
+  stream: "stream",
+  стрим: "stream",
 }
 
 function mapHeader(header: string): string {
@@ -203,7 +205,7 @@ function buildProfile(headers: string[], row: string[]): Profile {
     phone: record.phone || "",
     website: record.website || "",
     location: record.location || "",
-    avatar: record.avatar || "",
+    stream: parseMultiValue(record.stream || ""),
     extra,
   }
 }
@@ -224,6 +226,17 @@ function slugify(value: string): string {
     .trim()
     .replace(/[^a-z0-9а-я]+/gi, "-")
     .replace(/^-+|-+$/g, "")
+}
+
+/** Parse a multi-select cell value (Google Sheets dropdown) into distinct tags. */
+export function parseMultiValue(raw: string): string[] {
+  const trimmed = raw.trim()
+  if (!trimmed) return []
+
+  return trimmed
+    .split(/\s*[,;|]\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
 }
 
 /** The full sheet as headers + raw row values, preserving every column. */

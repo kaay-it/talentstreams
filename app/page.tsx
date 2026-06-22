@@ -262,7 +262,7 @@ function SetupNotice() {
           </ul>
           <p className="text-muted-foreground">
             Рекомендуемые колонки:{" "}
-            <span className="font-mono text-xs">id, name, title, bio, email, phone, website, location, avatar</span>
+            <span className="font-mono text-xs">id, name, title, bio, email, phone, website, location, stream</span>
           </p>
         </div>
       </div>
