@@ -26,10 +26,13 @@ export async function generateMetadata({
 
 export default async function ProfilePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ back?: string }>
 }) {
   const { id } = await params
+  const { back } = await searchParams
 
   if (!isSheetsConfigured()) {
     notFound()
@@ -46,5 +49,5 @@ export default async function ProfilePage({
     notFound()
   }
 
-  return <ProfileView profile={profile} />
+  return <ProfileView profile={profile} backUrl={back ?? "/"} />
 }

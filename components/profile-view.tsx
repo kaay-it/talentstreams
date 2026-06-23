@@ -8,7 +8,7 @@ import {
   MapPin,
 } from "lucide-react"
 
-export function ProfileView({ profile }: { profile: Profile }) {
+export function ProfileView({ profile, backUrl = "/" }: { profile: Profile; backUrl?: string }) {
   const contacts = [
     profile.email && {
       icon: Mail,
@@ -38,11 +38,11 @@ export function ProfileView({ profile }: { profile: Profile }) {
     <main className="min-h-svh bg-background">
       <div className="mx-auto w-full max-w-2xl px-4 py-8 md:py-12">
         <Link
-          href="/"
+          href={backUrl}
           className="mb-8 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="size-4" />
-          На главную
+          {backUrl === "/" ? "На главную" : "К подборке"}
         </Link>
 
         <article className="overflow-hidden rounded-2xl border bg-card shadow-sm">
