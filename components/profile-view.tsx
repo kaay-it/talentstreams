@@ -8,15 +8,7 @@ import {
   MapPin,
 } from "lucide-react"
 
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w.charAt(0).toUpperCase())
-    .join("")
-}
-
-export function ProfileView({ profile }: { profile: Profile }) {
+export function ProfileView({ profile, backUrl = "/" }: { profile: Profile; backUrl?: string }) {
   const contacts = [
     profile.email && {
       icon: Mail,
@@ -46,35 +38,33 @@ export function ProfileView({ profile }: { profile: Profile }) {
     <main className="min-h-svh bg-background">
       <div className="mx-auto w-full max-w-2xl px-4 py-8 md:py-12">
         <Link
-          href="/"
+          href={backUrl}
           className="mb-8 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="size-4" />
-          На главную
+          {backUrl === "/" ? "На главную" : "К подборке"}
         </Link>
 
         <article className="overflow-hidden rounded-2xl border bg-card shadow-sm">
           <div className="h-28 bg-primary md:h-32" aria-hidden="true" />
-          <div className="px-6 pb-8 md:px-8">
-            <div className="-mt-12 mb-6 flex items-end justify-between gap-4">
-              {profile.avatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={profile.avatar || "/placeholder.svg"}
-                  alt={`Фото профиля ${profile.name}`}
-                  className="size-24 rounded-2xl border-4 border-card object-cover shadow-sm"
-                />
-              ) : (
-                <div className="flex size-24 items-center justify-center rounded-2xl border-4 border-card bg-accent text-2xl font-semibold text-accent-foreground shadow-sm">
-                  {initials(profile.name)}
-                </div>
-              )}
-            </div>
-
+          <div className="px-6 pb-8 pt-6 md:px-8">
             <h1 className="text-balance text-2xl font-semibold tracking-tight text-card-foreground md:text-3xl">
               {profile.name || profile.id}
             </h1>
             {profile.title && <p className="mt-1 text-pretty text-base text-muted-foreground">{profile.title}</p>}
+
+            {profile.stream.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {profile.stream.map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
 
             {profile.bio && (
               <p className="mt-6 text-pretty leading-relaxed text-card-foreground">{profile.bio}</p>

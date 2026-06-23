@@ -16,12 +16,19 @@ export type Profile = {
   phone: string
   website: string
   location: string
-  avatar: string
+  /** One or more stream tags from a multi-select dropdown in the sheet. */
+  stream: string[]
   /** Any additional columns from the sheet, keyed by header name. */
   extra: Record<string, string>
 }
 
 const SHEET_RANGE = "A1:Z1000"
+const MAILING_LIST_RANGE = "'Mailing lists'!A1:Z1000"
+
+const MAILING_LIST_COL_ALIASES: Record<string, string> = {
+  "list id": "list_id",
+  "candidate id": "candidate_id",
+}
 
 /**
  * Normalize a private key value coming from an env var.
@@ -139,7 +146,7 @@ async function fetchSheetValues(sheetId: string, range: string): Promise<string[
   return data.values ?? []
 }
 
-const KNOWN_KEYS = ["id", "name", "title", "bio", "email", "phone", "website", "location", "avatar"]
+const KNOWN_KEYS = ["id", "name", "title", "bio", "email", "phone", "website", "location", "stream"]
 
 const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   id: "id",
@@ -153,7 +160,8 @@ const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   phone: "phone",
   website: "website",
   location: "location",
-  avatar: "avatar",
+  stream: "stream",
+  стрим: "stream",
 }
 
 function mapHeader(header: string): string {
@@ -203,7 +211,7 @@ function buildProfile(headers: string[], row: string[]): Profile {
     phone: record.phone || "",
     website: record.website || "",
     location: record.location || "",
-    avatar: record.avatar || "",
+    stream: parseMultiValue(record.stream || ""),
     extra,
   }
 }
@@ -224,6 +232,17 @@ function slugify(value: string): string {
     .trim()
     .replace(/[^a-z0-9а-я]+/gi, "-")
     .replace(/^-+|-+$/g, "")
+}
+
+/** Parse a multi-select cell value (Google Sheets dropdown) into distinct tags. */
+export function parseMultiValue(raw: string): string[] {
+  const trimmed = raw.trim()
+  if (!trimmed) return []
+
+  return trimmed
+    .split(/\s*[,;|]\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
 }
 
 /** The full sheet as headers + raw row values, preserving every column. */
@@ -270,6 +289,62 @@ export async function getProfile(id: string): Promise<Profile | null> {
     if (profile.id === id) return profile
   }
   return null
+}
+
+export type MailingListEntry = {
+  profile: Profile
+  /** Stream value from the mailing list sheet row. */
+  mailingStream: string
+}
+
+export type MailingList = {
+  listId: string
+  /** Stream name for the whole mailing list (from the first matching row). */
+  stream: string
+  /** Date string as stored in the sheet (e.g. "01.06.2025"). */
+  date: string
+  entries: MailingListEntry[]
+}
+
+/**
+ * Fetch a mailing list by its ID, preserving per-entry stream and the list date.
+ * Returns null if the list does not exist or contains no candidates.
+ */
+export async function getMailingList(listId: string): Promise<MailingList | null> {
+  const { sheetId } = getEnv()
+  const values = await fetchSheetValues(sheetId, MAILING_LIST_RANGE)
+  if (!values.length) return null
+
+  const rawHeaders = values[0].map((h) => (h ?? "").trim())
+  const mappedHeaders = rawHeaders.map((h) => MAILING_LIST_COL_ALIASES[h.toLowerCase()] ?? h.toLowerCase())
+
+  const listIdIdx = mappedHeaders.indexOf("list_id")
+  const candidateIdIdx = mappedHeaders.indexOf("candidate_id")
+  const streamIdx = mappedHeaders.indexOf("stream")
+  const dateIdx = mappedHeaders.indexOf("date")
+
+  if (listIdIdx < 0 || candidateIdIdx < 0) return null
+
+  const matchingRows = values.slice(1).filter((row) => (row[listIdIdx] ?? "").trim() === listId)
+  if (!matchingRows.length) return null
+
+  const date = dateIdx >= 0 ? (matchingRows[0][dateIdx] ?? "").trim() : ""
+  const stream = streamIdx >= 0 ? (matchingRows[0][streamIdx] ?? "").trim() : ""
+
+  const candidateIds = new Set<string>()
+  for (const row of matchingRows) {
+    const candidateId = (row[candidateIdIdx] ?? "").trim()
+    if (candidateId) candidateIds.add(candidateId)
+  }
+
+  if (!candidateIds.size) return null
+
+  const allProfiles = await getProfiles()
+  const entries: MailingListEntry[] = allProfiles
+    .filter((p) => candidateIds.has(p.id))
+    .map((p) => ({ profile: p, mailingStream: stream }))
+
+  return { listId, stream, date, entries }
 }
 
 /** Whether Google Sheets credentials are configured AND the key looks valid. */
