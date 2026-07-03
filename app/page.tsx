@@ -1,4 +1,5 @@
-import { isSheetsConfigured } from "@/lib/sheets"
+import { isSheetsConfigured, getStreams } from "@/lib/sheets"
+import { EmployerRegistrationModal } from "@/components/employer-registration-modal"
 import {
   AlertCircle,
   ArrowRight,
@@ -14,11 +15,25 @@ import {
   Zap,
 } from "lucide-react"
 
-export default function HomePage() {
+export default async function HomePage() {
   const configured = isSheetsConfigured()
+  const streams = configured ? await getStreams() : []
 
   return (
     <main className="min-h-svh bg-background">
+      {/* Sticky header */}
+      <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-sm">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-primary">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <Zap className="size-4" />
+            </span>
+            TalentStreams
+          </div>
+          <EmployerRegistrationModal streams={streams} />
+        </div>
+      </header>
+
       {/* Hero */}
       <section className="relative overflow-hidden border-b">
         <div
@@ -26,14 +41,7 @@ export default function HomePage() {
           aria-hidden="true"
         />
         <div className="relative mx-auto w-full max-w-5xl px-4 pt-16 pb-20 md:pt-24 md:pb-28">
-          <div className="flex items-center gap-2 text-sm font-medium text-primary">
-            <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Zap className="size-4" />
-            </span>
-            TalentStreams
-          </div>
-
-          <h1 className="mt-8 max-w-3xl text-balance text-4xl font-semibold tracking-tight text-foreground md:text-6xl">
+          <h1 className="max-w-3xl text-balance text-4xl font-semibold tracking-tight text-foreground md:text-6xl">
             Проверенные кандидаты для работодателей Центральной Азии
           </h1>
           <p className="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted-foreground md:text-xl">

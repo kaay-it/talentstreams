@@ -86,12 +86,16 @@ function getEnv() {
   return { email: creds.email, privateKey: creds.privateKey, sheetId }
 }
 
-async function getAccessToken(email: string, privateKey: string): Promise<string> {
+async function getAccessToken(
+  email: string,
+  privateKey: string,
+  scope = "https://www.googleapis.com/auth/spreadsheets.readonly",
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   const header = { alg: "RS256", typ: "JWT" }
   const payload = {
     iss: email,
-    scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+    scope,
     aud: "https://oauth2.googleapis.com/token",
     iat: now,
     exp: now + 3600,
@@ -345,6 +349,88 @@ export async function getMailingList(listId: string): Promise<MailingList | null
     .map((p) => ({ profile: p, mailingStream: stream }))
 
   return { listId, stream, date, entries }
+}
+
+/** Return all streams from the "Streams" sheet tab (first column, skipping header row). */
+export async function getStreams(): Promise<string[]> {
+  try {
+    const { sheetId } = getEnv()
+    const values = await fetchSheetValues(sheetId, "'Streams'!A1:A1000")
+    return values
+      .slice(1)
+      .map((row) => (row[0] ?? "").trim())
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+const EMPLOYERS_SHEET = "Employers"
+const EMPLOYERS_HEADERS = ["Timestamp", "Name", "Company", "Email", "Phone", "Primary Contact", "Telegram", "Streams"]
+
+async function ensureEmployersSheet(sheetId: string, token: string): Promise<void> {
+  const metaRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!metaRes.ok) return
+
+  const meta = (await metaRes.json()) as { sheets: { properties: { title: string } }[] }
+  const exists = meta.sheets.some((s) => s.properties.title === EMPLOYERS_SHEET)
+  if (exists) return
+
+  // Create the sheet tab
+  const createRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: EMPLOYERS_SHEET } } }] }),
+    },
+  )
+  if (!createRes.ok) return
+
+  // Write header row
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/` +
+      `${encodeURIComponent(EMPLOYERS_SHEET + "!A1")}?valueInputOption=USER_ENTERED`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [EMPLOYERS_HEADERS] }),
+    },
+  )
+}
+
+/**
+ * Append a row to the "Employers" sheet tab, creating it with headers if needed.
+ * Requires write scope — the service account must have Editor access to the sheet.
+ */
+export async function appendEmployerRow(values: string[]): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(
+    email,
+    privateKey,
+    "https://www.googleapis.com/auth/spreadsheets",
+  )
+
+  await ensureEmployersSheet(sheetId, token)
+
+  const range = encodeURIComponent(EMPLOYERS_SHEET + "!A1")
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}:append` +
+    `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ values: [values] }),
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Sheets append failed (${res.status}): ${body}`)
+  }
 }
 
 /** Whether Google Sheets credentials are configured AND the key looks valid. */
