@@ -1,5 +1,6 @@
 import { isSheetsConfigured, getStreams } from "@/lib/sheets"
 import { EmployerRegistrationModal } from "@/components/employer-registration-modal"
+import { CandidateRegistrationModal } from "@/components/candidate-registration-modal"
 import {
   AlertCircle,
   ArrowRight,
@@ -30,7 +31,10 @@ export default async function HomePage() {
             </span>
             TalentStreams
           </div>
-          <EmployerRegistrationModal streams={streams} />
+          <div className="flex items-center gap-2">
+            <CandidateRegistrationModal />
+            <EmployerRegistrationModal streams={streams} />
+          </div>
         </div>
       </header>
 

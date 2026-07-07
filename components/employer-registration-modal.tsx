@@ -9,7 +9,10 @@ const CONTACT_OPTIONS = [
   { value: "email", label: "Email" },
   { value: "telegram", label: "Telegram" },
   { value: "whatsapp", label: "WhatsApp" },
+  { value: "linkedin", label: "LinkedIn" },
 ] as const
+
+const MAX_STREAMS = 2
 
 type ContactMethod = EmployerData["primaryContact"]
 
@@ -50,6 +53,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
   const [phone, setPhone] = useState("")
   const [primaryContact, setPrimaryContact] = useState<ContactMethod>("email")
   const [telegram, setTelegram] = useState("")
+  const [linkedin, setLinkedin] = useState("")
   const [selectedStreams, setSelectedStreams] = useState<string[]>([])
 
   const emailRef = useRef<HTMLInputElement>(null)
@@ -78,18 +82,23 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     setPhone("")
     setPrimaryContact("email")
     setTelegram("")
+    setLinkedin("")
     setSelectedStreams([])
   }
 
   function toggleStream(s: string) {
-    setSelectedStreams((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
+    setSelectedStreams((prev) => {
+      if (prev.includes(s)) return prev.filter((x) => x !== s)
+      if (prev.length >= MAX_STREAMS) return prev
+      return [...prev, s]
+    })
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setStatus("submitting")
     try {
-      await registerEmployer({ name, company, email, phone, primaryContact, telegram, streams: selectedStreams })
+      await registerEmployer({ name, company, email, phone, primaryContact, telegram, linkedin, streams: selectedStreams })
       setStatus("success")
     } catch (err) {
       setStatus("error")
@@ -100,7 +109,8 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
   const canSubmit =
     name.trim().length > 0 &&
     selectedStreams.length > 0 &&
-    (primaryContact !== "telegram" || telegram.trim())
+    (primaryContact !== "telegram" || telegram.trim()) &&
+    (primaryContact !== "linkedin" || linkedin.trim())
 
   return (
     <>
@@ -235,27 +245,58 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                     </Field>
                   )}
 
+                  {primaryContact === "linkedin" && (
+                    <Field label="LinkedIn" required>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 select-none text-sm text-muted-foreground">
+                          in/
+                        </span>
+                        <input
+                          type="text"
+                          required
+                          value={linkedin}
+                          onChange={(e) => setLinkedin(e.target.value.replace(/^(https?:\/\/)?(www\.)?linkedin\.com\/in\/?/, ""))}
+                          placeholder="username"
+                          className={`${inputCls} pl-9`}
+                        />
+                      </div>
+                    </Field>
+                  )}
+
                   <Field
                     label="Стримы для рассылки"
                     required
-                    hint={selectedStreams.length === 0 ? "Выберите хотя бы один" : undefined}
+                    hint={
+                      selectedStreams.length === 0
+                        ? `Выберите от 1 до ${MAX_STREAMS}`
+                        : selectedStreams.length === MAX_STREAMS
+                        ? `Выбрано максимум (${MAX_STREAMS})`
+                        : undefined
+                    }
                   >
                     {streams.length > 0 ? (
                       <div className="flex flex-wrap gap-2">
-                        {streams.map((s) => (
-                          <button
-                            key={s}
-                            type="button"
-                            onClick={() => toggleStream(s)}
-                            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                              selectedStreams.includes(s)
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
-                            }`}
-                          >
-                            {s}
-                          </button>
-                        ))}
+                        {streams.map((s) => {
+                          const selected = selectedStreams.includes(s)
+                          const disabled = !selected && selectedStreams.length >= MAX_STREAMS
+                          return (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => toggleStream(s)}
+                              disabled={disabled}
+                              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                selected
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : disabled
+                                  ? "cursor-not-allowed opacity-35"
+                                  : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                              }`}
+                            >
+                              {s}
+                            </button>
+                          )
+                        })}
                       </div>
                     ) : (
                       <p className="text-sm text-muted-foreground">Стримы не настроены</p>

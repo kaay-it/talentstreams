@@ -365,10 +365,9 @@ export async function getStreams(): Promise<string[]> {
   }
 }
 
-const EMPLOYERS_SHEET = "Employers"
-const EMPLOYERS_HEADERS = ["Timestamp", "Name", "Company", "Email", "Phone", "Primary Contact", "Telegram", "Streams"]
+const WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
-async function ensureEmployersSheet(sheetId: string, token: string): Promise<void> {
+async function ensureSheet(sheetId: string, token: string, title: string, headers: string[]): Promise<void> {
   const metaRes = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`,
     { headers: { Authorization: `Bearer ${token}` } },
@@ -376,47 +375,35 @@ async function ensureEmployersSheet(sheetId: string, token: string): Promise<voi
   if (!metaRes.ok) return
 
   const meta = (await metaRes.json()) as { sheets: { properties: { title: string } }[] }
-  const exists = meta.sheets.some((s) => s.properties.title === EMPLOYERS_SHEET)
-  if (exists) return
+  if (meta.sheets.some((s) => s.properties.title === title)) return
 
-  // Create the sheet tab
   const createRes = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: EMPLOYERS_SHEET } } }] }),
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title } } }] }),
     },
   )
   if (!createRes.ok) return
 
-  // Write header row
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/` +
-      `${encodeURIComponent(EMPLOYERS_SHEET + "!A1")}?valueInputOption=USER_ENTERED`,
+      `${encodeURIComponent(title + "!A1")}?valueInputOption=USER_ENTERED`,
     {
       method: "PUT",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ values: [EMPLOYERS_HEADERS] }),
+      body: JSON.stringify({ values: [headers] }),
     },
   )
 }
 
-/**
- * Append a row to the "Employers" sheet tab, creating it with headers if needed.
- * Requires write scope — the service account must have Editor access to the sheet.
- */
-export async function appendEmployerRow(values: string[]): Promise<void> {
+async function appendRow(sheetTitle: string, headers: string[], values: string[]): Promise<void> {
   const { email, privateKey, sheetId } = getEnv()
-  const token = await getAccessToken(
-    email,
-    privateKey,
-    "https://www.googleapis.com/auth/spreadsheets",
-  )
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+  await ensureSheet(sheetId, token, sheetTitle, headers)
 
-  await ensureEmployersSheet(sheetId, token)
-
-  const range = encodeURIComponent(EMPLOYERS_SHEET + "!A1")
+  const range = encodeURIComponent(sheetTitle + "!A1")
   const url =
     `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}:append` +
     `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`
@@ -431,6 +418,17 @@ export async function appendEmployerRow(values: string[]): Promise<void> {
     const body = await res.text()
     throw new Error(`Sheets append failed (${res.status}): ${body}`)
   }
+}
+
+const EMPLOYERS_HEADERS = ["Timestamp", "Name", "Company", "Email", "Phone", "Primary Contact", "Telegram", "LinkedIn", "Streams"]
+const CANDIDATES_HEADERS = ["Timestamp", "Name", "Email", "Phone", "Resume URL", "Cover Letter"]
+
+export async function appendEmployerRow(values: string[]): Promise<void> {
+  await appendRow("Employers", EMPLOYERS_HEADERS, values)
+}
+
+export async function appendCandidateRow(values: string[]): Promise<void> {
+  await appendRow("Candidates", CANDIDATES_HEADERS, values)
 }
 
 /** Whether Google Sheets credentials are configured AND the key looks valid. */
