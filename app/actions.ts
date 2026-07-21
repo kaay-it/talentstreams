@@ -1,7 +1,7 @@
 "use server"
 
 import { request } from "node:https"
-import { appendEmployerRow, appendCandidateRow } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, getMailingList } from "@/lib/sheets"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
 
@@ -56,32 +56,154 @@ async function getSendPulseToken(): Promise<string | null> {
   }
 }
 
-async function addToSendPulse(name: string, email: string, phone: string, telegram?: string): Promise<void> {
-  console.log("[SendPulse] addToSendPulse called", { email })
-  const bookId = process.env.SENDPULSE_ADDRESS_BOOK_ID
-  if (!bookId) {
-    console.warn("[SendPulse] SENDPULSE_ADDRESS_BOOK_ID not set")
+/** Parse "Finance:111,Tech:222" from SENDPULSE_STREAM_BOOKS into a lowercase map. */
+function getStreamBookMap(): Map<string, string> {
+  const map = new Map<string, string>()
+  const raw = process.env.SENDPULSE_STREAM_BOOKS || ""
+  for (const pair of raw.split(",")) {
+    const colonIdx = pair.indexOf(":")
+    if (colonIdx < 0) continue
+    const stream = pair.slice(0, colonIdx).trim()
+    const bookId = pair.slice(colonIdx + 1).trim()
+    if (stream && bookId) map.set(stream.toLowerCase(), bookId)
+  }
+  return map
+}
+
+async function addToAddressBook(
+  email: string,
+  bookId: string,
+  variables: Record<string, string>,
+): Promise<void> {
+  const token = await getSendPulseToken()
+  if (!token) { console.warn("[SendPulse] failed to get access token"); return }
+  const payload = JSON.stringify({ emails: [{ email, variables }] })
+  console.log(`[SendPulse] addToBook bookId=${bookId}:`, payload)
+  const { status, text } = await spPost(
+    `${SENDPULSE_API}/addressbooks/${bookId}/emails`,
+    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    payload,
+  )
+  console.log(`[SendPulse] bookId=${bookId} status=${status}`, text)
+}
+
+async function addToSendPulse(
+  name: string,
+  email: string,
+  phone: string,
+  extra?: Record<string, string>,
+): Promise<void> {
+  console.log("[SendPulse] addToSendPulse", { email })
+  const variables: Record<string, string> = { "Имя": name, phone, ...extra }
+
+  const masterBookId = process.env.SENDPULSE_ADDRESS_BOOK_ID
+  const streamBooks = getStreamBookMap()
+  const streams = extra?.Streams
+    ? extra.Streams.split(",").map((s) => s.trim()).filter(Boolean)
+    : []
+
+  const bookIds = new Set<string>()
+  if (masterBookId) bookIds.add(masterBookId)
+  for (const stream of streams) {
+    const id = streamBooks.get(stream.toLowerCase())
+    if (id) bookIds.add(id)
+  }
+
+  if (!bookIds.size) {
+    console.warn("[SendPulse] no address book configured (set SENDPULSE_ADDRESS_BOOK_ID or SENDPULSE_STREAM_BOOKS)")
     return
   }
-  try {
-    const token = await getSendPulseToken()
-    if (!token) {
-      console.warn("[SendPulse] failed to get access token")
-      return
-    }
-    const variables: Record<string, string> = { "Имя": name, phone }
-    if (telegram) variables.telegram = telegram
-    const payload = JSON.stringify({ emails: [{ email, variables }] })
-    console.log("[SendPulse] sending:", payload)
-    const { status, text } = await spPost(
-      `${SENDPULSE_API}/addressbooks/${bookId}/emails`,
-      { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      payload,
+
+  await Promise.all([...bookIds].map((id) => addToAddressBook(email, id, variables)))
+}
+
+export type PublishResult = {
+  listId: string
+  stream: string
+  campaignId: number
+}
+
+function buildEmailHtml(stream: string, date: string, url: string, count: number): string {
+  return `<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#111">
+  <p style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 8px">Talent Stream · ${stream}</p>
+  <h1 style="font-size:22px;margin:0 0 16px">Новая подборка кандидатов</h1>
+  <p>Здравствуйте, {{Имя}}!</p>
+  <p>Для вас подготовлен новый выпуск стрима <strong>${stream}</strong> от ${date} — ${count} ${candidatePlural(count)}.</p>
+  <p style="margin:24px 0">
+    <a href="${url}" style="background:#1168bd;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block">
+      Открыть подборку
+    </a>
+  </p>
+  <p style="color:#999;font-size:12px">Если кнопка не открывается, скопируйте ссылку: ${url}</p>
+</body>
+</html>`
+}
+
+function candidatePlural(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return "проверенный кандидат"
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "проверенных кандидата"
+  return "проверенных кандидатов"
+}
+
+async function createCampaign(
+  bookId: string | number,
+  subject: string,
+  html: string,
+  name: string,
+): Promise<{ id: number }> {
+  const fromEmail = process.env.SENDPULSE_FROM_EMAIL
+  const fromName = process.env.SENDPULSE_FROM_NAME || "TalentStreams"
+  if (!fromEmail) throw new Error("SENDPULSE_FROM_EMAIL не задан в переменных окружения")
+
+  const token = await getSendPulseToken()
+  if (!token) throw new Error("Не удалось получить токен SendPulse")
+
+  const payload = JSON.stringify({
+    sender_name: fromName,
+    sender_email: fromEmail,
+    subject,
+    body: html,
+    name,
+    list_id: Number(bookId),
+  })
+  console.log("[SendPulse] createCampaign:", payload)
+
+  const { status, text } = await spPost(
+    `${SENDPULSE_API}/campaigns`,
+    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    payload,
+  )
+  console.log(`[SendPulse] campaigns status=${status}`, text)
+
+  if (status < 200 || status >= 300) throw new Error(`SendPulse campaign error (${status}): ${text}`)
+  return JSON.parse(text) as { id: number }
+}
+
+export async function publishMailingList(listId: string): Promise<PublishResult> {
+  const list = await getMailingList(listId)
+  if (!list) throw new Error(`Подборка не найдена: ${listId}`)
+
+  const streamBooks = getStreamBookMap()
+  const bookId =
+    streamBooks.get(list.stream.toLowerCase()) ?? process.env.SENDPULSE_ADDRESS_BOOK_ID
+  if (!bookId) {
+    throw new Error(
+      `Нет адресной книги для стрима "${list.stream}". Задайте SENDPULSE_STREAM_BOOKS или SENDPULSE_ADDRESS_BOOK_ID.`,
     )
-    console.log(`[SendPulse] status=${status}`, text)
-  } catch (err) {
-    console.error("[SendPulse] request failed:", err)
   }
+
+  const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
+  const listUrl = `${appUrl}/list/${listId}`
+  const subject = `Talent Stream: ${list.stream} — выпуск ${list.date}`
+  const campaignName = `${list.stream} ${list.date} (${listId.slice(0, 8)})`
+  const html = buildEmailHtml(list.stream, list.date, listUrl, list.entries.length)
+
+  const campaign = await createCampaign(bookId, subject, html, campaignName)
+  return { listId, stream: list.stream, campaignId: campaign.id }
 }
 
 export type EmployerData = {
@@ -143,6 +265,11 @@ export async function registerEmployer(data: EmployerData): Promise<void> {
       data.linkedin || "",
       data.streams.join(", "),
     ]),
-    addToSendPulse(data.name, data.email, data.phone, data.telegram || undefined),
+    addToSendPulse(data.name, data.email, data.phone, {
+      ...(data.telegram && { Telegram: data.telegram }),
+      ...(data.linkedin && { LinkedIn: data.linkedin }),
+      "Primary Contact": data.primaryContact,
+      Streams: data.streams.join(", "),
+    }),
   ])
 }
