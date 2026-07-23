@@ -1,82 +1,16 @@
 "use server"
 
-import { request } from "node:https"
 import { appendEmployerRow, appendCandidateRow, getMailingList } from "@/lib/sheets"
+import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
 
-function spPost(url: string, headers: Record<string, string>, body: string): Promise<{ status: number; text: string }> {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url)
-    const req = request(
-      {
-        hostname: u.hostname,
-        port: 443,
-        path: u.pathname + u.search,
-        method: "POST",
-        headers: { ...headers, "Content-Length": Buffer.byteLength(body) },
-        rejectUnauthorized: false,
-      },
-      (res) => {
-        let text = ""
-        res.on("data", (chunk: Buffer) => (text += chunk.toString()))
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, text }))
-      },
-    )
-    req.on("error", reject)
-    req.write(body)
-    req.end()
-  })
-}
-
-let _tokenCache: { value: string; expiresAt: number } | null = null
-
-async function getSendPulseToken(): Promise<string | null> {
-  const clientId = process.env.SENDPULSE_CLIENT_ID
-  const clientSecret = process.env.SENDPULSE_CLIENT_SECRET
-  if (!clientId || !clientSecret) return null
-
-  if (_tokenCache && Date.now() < _tokenCache.expiresAt) return _tokenCache.value
-
-  try {
-    const { status, text } = await spPost(
-      `${SENDPULSE_API}/oauth/access_token`,
-      { "Content-Type": "application/json" },
-      JSON.stringify({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }),
-    )
-    console.log(`[SendPulse] oauth status=${status}`, text)
-    if (status < 200 || status >= 300) return null
-    const data = JSON.parse(text) as { access_token?: string; expires_in?: number }
-    if (!data.access_token) return null
-    _tokenCache = { value: data.access_token, expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000 - 60_000 }
-    return _tokenCache.value
-  } catch (err) {
-    console.error("[SendPulse] oauth failed:", err)
-    return null
-  }
-}
-
-/** Parse "Finance:111,Tech:222" from SENDPULSE_STREAM_BOOKS into a lowercase map. */
-function getStreamBookMap(): Map<string, string> {
-  const map = new Map<string, string>()
-  const raw = process.env.SENDPULSE_STREAM_BOOKS || ""
-  for (const pair of raw.split(",")) {
-    const colonIdx = pair.indexOf(":")
-    if (colonIdx < 0) continue
-    const stream = pair.slice(0, colonIdx).trim()
-    const bookId = pair.slice(colonIdx + 1).trim()
-    if (stream && bookId) map.set(stream.toLowerCase(), bookId)
-  }
-  return map
-}
-
 async function addToAddressBook(
   email: string,
-  bookId: string,
+  bookId: number,
   variables: Record<string, string>,
+  token: string,
 ): Promise<void> {
-  const token = await getSendPulseToken()
-  if (!token) { console.warn("[SendPulse] failed to get access token"); return }
   const payload = JSON.stringify({ emails: [{ email, variables }] })
   console.log(`[SendPulse] addToBook bookId=${bookId}:`, payload)
   const { status, text } = await spPost(
@@ -94,27 +28,20 @@ async function addToSendPulse(
   extra?: Record<string, string>,
 ): Promise<void> {
   console.log("[SendPulse] addToSendPulse", { email })
-  const variables: Record<string, string> = { "Имя": name, phone, ...extra }
+  const token = await getToken()
+  if (!token) { console.warn("[SendPulse] failed to get access token"); return }
 
-  const masterBookId = process.env.SENDPULSE_ADDRESS_BOOK_ID
-  const streamBooks = getStreamBookMap()
+  const variables: Record<string, string> = { "Имя": name, phone, ...extra }
+  const masterBookName = process.env.SENDPULSE_MASTER_BOOK_NAME || "Default"
   const streams = extra?.Streams
     ? extra.Streams.split(",").map((s) => s.trim()).filter(Boolean)
     : []
 
-  const bookIds = new Set<string>()
-  if (masterBookId) bookIds.add(masterBookId)
-  for (const stream of streams) {
-    const id = streamBooks.get(stream.toLowerCase())
-    if (id) bookIds.add(id)
-  }
+  const bookNames = [masterBookName, ...streams]
+  const uniqueNames = [...new Set(bookNames)]
 
-  if (!bookIds.size) {
-    console.warn("[SendPulse] no address book configured (set SENDPULSE_ADDRESS_BOOK_ID or SENDPULSE_STREAM_BOOKS)")
-    return
-  }
-
-  await Promise.all([...bookIds].map((id) => addToAddressBook(email, id, variables)))
+  const bookIds = await Promise.all(uniqueNames.map((n) => getOrCreateBook(n, token)))
+  await Promise.all(bookIds.map((id) => addToAddressBook(email, id, variables, token)))
 }
 
 export type PublishResult = {
@@ -123,20 +50,98 @@ export type PublishResult = {
   campaignId: number
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
 function buildEmailHtml(stream: string, date: string, url: string, count: number): string {
+  const s = escapeHtml(stream)
+  const d = escapeHtml(date)
+  const plural = candidatePlural(count)
+  const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif"
+
   return `<!DOCTYPE html>
-<html>
-<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#111">
-  <p style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 8px">Talent Stream · ${stream}</p>
-  <h1 style="font-size:22px;margin:0 0 16px">Новая подборка кандидатов</h1>
-  <p>Здравствуйте, {{Имя}}!</p>
-  <p>Для вас подготовлен новый выпуск стрима <strong>${stream}</strong> от ${date} — ${count} ${candidatePlural(count)}.</p>
-  <p style="margin:24px 0">
-    <a href="${url}" style="background:#1168bd;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block">
-      Открыть подборку
-    </a>
-  </p>
-  <p style="color:#999;font-size:12px">Если кнопка не открывается, скопируйте ссылку: ${url}</p>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Talent Stream</title>
+</head>
+<body style="margin:0;padding:0;background:#f8fafc">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc">
+<tr><td align="center" style="padding:32px 16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px">
+
+  <tr>
+    <td style="padding-bottom:16px">
+      <p style="margin:0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#2563eb;font-family:${font}">
+        Talent Stream
+      </p>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+
+      <tr>
+        <td style="padding:32px 32px 24px">
+
+          <p style="margin:0 0 14px">
+            <span style="display:inline-block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#2563eb;background:#eff6ff;border-radius:999px;padding:3px 10px;font-family:${font}">
+              ${s}
+            </span>
+          </p>
+
+          <h1 style="margin:0 0 10px;font-size:22px;font-weight:600;color:#0f172a;line-height:1.35;letter-spacing:-0.02em;font-family:${font}">
+            Выпуск ${s} Talent Stream подготовлен специально для вас.
+          </h1>
+
+          <p style="margin:0 0 16px;font-size:14px;color:#64748b;line-height:1.65;font-family:${font}">
+            В него вошли проверенные кандидаты, отобранные нашей редакцией за последнюю неделю.
+          </p>
+
+          <p style="margin:0 0 24px;font-size:13px;color:#94a3b8;font-family:${font}">
+            ${d}&nbsp;&nbsp;·&nbsp;&nbsp;${count} ${plural}
+          </p>
+
+          <hr style="border:none;border-top:1px solid #f1f5f9;margin:0 0 24px">
+
+          <p style="margin:0 0 20px;font-size:14px;color:#374151;line-height:1.65;font-family:${font}">
+            Здравствуйте, {{Имя}}!<br>
+            Перейдите по ссылке, чтобы познакомиться с кандидатами этого выпуска.
+          </p>
+
+          <table role="presentation" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="border-radius:8px;background:#2563eb">
+                <a href="${url}" style="display:inline-block;padding:11px 22px;font-size:14px;font-weight:600;color:#fff;text-decoration:none;letter-spacing:-0.01em;font-family:${font}">
+                  Открыть подборку &rarr;
+                </a>
+              </td>
+            </tr>
+          </table>
+
+        </td>
+      </tr>
+
+      <tr>
+        <td style="padding:16px 32px;background:#f8fafc;border-top:1px solid #f1f5f9">
+          <p style="margin:0;font-size:11px;color:#94a3b8;line-height:1.6;word-break:break-all;font-family:${font}">
+            Если кнопка не открывается, скопируйте ссылку:<br>
+            <a href="${url}" style="color:#94a3b8;text-decoration:underline">${url}</a>
+          </p>
+        </td>
+      </tr>
+
+    </table>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
 </body>
 </html>`
 }
@@ -159,16 +164,16 @@ async function createCampaign(
   const fromName = process.env.SENDPULSE_FROM_NAME || "TalentStreams"
   if (!fromEmail) throw new Error("SENDPULSE_FROM_EMAIL не задан в переменных окружения")
 
-  const token = await getSendPulseToken()
+  const token = await getToken()
   if (!token) throw new Error("Не удалось получить токен SendPulse")
 
   const payload = JSON.stringify({
-    sender_name: fromName,
-    sender_email: fromEmail,
-    subject,
-    body: html,
     name,
     list_id: Number(bookId),
+    subject,
+    body: Buffer.from(html, "utf-8").toString("base64"),
+    sender_name: fromName,
+    sender_email: fromEmail,
   })
   console.log("[SendPulse] createCampaign:", payload)
 
@@ -177,9 +182,20 @@ async function createCampaign(
     { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     payload,
   )
-  console.log(`[SendPulse] campaigns status=${status}`, text)
+  console.log(`[SendPulse] campaigns status=${status} body=${text}`)
 
-  if (status < 200 || status >= 300) throw new Error(`SendPulse campaign error (${status}): ${text}`)
+  if (status < 200 || status >= 300) {
+    let message = `SendPulse campaign error (${status}): ${text}`
+    try {
+      const err = JSON.parse(text) as { error_code?: number; message?: string }
+      if (err.error_code === 709) {
+        message = "Адресная книга занята (идёт копирование адресов). Подождите минуту и попробуйте снова."
+      } else if (err.error_code === 798) {
+        message = "В адресной книге нет подписчиков. Добавьте работодателей в стрим «" + name.split(" — ")[0] + "» и повторите попытку."
+      }
+    } catch { /* ignore parse errors */ }
+    throw new Error(message)
+  }
   return JSON.parse(text) as { id: number }
 }
 
@@ -187,19 +203,14 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   const list = await getMailingList(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
 
-  const streamBooks = getStreamBookMap()
-  const bookId =
-    streamBooks.get(list.stream.toLowerCase()) ?? process.env.SENDPULSE_ADDRESS_BOOK_ID
-  if (!bookId) {
-    throw new Error(
-      `Нет адресной книги для стрима "${list.stream}". Задайте SENDPULSE_STREAM_BOOKS или SENDPULSE_ADDRESS_BOOK_ID.`,
-    )
-  }
+  const token = await getToken()
+  if (!token) throw new Error("Не удалось получить токен SendPulse")
 
+  const bookId = await getOrCreateBook(list.stream, token)
   const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
   const listUrl = `${appUrl}/list/${listId}`
   const subject = `Talent Stream: ${list.stream} — выпуск ${list.date}`
-  const campaignName = `${list.stream} ${list.date} (${listId.slice(0, 8)})`
+  const campaignName = `${list.stream} — ${list.date}`
   const html = buildEmailHtml(list.stream, list.date, listUrl, list.entries.length)
 
   const campaign = await createCampaign(bookId, subject, html, campaignName)
