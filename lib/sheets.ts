@@ -431,6 +431,95 @@ export async function appendCandidateRow(values: string[]): Promise<void> {
   await appendRow("Candidates", CANDIDATES_HEADERS, values)
 }
 
+export type MailingListSummary = {
+  listId: string
+  stream: string
+  date: string
+  candidateCount: number
+}
+
+/** Fetch all mailing lists grouped by List ID (no profile data, fast). */
+export async function getMailingLists(): Promise<MailingListSummary[]> {
+  const { sheetId } = getEnv()
+  const values = await fetchSheetValues(sheetId, MAILING_LIST_RANGE)
+  if (!values.length) return []
+
+  const rawHeaders = values[0].map((h) => (h ?? "").trim())
+  const mappedHeaders = rawHeaders.map((h) => MAILING_LIST_COL_ALIASES[h.toLowerCase()] ?? h.toLowerCase())
+
+  const listIdIdx = mappedHeaders.indexOf("list_id")
+  const candidateIdIdx = mappedHeaders.indexOf("candidate_id")
+  const streamIdx = mappedHeaders.indexOf("stream")
+  const dateIdx = mappedHeaders.indexOf("date")
+
+  if (listIdIdx < 0) return []
+
+  const byListId = new Map<string, { stream: string; date: string; candidateIds: Set<string> }>()
+
+  for (const row of values.slice(1)) {
+    const listId = (row[listIdIdx] ?? "").trim()
+    if (!listId) continue
+    if (!byListId.has(listId)) {
+      byListId.set(listId, {
+        stream: streamIdx >= 0 ? (row[streamIdx] ?? "").trim() : "",
+        date: dateIdx >= 0 ? (row[dateIdx] ?? "").trim() : "",
+        candidateIds: new Set(),
+      })
+    }
+    const entry = byListId.get(listId)!
+    const candidateId = candidateIdIdx >= 0 ? (row[candidateIdIdx] ?? "").trim() : ""
+    if (candidateId) entry.candidateIds.add(candidateId)
+  }
+
+  return Array.from(byListId.entries()).map(([listId, { stream, date, candidateIds }]) => ({
+    listId,
+    stream,
+    date,
+    candidateCount: candidateIds.size,
+  }))
+}
+
+export type Employer = {
+  name: string
+  company: string
+  email: string
+  streams: string[]
+}
+
+/** Fetch all employers subscribed to a given stream from the Employers sheet. */
+export async function getEmployersByStream(stream: string): Promise<Employer[]> {
+  const { sheetId } = getEnv()
+  let values: string[][]
+  try {
+    values = await fetchSheetValues(sheetId, "'Employers'!A1:I1000")
+  } catch {
+    return []
+  }
+  if (values.length < 2) return []
+
+  const headers = values[0].map((h) => (h ?? "").trim().toLowerCase())
+  const nameIdx = headers.indexOf("name")
+  const companyIdx = headers.indexOf("company")
+  const emailIdx = headers.indexOf("email")
+  const streamsIdx = headers.indexOf("streams")
+
+  if (emailIdx < 0) return []
+
+  return values
+    .slice(1)
+    .filter((row) => {
+      const streamsVal = streamsIdx >= 0 ? (row[streamsIdx] ?? "") : ""
+      return parseMultiValue(streamsVal).some((s) => s.toLowerCase() === stream.toLowerCase())
+    })
+    .map((row) => ({
+      name: nameIdx >= 0 ? (row[nameIdx] ?? "").trim() : "",
+      company: companyIdx >= 0 ? (row[companyIdx] ?? "").trim() : "",
+      email: (row[emailIdx] ?? "").trim(),
+      streams: parseMultiValue(streamsIdx >= 0 ? (row[streamsIdx] ?? "") : ""),
+    }))
+    .filter((e) => e.email)
+}
+
 /** Whether Google Sheets credentials are configured AND the key looks valid. */
 export function isSheetsConfigured(): boolean {
   const sheetId = process.env.GOOGLE_SHEET_ID

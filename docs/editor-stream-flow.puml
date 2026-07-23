@@ -1,0 +1,140 @@
+@startuml editor-stream-flow
+title Жизненный цикл стрима: подписка → выпуск → рассылка → просмотр
+
+skinparam sequence {
+  ArrowColor #1168bd
+  ActorBorderColor #1168bd
+  ActorBackgroundColor #dce8f5
+  ParticipantBorderColor #1168bd
+  ParticipantBackgroundColor #dce8f5
+  ParticipantFontSize 13
+  LifeLineBorderColor #aaaaaa
+  NoteBackgroundColor #fffde7
+  NoteBorderColor #e6c619
+  DividerBackgroundColor #e8f0fe
+}
+skinparam ActorFontSize 13
+skinparam ArrowFontSize 12
+
+actor       "Редактор"              as editor
+actor       "Работодатель"          as employer
+participant "TalentStreams\nWeb App" as app
+participant "Sheets · Streams"      as sh_streams  #d0e8ff
+participant "Sheets · Candidates"   as sh_cands    #d0e8ff
+participant "Sheets · Mailing lists" as sh_mail    #d0e8ff
+participant "Sheets · Employers"    as sh_emp      #d0e8ff
+participant "SendPulse\n(мастер-книга)" as sp_master  #fce8cc
+participant "SendPulse\n(книга стрима)" as sp_stream  #fce8cc
+participant "SendPulse\nCampaigns"  as sp_camp     #fce8cc
+
+== 1. Редактор настраивает стримы (разово) ==
+
+editor -> sh_streams : Добавляет / редактирует названия стримов\n(колонка A листа «Streams»)
+note right of sh_streams
+  Stream
+  ──────
+  Finance
+  Tech
+  Operations
+  Marketing
+end note
+
+note over editor, sh_streams
+  Для каждого стрима редактор создаёт
+  отдельную адресную книгу в SendPulse
+  и добавляет её ID в SENDPULSE_STREAM_BOOKS:
+  Finance:709647,Tech:800001,…
+end note
+
+== 2. Работодатель подписывается ==
+
+employer -> app : Открывает сайт, нажимает\n«Подписаться на рассылку»
+app -> sh_streams : getStreams()
+sh_streams --> app : ["Finance", "Tech", "Operations", "Marketing"]
+app --> employer : Форма с выбором стримов (макс. 2)
+
+employer -> app : Заполняет форму\n{ имя, компания, email, телефон,\n  способ связи, Telegram, LinkedIn,\n  streams: ["Finance"] }
+
+app -> sh_emp : appendEmployerRow([...])
+sh_emp --> app : OK
+
+app -> sp_master : POST /addressbooks/MASTER/emails\n{ email, variables: { Имя, phone, Telegram,\n  LinkedIn, Primary Contact, Streams } }
+sp_master --> app : { "result": true }
+
+app -> sp_stream : POST /addressbooks/FINANCE_BOOK/emails\n{ email, variables: { Имя, phone, … } }
+sp_stream --> app : { "result": true }
+
+app --> employer : «Заявка отправлена»
+
+note over sh_emp
+  Лист «Employers»:
+  ──────────────────────────────────────────────────
+  Timestamp | Name    | Company | … | Streams
+  21.07.26  | Alisher | Uzum    | … | Finance
+end note
+
+== 3. Редактор готовит выпуск ==
+
+editor -> sh_cands : Проверяет и обновляет профили кандидатов
+note right of sh_cands
+  Лист «Candidates»:
+  id (UUID)                             | name     | stream
+  a3f8e2c1-4b0d-4e9a-8f1c-d2e7b3a9c501 | Алия М.  | Finance
+  7c1d4f82-9e3a-4b7d-a2f0-e8c5d1b6f340 | Санжар Р.| Finance
+end note
+
+editor -> sh_mail : Создаёт строки нового выпуска\n(List ID — UUID, Stream, Date, Candidate ID — UUID)
+note right of sh_mail
+  List ID (UUID)                        | Stream  | Date       | Candidate ID (UUID)
+  f04a9b3e-2c7d-4e1f-b8a0-3d6c9e5f1027 | Finance | 21.07.2026 | a3f8e2c1-…
+  f04a9b3e-2c7d-4e1f-b8a0-3d6c9e5f1027 | Finance | 21.07.2026 | 7c1d4f82-…
+end note
+
+== 4. Редактор запускает рассылку ==
+
+note over editor, app
+  Два равнозначных способа запуска:
+  а) Страница /editor?secret=… → кнопка «Отправить»
+  б) curl /api/publish/{listId}?token=…
+end note
+
+editor -> app : publishMailingList("f04a9b3e-…")\n(Server Action или API-роут)
+app -> sh_mail : getMailingList("f04a9b3e-…")
+sh_mail --> app : { stream: "Finance", date: "21.07.2026",\n  entries: [2 кандидата] }
+
+app -> sp_camp : POST /oauth/access_token
+sp_camp --> app : { access_token }
+
+app -> sp_camp : POST /campaigns\n{ list_id: FINANCE_BOOK_ID,\n  subject: "Talent Stream: Finance — 21.07.2026",\n  body: html с {{Имя}},\n  sender_name, sender_email }
+sp_camp --> app : { id: 12345 }
+
+app --> editor : «Кампания #12345 запущена»
+
+== 4а. SendPulse доставляет письма подписчикам ==
+
+sp_camp -> employer : Email «Talent Stream: Finance — 21.07.2026»\nСсылка: /list/f04a9b3e-…\n({{Имя}} заменяется на имя получателя)
+
+note right of sp_camp
+  SendPulse сам рассылает письма
+  всем контактам в книге стрима «Finance»
+  UUID в URL непредсказуем —
+  подобрать чужую подборку нельзя
+end note
+
+== 5. Работодатель просматривает подборку ==
+
+employer -> app : GET /list/f04a9b3e-2c7d-4e1f-b8a0-3d6c9e5f1027
+app -> sh_mail : getMailingList("f04a9b3e-…")
+sh_mail --> app : { stream, date, candidate_ids: [UUID, UUID] }
+app -> sh_cands : getProfiles() → фильтр по candidate_ids
+sh_cands --> app : профили кандидатов
+app --> employer : Страница выпуска\n(стрим, дата, карточки кандидатов)
+
+== 6. Работодатель смотрит профиль ==
+
+employer -> app : GET /a3f8e2c1-…?back=/list/f04a9b3e-…
+app -> sh_cands : getProfile("a3f8e2c1-…")
+sh_cands --> app : полный профиль
+app --> employer : Профиль кандидата\n(кнопка «К подборке» → /list/f04a9b3e-…)
+
+@enduml
