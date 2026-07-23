@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation"
-import { CalendarDays, Users, Layers } from "lucide-react"
+import { CalendarDays, Users, Layers, CheckCircle2 } from "lucide-react"
 import { getMailingLists } from "@/lib/sheets"
+import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
+import { CampaignHistory } from "@/components/campaign-history"
 
 export const dynamic = "force-dynamic"
 
@@ -17,7 +19,25 @@ export default async function EditorPage({
     notFound()
   }
 
-  const lists = await getMailingLists()
+  const [lists, campaigns] = await Promise.all([getMailingLists(), getCampaigns()])
+
+  const campaignsByTitle = new Map<string, Campaign[]>()
+  for (const c of campaigns) {
+    const arr = campaignsByTitle.get(c.name) ?? []
+    arr.push(c)
+    campaignsByTitle.set(c.name, arr)
+  }
+
+  const token = await getToken()
+  const streamBookCounts = new Map<string, number>()
+  if (token) {
+    const uniqueStreams = [...new Set(lists.map((l) => l.stream).filter(Boolean))]
+    await Promise.all(
+      uniqueStreams.map(async (stream) => {
+        streamBookCounts.set(stream, await getBookEmailCount(stream, token))
+      }),
+    )
+  }
 
   const secretParam = editorSecret ? `?secret=${editorSecret}` : ""
 
@@ -42,42 +62,58 @@ export default async function EditorPage({
           </div>
         ) : (
           <div className="space-y-3">
-            {lists.map((list) => (
-              <div
-                key={list.listId}
-                className="flex items-center gap-4 rounded-xl border bg-card px-5 py-4"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-                      {list.stream || "—"}
-                    </span>
-                    {list.date && (
-                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                        <CalendarDays className="size-3" />
-                        {list.date}
-                      </span>
-                    )}
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <Users className="size-3" />
-                      {list.candidateCount} {candidatePlural(list.candidateCount)}
-                    </span>
-                  </div>
-                  <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                    <a
-                      href={`/list/${list.listId}${secretParam}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:text-foreground hover:underline"
-                    >
-                      /list/{list.listId}
-                    </a>
-                  </p>
-                </div>
+            {lists.map((list) => {
+              const campaignTitle = `${list.stream} — ${list.date}`
+              const matchedCampaigns = campaignsByTitle.get(campaignTitle) ?? []
+              const alreadySent = matchedCampaigns.length > 0
+              const bookEmpty = (streamBookCounts.get(list.stream) ?? 0) === 0
+              return (
+                <div
+                  key={list.listId}
+                  className="rounded-xl border bg-card overflow-hidden"
+                >
+                  <div className="flex items-center gap-4 px-5 py-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                          {list.stream || "—"}
+                        </span>
+                        {list.date && (
+                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <CalendarDays className="size-3" />
+                            {list.date}
+                          </span>
+                        )}
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <Users className="size-3" />
+                          {list.candidateCount} {candidatePlural(list.candidateCount)}
+                        </span>
+                        {alreadySent && (
+                          <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
+                            <CheckCircle2 className="size-3" />
+                            Отправлено
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                        <a
+                          href={`/list/${list.listId}${secretParam}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-foreground hover:underline"
+                        >
+                          /list/{list.listId}
+                        </a>
+                      </p>
+                    </div>
 
-                <PublishButton listId={list.listId} />
-              </div>
-            ))}
+                    <PublishButton listId={list.listId} alreadySent={alreadySent} bookEmpty={bookEmpty} />
+                  </div>
+
+                  <CampaignHistory campaigns={matchedCampaigns} />
+                </div>
+              )
+            })}
           </div>
         )}
 
