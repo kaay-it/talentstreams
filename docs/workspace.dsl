@@ -6,100 +6,104 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     # ── Акторы ──────────────────────────────────────────────────────────────
 
-    employer = person "Работодатель" "Просматривает подборки кандидатов и подписывается на еженедельные рассылки" "User"
+    employer = person "Работодатель" "Просматривает анонимные подборки кандидатов, подписывается на рассылку, отправляет запросы на контакт" "User"
     candidate = person "Кандидат" "Регистрируется для включения в подборки" "User"
-    editor = person "Редактор" "Ведёт данные кандидатов, подборок и стримов напрямую в Google Sheets" "Internal"
+    editor = person "Редактор" "Ведёт данные кандидатов и стримов в Google Sheets; подтверждает заявки работодателей и запускает рассылки через /editor" "Internal"
 
     # ── Внешние системы ──────────────────────────────────────────────────────
 
-    googleSheets = softwareSystem "Google Sheets" "Единое хранилище данных: профили кандидатов, подборки рассылок, список стримов, заявки работодателей и кандидатов" "External"
+    googleSheets = softwareSystem "Google Sheets" "Единое хранилище данных: профили кандидатов, подборки рассылок, стримы, заявки работодателей (со статусом), заявки кандидатов" "External"
 
-    sendPulse = softwareSystem "SendPulse" "Email-маркетинг: адресная книга подписчиков, автоматизации рассылок" "External"
+    sendPulse = softwareSystem "SendPulse" "Email-маркетинг: адресные книги подписчиков (мастер + по стримам), рассылки кампаний" "External"
 
     # ── Основная система ─────────────────────────────────────────────────────
 
-    talentStreams = softwareSystem "TalentStreams" "Next.js-приложение: публичный сайт с профилями кандидатов, страницами подборок и формами регистрации" {
+    talentStreams = softwareSystem "TalentStreams" "Next.js-приложение: публичный сайт с подборками кандидатов, формами регистрации и редактором выпусков" {
 
-      webApp = container "Web Application" "Server-side рендеринг страниц, обработка форм через Server Actions, интеграции с внешними API" "Next.js 14, TypeScript" "WebApp" {
+      webApp = container "Web Application" "Server-side рендеринг, Server Actions, интеграции с Google Sheets и SendPulse" "Next.js 14, TypeScript" "WebApp" {
 
         # Pages (Server Components)
-        homePage = component "HomePage" "Лендинг сервиса: описание, кнопки регистрации работодателя и кандидата. Загружает список стримов с сервера." "Next.js Server Component" "Page"
+        homePage = component "HomePage (/)" "Лендинг: описание сервиса, формы регистрации работодателя и кандидата, список стримов с сервера" "Next.js Server Component" "Page"
 
-        profilePage = component "ProfilePage" "Профиль кандидата по его ID. Поддерживает параметр ?back= для возврата в подборку." "Next.js Server Component" "Page"
+        mailingListPage = component "MailingListPage (/list/[listId])" "Страница подборки: анонимные карточки кандидатов (без имён и контактов), теги, summary, disclaimer. Noindex." "Next.js Server Component" "Page"
 
-        mailingListPage = component "MailingListPage" "Страница подборки (/list/[listId]): список кандидатов выпуска с датой и стримом." "Next.js Server Component" "Page"
+        profilePage = component "ProfilePage (/profile/[id])" "Полный профиль кандидата. Недоступна со страниц подборок. Noindex." "Next.js Server Component" "Page"
+
+        editorPage = component "EditorPage (/editor)" "Редактор: список выпусков (стрим, дата, кандидаты, история кампаний, кнопка публикации), секция подтверждения работодателей. Защищён EDITOR_SECRET." "Next.js Server Component" "Page"
 
         # Client Components
-        employerModal = component "EmployerRegistrationModal" "Форма подписки работодателя: имя, компания, email, телефон, способ связи (Email / Telegram / WhatsApp / LinkedIn), выбор до 2 стримов." "React Client Component" "UI"
+        employerModal = component "EmployerRegistrationModal" "Форма подписки работодателя: имя, компания, email, телефон, способ связи, выбор стримов. После отправки — статус «На проверке»." "React Client Component" "UI"
 
         candidateModal = component "CandidateRegistrationModal" "Форма регистрации кандидата: имя, email, телефон, ссылка на резюме, сопроводительное письмо." "React Client Component" "UI"
 
-        profileView = component "ProfileView" "Карточка профиля: имя, роль, bio, контакты, теги стримов, дополнительные поля. Кнопка «назад» ведёт к подборке или на главную." "React Client Component" "UI"
+        profileView = component "ProfileView" "Полная карточка профиля: имя, роль, bio, контакты, теги стримов, дополнительные поля. Кнопка «назад»." "React Client Component" "UI"
 
-        editorPage = component "EditorPage" "Страница редактора (/editor): список всех выпусков из «Mailing lists» с датой, стримом, счётчиком кандидатов и кнопкой запуска рассылки. Защищена EDITOR_SECRET." "Next.js Server Component" "Page"
+        contactButton = component "ContactButton" "Кнопка «Хочу связаться» на карточке подборки. Заглушка — TASK-01." "React Client Component" "UI"
+
+        employerSection = component "EmployerSection" "Секция редактора: три коллапсируемые группы работодателей (На проверке / Отклонён / Подтверждён). Кнопки «Подтвердить» и «Отклонить»." "React Client Component" "UI"
+
+        publishButton = component "PublishButton" "Кнопка запуска рассылки. Отключена если адресная книга пуста. Показывает статус кампании." "React Client Component" "UI"
 
         # Server Actions
-        serverActions = component "Server Actions" "registerEmployer(), registerCandidate(), publishMailingList() — валидация, параллельная запись в Google Sheets, управление кампаниями SendPulse." "Next.js Server Actions" "Logic"
+        serverActions = component "Server Actions" "registerEmployer() — пишет со статусом «На проверке», не добавляет в SP.\nregisterCandidate() — пишет в Sheets.\npublishMailingList() — создаёт кампанию в SP.\nconfirmEmployer() — сначала SP, затем статус «Подтверждён».\nrejectEmployer() — статус «Отклонён».\naddProfileColumns() — миграция колонок." "Next.js Server Actions" "Logic"
 
-        publishApi = component "Publish API" "API-роут /api/publish/[listId]: HTTP GET/POST для запуска рассылки через curl или внешние системы. Защищён EDITOR_SECRET через query-параметр token или заголовок x-editor-token." "Next.js Route Handler" "Logic"
+        publishApi = component "Publish API (/api/publish/[listId])" "HTTP-роут для запуска рассылки через curl или внешние системы. Защищён EDITOR_SECRET." "Next.js Route Handler" "Logic"
 
         # Integrations
-        sheetsLib = component "Sheets Library" "Весь доступ к Google Sheets: чтение профилей, подборок, стримов, выпусков, работодателей; запись заявок. Аутентификация через Service Account JWT." "TypeScript, Google Sheets API v4" "Integration"
+        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nЧтение: профили, подборки, стримы, работодатели.\nЗапись: регистрации, статусы работодателей.\nМиграция: ensureProfileColumns().\nАвтосоздание листов через ensureSheet()." "TypeScript, Google Sheets API v4" "Integration"
 
-        sendPulseIntegration = component "SendPulse Integration" "OAuth 2.0 Client Credentials с кэшем токена 59 мин. Добавление контактов в адресные книги (мастер + по стримам). Создание email-кампаний через POST /campaigns. node:https для обхода корпоративного TLS." "TypeScript, SendPulse REST API" "Integration"
+        sendPulseLib = component "SendPulse Library (lib/sendpulse.ts)" "OAuth 2.0 с кэшем токена (59 мин). Кэш адресных книг с TTL 60 с.\ngetOrCreateBook() — авто-создание книги.\ngetBookEmailCount() — проверка подписчиков до рассылки.\ncreateCampaign() / getCampaigns()." "TypeScript, SendPulse REST API" "Integration"
       }
     }
 
     # ── Отношения: системный контекст ────────────────────────────────────────
 
-    employer -> talentStreams "Просматривает подборки и профили кандидатов, подписывается на рассылку"
+    employer -> talentStreams "Просматривает подборки, подписывается на рассылку, запрашивает контакт с кандидатом"
     candidate -> talentStreams "Регистрируется как кандидат"
-    editor -> googleSheets "Заполняет листы: Candidates, Mailing lists, Streams, Employers"
+    editor -> googleSheets "Заполняет листы: Candidates, Mailing lists, Streams"
+    editor -> talentStreams "Подтверждает работодателей, запускает рассылки через /editor"
 
-    talentStreams -> googleSheets "Читает профили, подборки, стримы; пишет заявки" "HTTPS, Sheets API v4"
-    talentStreams -> sendPulse "Добавляет контакты в адресную книгу" "HTTPS, REST API"
+    talentStreams -> googleSheets "Читает профили, подборки, стримы, работодателей; пишет заявки и статусы" "HTTPS, Sheets API v4"
+    talentStreams -> sendPulse "Добавляет подтверждённых работодателей; создаёт кампании" "HTTPS, REST API"
 
     # ── Отношения: контейнерный уровень ──────────────────────────────────────
 
     employer -> talentStreams.webApp "HTTPS"
     candidate -> talentStreams.webApp "HTTPS"
-    editor -> talentStreams.webApp "HTTPS (редактор выпусков)"
+    editor -> talentStreams.webApp "HTTPS (/editor)"
     talentStreams.webApp -> googleSheets "Sheets API v4 / Service Account JWT" "HTTPS"
-    talentStreams.webApp -> sendPulse "OAuth 2.0 + POST /addressbooks + POST /campaigns" "HTTPS"
+    talentStreams.webApp -> sendPulse "OAuth 2.0 + REST API" "HTTPS"
 
     # ── Отношения: компонентный уровень ──────────────────────────────────────
 
-    # Страницы рендерят компоненты
-    talentStreams.webApp.homePage -> talentStreams.webApp.employerModal "Рендерит (передаёт список стримов)"
+    talentStreams.webApp.homePage -> talentStreams.webApp.employerModal "Рендерит"
     talentStreams.webApp.homePage -> talentStreams.webApp.candidateModal "Рендерит"
-    talentStreams.webApp.profilePage -> talentStreams.webApp.profileView "Рендерит (передаёт backUrl)"
-    talentStreams.webApp.mailingListPage -> talentStreams.webApp.profileView "Рендерит карточки кандидатов"
+    talentStreams.webApp.profilePage -> talentStreams.webApp.profileView "Рендерит"
+    talentStreams.webApp.mailingListPage -> talentStreams.webApp.contactButton "Рендерит (по одной на карточку)"
+    talentStreams.webApp.editorPage -> talentStreams.webApp.publishButton "Рендерит (по одной на выпуск)"
+    talentStreams.webApp.editorPage -> talentStreams.webApp.employerSection "Рендерит"
 
-    # Страницы читают данные
     talentStreams.webApp.homePage -> talentStreams.webApp.sheetsLib "getStreams()"
     talentStreams.webApp.profilePage -> talentStreams.webApp.sheetsLib "getProfile(id)"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
-    talentStreams.webApp.editorPage -> talentStreams.webApp.sheetsLib "getMailingLists()"
-    talentStreams.webApp.editorPage -> talentStreams.webApp.serverActions "publishMailingList(listId)"
+    talentStreams.webApp.editorPage -> talentStreams.webApp.sheetsLib "getMailingLists(), getEmployers()"
+    talentStreams.webApp.editorPage -> talentStreams.webApp.sendPulseLib "getBookEmailCount() — проверка пустой книги"
 
-    # Формы вызывают Server Actions
     talentStreams.webApp.employerModal -> talentStreams.webApp.serverActions "registerEmployer(EmployerData)"
     talentStreams.webApp.candidateModal -> talentStreams.webApp.serverActions "registerCandidate(CandidateData)"
+    talentStreams.webApp.publishButton -> talentStreams.webApp.serverActions "publishMailingList(listId)"
+    talentStreams.webApp.employerSection -> talentStreams.webApp.serverActions "confirmEmployer() / rejectEmployer()"
 
-    # Publish API вызывает Server Action
     talentStreams.webApp.publishApi -> talentStreams.webApp.serverActions "publishMailingList(listId)"
 
-    # Server Actions пишут данные и взаимодействуют с SendPulse
-    talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendEmployerRow(), appendCandidateRow(), getMailingList()"
-    talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseIntegration "addToSendPulse() / createCampaign()"
+    talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendEmployerRow(), appendCandidateRow(), getMailingList(), updateEmployerStatus()"
+    talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "addToSendPulse() / createCampaign()"
 
-    # Редактор работает с EditorPage и PublishApi
-    editor -> talentStreams.webApp.editorPage "Просматривает выпуски, запускает рассылку"
+    editor -> talentStreams.webApp.editorPage "Просматривает выпуски, подтверждает работодателей, запускает рассылку"
     editor -> talentStreams.webApp.publishApi "curl /api/publish/{listId}?token=…"
 
-    # Интеграции взаимодействуют с внешними системами
-    talentStreams.webApp.sheetsLib -> googleSheets "fetchSheetValues(), appendRow()" "HTTPS, Sheets API v4"
-    talentStreams.webApp.sendPulseIntegration -> sendPulse "POST /oauth/access_token, POST /addressbooks/{id}/emails, POST /campaigns" "HTTPS"
+    talentStreams.webApp.sheetsLib -> googleSheets "fetchSheetValues(), appendRow(), values.update()" "HTTPS, Sheets API v4"
+    talentStreams.webApp.sendPulseLib -> sendPulse "POST /oauth/access_token, GET /addressbooks, POST /addressbooks/{id}/emails, POST /campaigns" "HTTPS"
   }
 
   views {
@@ -122,32 +126,40 @@ workspace "TalentStreams" "Платформа подборки проверен�
       description "Компоненты Web Application"
     }
 
-    dynamic talentStreams.webApp "EmployerRegistration" "Сценарий регистрации работодателя" {
+    dynamic talentStreams.webApp "EmployerRegistration" "Сценарий регистрации работодателя (заявка)" {
       talentStreams.webApp.employerModal -> talentStreams.webApp.serverActions "registerEmployer(data)"
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendEmployerRow([...])"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendEmployerRow([..., 'На проверке'])"
       talentStreams.webApp.sheetsLib -> googleSheets "POST /values/Employers!A1:append"
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseIntegration "addToSendPulse(name, email, phone, { Streams, ... })"
-      talentStreams.webApp.sendPulseIntegration -> sendPulse "POST /addressbooks/MASTER/emails"
-      talentStreams.webApp.sendPulseIntegration -> sendPulse "POST /addressbooks/STREAM_BOOK/emails (по каждому выбранному стриму)"
       autolayout lr
     }
 
-    dynamic talentStreams.webApp "MailingListView" "Сценарий просмотра подборки" {
+    dynamic talentStreams.webApp "EmployerApproval" "Сценарий подтверждения работодателя редактором" {
+      talentStreams.webApp.employerSection -> talentStreams.webApp.serverActions "confirmEmployer(rowIndex, employerData)"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "addToSendPulse(name, email, phone, { Streams, … })"
+      talentStreams.webApp.sendPulseLib -> sendPulse "POST /addressbooks/MASTER/emails"
+      talentStreams.webApp.sendPulseLib -> sendPulse "POST /addressbooks/STREAM_BOOK/emails"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "updateEmployerStatus(rowIndex, 'Подтверждён')"
+      talentStreams.webApp.sheetsLib -> googleSheets "PUT /values/Employers!J{row}"
+      autolayout lr
+    }
+
+    dynamic talentStreams.webApp "MailingListView" "Сценарий просмотра анонимной подборки" {
       talentStreams.webApp.mailingListPage -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
       talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000"
       talentStreams.webApp.sheetsLib -> googleSheets "GET профили основного листа"
-      talentStreams.webApp.mailingListPage -> talentStreams.webApp.profileView "Рендерит карточки с ссылкой /{id}?back=/list/{listId}"
+      talentStreams.webApp.mailingListPage -> talentStreams.webApp.contactButton "Рендерит кнопку под каждой анонимной карточкой"
       autolayout lr
     }
 
     dynamic talentStreams.webApp "PublishMailingList" "Сценарий публикации выпуска редактором" {
-      talentStreams.webApp.editorPage -> talentStreams.webApp.sheetsLib "getMailingLists()"
-      talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000"
-      talentStreams.webApp.editorPage -> talentStreams.webApp.serverActions "publishMailingList(listId)"
+      talentStreams.webApp.editorPage -> talentStreams.webApp.sheetsLib "getMailingLists(), getEmployers()"
+      talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000, GET 'Employers'!A1:J1000"
+      talentStreams.webApp.editorPage -> talentStreams.webApp.sendPulseLib "getBookEmailCount(stream)"
+      talentStreams.webApp.sendPulseLib -> sendPulse "GET /addressbooks?limit=500"
+      talentStreams.webApp.publishButton -> talentStreams.webApp.serverActions "publishMailingList(listId)"
       talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
-      talentStreams.webApp.sheetsLib -> googleSheets "GET профили для подсчёта кандидатов"
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseIntegration "createCampaign(bookId, subject, html)"
-      talentStreams.webApp.sendPulseIntegration -> sendPulse "POST /oauth/access_token → POST /campaigns"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "createCampaign(bookId, subject, html)"
+      talentStreams.webApp.sendPulseLib -> sendPulse "POST /oauth/access_token → POST /campaigns"
       autolayout lr
     }
 
