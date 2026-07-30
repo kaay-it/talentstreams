@@ -3,7 +3,6 @@ import { notFound } from "next/navigation"
 import { getProfile, isSheetsConfigured } from "@/lib/sheets"
 import { ProfileView } from "@/components/profile-view"
 
-// Always render fresh from the sheet on request.
 export const dynamic = "force-dynamic"
 
 export async function generateMetadata({
@@ -14,13 +13,14 @@ export async function generateMetadata({
   const { id } = await params
   try {
     const profile = await getProfile(id)
-    if (!profile) return { title: "Профиль не найден" }
+    if (!profile) return { title: "Профиль не найден", robots: { index: false, follow: false } }
     return {
       title: `${profile.name}${profile.title ? ` — ${profile.title}` : ""}`,
       description: profile.bio || `Визитка ${profile.name}`,
+      robots: { index: false, follow: false },
     }
   } catch {
-    return { title: "Профиль" }
+    return { title: "Профиль", robots: { index: false, follow: false } }
   }
 }
 
@@ -34,9 +34,7 @@ export default async function ProfilePage({
   const { id } = await params
   const { back } = await searchParams
 
-  if (!isSheetsConfigured()) {
-    notFound()
-  }
+  if (!isSheetsConfigured()) notFound()
 
   let profile = null
   try {
@@ -45,9 +43,7 @@ export default async function ProfilePage({
     profile = null
   }
 
-  if (!profile) {
-    notFound()
-  }
+  if (!profile) notFound()
 
   return <ProfileView profile={profile} backUrl={back ?? "/"} />
 }

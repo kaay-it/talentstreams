@@ -1,6 +1,6 @@
 "use server"
 
-import { appendEmployerRow, appendCandidateRow, getMailingList } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, getMailingList, ensureProfileColumns } from "@/lib/sheets"
 import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -42,6 +42,10 @@ async function addToSendPulse(
 
   const bookIds = await Promise.all(uniqueNames.map((n) => getOrCreateBook(n, token)))
   await Promise.all(bookIds.map((id) => addToAddressBook(email, id, variables, token)))
+}
+
+export async function addProfileColumns(): Promise<{ added: string[] }> {
+  return ensureProfileColumns()
 }
 
 export type PublishResult = {
@@ -99,7 +103,7 @@ function buildEmailHtml(stream: string, date: string, url: string, count: number
           </h1>
 
           <p style="margin:0 0 16px;font-size:14px;color:#64748b;line-height:1.65;font-family:${font}">
-            В него вошли проверенные кандидаты, отобранные нашей редакцией за последнюю неделю.
+            В него вошли проверенные кандидаты, отобранные нашей командой за последнюю неделю.
           </p>
 
           <p style="margin:0 0 24px;font-size:13px;color:#94a3b8;font-family:${font}">
@@ -240,16 +244,13 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
   if (!data.name.trim()) throw new Error("Укажите имя")
   if (!data.email.trim()) throw new Error("Укажите email")
 
-  await Promise.all([
-    appendCandidateRow([
-      new Date().toISOString(),
-      data.name,
-      data.email,
-      data.phone,
-      data.resumeUrl,
-      data.coverLetter,
-    ]),
-    addToSendPulse(data.name, data.email, data.phone),
+  await appendCandidateRow([
+    new Date().toISOString(),
+    data.name,
+    data.email,
+    data.phone,
+    data.resumeUrl,
+    data.coverLetter,
   ])
 }
 

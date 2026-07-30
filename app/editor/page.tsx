@@ -4,6 +4,7 @@ import { getMailingLists } from "@/lib/sheets"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
 import { CampaignHistory } from "@/components/campaign-history"
+import { AddColumnsButton } from "@/components/add-columns-button"
 
 export const dynamic = "force-dynamic"
 
@@ -39,7 +40,6 @@ export default async function EditorPage({
     )
   }
 
-  const secretParam = editorSecret ? `?secret=${editorSecret}` : ""
 
   return (
     <div className="min-h-screen bg-background">
@@ -97,7 +97,7 @@ export default async function EditorPage({
                       </div>
                       <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
                         <a
-                          href={`/list/${list.listId}${secretParam}`}
+                          href={`/list/${list.listId}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="hover:text-foreground hover:underline"
@@ -123,6 +123,9 @@ export default async function EditorPage({
             <div className="space-y-1">
               <p>Кнопка «Отправить» рассылает письмо всем работодателям, подписанным на стрим этого выпуска.</p>
               <p>Убедитесь, что в переменных окружения заданы <code>APP_URL</code>, <code>SENDPULSE_FROM_EMAIL</code> и <code>SENDPULSE_FROM_NAME</code>.</p>
+              <div className="pt-1 border-t border-border/50">
+                <AddColumnsButton />
+              </div>
             </div>
           </div>
         </div>
