@@ -18,6 +18,19 @@ export type Profile = {
   location: string
   /** One or more stream tags from a multi-select dropdown in the sheet. */
   stream: string[]
+  // ── Distribution tags (§5 spec) ───────────────────────────────────────────
+  /** Middle | Senior | Lead | Директор/VP */
+  level: string
+  /** Startup | Fintech & Banking | E-commerce & Retail | AI | IT, SaaS, Software & Data | Telecom & Enterprise */
+  industry: string
+  /** Product | Tech | Back Office | Commercial */
+  func: string
+  /** Current country */
+  countryPrimary: string
+  /** Desired country for relocation (empty if not open to relocation) */
+  countryDesired: string
+  /** Anonymized free-text description written by the editor (no personal data). */
+  summary: string
   /** Any additional columns from the sheet, keyed by header name. */
   extra: Record<string, string>
 }
@@ -150,7 +163,10 @@ async function fetchSheetValues(sheetId: string, range: string): Promise<string[
   return data.values ?? []
 }
 
-const KNOWN_KEYS = ["id", "name", "title", "bio", "email", "phone", "website", "location", "stream"]
+const KNOWN_KEYS = [
+  "id", "name", "title", "bio", "email", "phone", "website", "location", "stream",
+  "level", "industry", "func", "countryPrimary", "countryDesired", "summary",
+]
 
 const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   id: "id",
@@ -166,6 +182,20 @@ const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   location: "location",
   stream: "stream",
   стрим: "stream",
+  level: "level",
+  уровень: "level",
+  industry: "industry",
+  отрасль: "industry",
+  function: "func",
+  функция: "func",
+  "country primary": "countryPrimary",
+  "страна текущая": "countryPrimary",
+  "основная страна": "countryPrimary",
+  "country desired": "countryDesired",
+  "страна желаемая": "countryDesired",
+  "желаемая страна": "countryDesired",
+  summary: "summary",
+  саммари: "summary",
 }
 
 function mapHeader(header: string): string {
@@ -216,6 +246,12 @@ function buildProfile(headers: string[], row: string[]): Profile {
     website: record.website || "",
     location: record.location || "",
     stream: parseMultiValue(record.stream || ""),
+    level: record.level || "",
+    industry: record.industry || "",
+    func: record.func || "",
+    countryPrimary: record.countryPrimary || "",
+    countryDesired: record.countryDesired || "",
+    summary: record.summary || "",
     extra,
   }
 }
@@ -527,4 +563,58 @@ export function isSheetsConfigured(): boolean {
   const creds = resolveCredentials()
   if (!creds) return false
   return isValidPrivateKey(creds.privateKey)
+}
+
+// ── Profile column migration ──────────────────────────────────────────────────
+
+const DISTRIBUTION_COLUMNS = ["Level", "Industry", "Function", "Country Primary", "Country Desired", "Summary"]
+
+function colLetter(n: number): string {
+  let s = ""
+  while (n > 0) {
+    n--
+    s = String.fromCharCode(65 + (n % 26)) + s
+    n = Math.floor(n / 26)
+  }
+  return s
+}
+
+/**
+ * Reads the header row of the main profiles sheet and appends any missing
+ * distribution-tag columns (Level, Industry, Function, Country Primary,
+ * Country Desired) after the last existing column.
+ */
+export async function ensureProfileColumns(): Promise<{ added: string[] }> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("A1:AZ1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) throw new Error(`Failed to read profile header row (${res.status}): ${await res.text()}`)
+
+  const data = (await res.json()) as { values?: string[][] }
+  const currentHeaders = (data.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
+
+  const missing = DISTRIBUTION_COLUMNS.filter(
+    (col) => !currentHeaders.includes(col.toLowerCase()),
+  )
+  if (!missing.length) return { added: [] }
+
+  const startIdx = currentHeaders.length + 1
+  const endIdx = startIdx + missing.length - 1
+  const range = `${colLetter(startIdx)}1:${colLetter(endIdx)}1`
+
+  const updateRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [missing] }),
+    },
+  )
+  if (!updateRes.ok) throw new Error(`Failed to add columns (${updateRes.status}): ${await updateRes.text()}`)
+
+  return { added: missing }
 }
