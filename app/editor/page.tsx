@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation"
-import { CalendarDays, Users, Layers, CheckCircle2 } from "lucide-react"
-import { getMailingLists } from "@/lib/sheets"
+import { CalendarDays, Users, Layers, CheckCircle2, UserCheck } from "lucide-react"
+import { getMailingLists, getEmployers } from "@/lib/sheets"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
 import { CampaignHistory } from "@/components/campaign-history"
 import { AddColumnsButton } from "@/components/add-columns-button"
+import { EmployerSection } from "@/components/employer-section"
 
 export const dynamic = "force-dynamic"
 
@@ -20,7 +21,7 @@ export default async function EditorPage({
     notFound()
   }
 
-  const [lists, campaigns] = await Promise.all([getMailingLists(), getCampaigns()])
+  const [lists, campaigns, employers] = await Promise.all([getMailingLists(), getCampaigns(), getEmployers()])
 
   const campaignsByTitle = new Map<string, Campaign[]>()
   for (const c of campaigns) {
@@ -116,6 +117,14 @@ export default async function EditorPage({
             })}
           </div>
         )}
+
+        <section className="mt-8">
+          <div className="mb-3 flex items-center gap-2">
+            <UserCheck className="size-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">Работодатели</h2>
+          </div>
+          <EmployerSection employers={employers} />
+        </section>
 
         <div className="mt-8 rounded-xl border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
           <div className="flex items-start gap-2">

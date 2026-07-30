@@ -105,7 +105,16 @@ export async function getOrCreateBook(name: string, token: string): Promise<numb
     { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     JSON.stringify({ bookName: name }),
   )
-  if (status < 200 || status >= 300) throw new Error(`Failed to create address book "${name}": ${text}`)
+  if (status < 200 || status >= 300) {
+    let message = `Не удалось создать адресную книгу «${name}»`
+    try {
+      const err = JSON.parse(text) as { error_code?: number; message?: string }
+      if (err.error_code === 3030303030) {
+        message = `Достигнут лимит адресных книг в SendPulse — обновите тарифный план или удалите неиспользуемые книги`
+      }
+    } catch { /* ignore */ }
+    throw new Error(message)
+  }
   const data = JSON.parse(text) as { id: number }
   _bookCache!.set(name, { id: data.id, emailCount: 0 })
   return data.id

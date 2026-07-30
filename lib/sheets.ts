@@ -456,7 +456,7 @@ async function appendRow(sheetTitle: string, headers: string[], values: string[]
   }
 }
 
-const EMPLOYERS_HEADERS = ["Timestamp", "Name", "Company", "Email", "Phone", "Primary Contact", "Telegram", "LinkedIn", "Streams"]
+const EMPLOYERS_HEADERS = ["Timestamp", "Name", "Company", "Email", "Phone", "Primary Contact", "Telegram", "LinkedIn", "Streams", "Status"]
 const CANDIDATES_HEADERS = ["Timestamp", "Name", "Email", "Phone", "Resume URL", "Cover Letter"]
 
 export async function appendEmployerRow(values: string[]): Promise<void> {
@@ -515,45 +515,93 @@ export async function getMailingLists(): Promise<MailingListSummary[]> {
   }))
 }
 
+export type EmployerStatus = "На проверке" | "Подтверждён" | "Отклонён"
+
 export type Employer = {
+  rowIndex: number
   name: string
   company: string
   email: string
+  phone: string
+  primaryContact: string
+  telegram: string
+  linkedin: string
   streams: string[]
+  status: EmployerStatus
 }
 
-/** Fetch all employers subscribed to a given stream from the Employers sheet. */
-export async function getEmployersByStream(stream: string): Promise<Employer[]> {
-  const { sheetId } = getEnv()
-  let values: string[][]
-  try {
-    values = await fetchSheetValues(sheetId, "'Employers'!A1:I1000")
-  } catch {
-    return []
-  }
+function parseEmployerRows(values: string[][]): Employer[] {
   if (values.length < 2) return []
-
   const headers = values[0].map((h) => (h ?? "").trim().toLowerCase())
   const nameIdx = headers.indexOf("name")
   const companyIdx = headers.indexOf("company")
   const emailIdx = headers.indexOf("email")
+  const phoneIdx = headers.indexOf("phone")
+  const primaryContactIdx = headers.indexOf("primary contact")
+  const telegramIdx = headers.indexOf("telegram")
+  const linkedinIdx = headers.indexOf("linkedin")
   const streamsIdx = headers.indexOf("streams")
+  const statusIdx = headers.indexOf("status")
 
   if (emailIdx < 0) return []
 
-  return values
-    .slice(1)
-    .filter((row) => {
-      const streamsVal = streamsIdx >= 0 ? (row[streamsIdx] ?? "") : ""
-      return parseMultiValue(streamsVal).some((s) => s.toLowerCase() === stream.toLowerCase())
-    })
-    .map((row) => ({
-      name: nameIdx >= 0 ? (row[nameIdx] ?? "").trim() : "",
-      company: companyIdx >= 0 ? (row[companyIdx] ?? "").trim() : "",
-      email: (row[emailIdx] ?? "").trim(),
-      streams: parseMultiValue(streamsIdx >= 0 ? (row[streamsIdx] ?? "") : ""),
-    }))
-    .filter((e) => e.email)
+  return values.slice(1).map((row, i) => ({
+    rowIndex: i + 2, // row 1 is header
+    name: nameIdx >= 0 ? (row[nameIdx] ?? "").trim() : "",
+    company: companyIdx >= 0 ? (row[companyIdx] ?? "").trim() : "",
+    email: emailIdx >= 0 ? (row[emailIdx] ?? "").trim() : "",
+    phone: phoneIdx >= 0 ? (row[phoneIdx] ?? "").trim() : "",
+    primaryContact: primaryContactIdx >= 0 ? (row[primaryContactIdx] ?? "").trim() : "",
+    telegram: telegramIdx >= 0 ? (row[telegramIdx] ?? "").trim() : "",
+    linkedin: linkedinIdx >= 0 ? (row[linkedinIdx] ?? "").trim() : "",
+    streams: parseMultiValue(streamsIdx >= 0 ? (row[streamsIdx] ?? "") : ""),
+    status: ((statusIdx >= 0 ? (row[statusIdx] ?? "").trim() : "") || "На проверке") as EmployerStatus,
+  })).filter((e) => e.email)
+}
+
+/** Fetch all employers from the Employers sheet. */
+export async function getEmployers(): Promise<Employer[]> {
+  const { sheetId } = getEnv()
+  try {
+    const values = await fetchSheetValues(sheetId, "'Employers'!A1:J1000")
+    return parseEmployerRows(values)
+  } catch {
+    return []
+  }
+}
+
+/** Fetch all employers subscribed to a given stream from the Employers sheet. */
+export async function getEmployersByStream(stream: string): Promise<Employer[]> {
+  const employers = await getEmployers()
+  return employers.filter((e) =>
+    e.streams.some((s) => s.toLowerCase() === stream.toLowerCase())
+  )
+}
+
+/** Update the Status cell of an employer row. */
+export async function updateEmployerStatus(rowIndex: number, status: EmployerStatus): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const headerRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Employers'!A1:J1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  const headerData = (await headerRes.json()) as { values?: string[][] }
+  const headers = (headerData.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
+  const statusColIdx = headers.indexOf("status")
+  if (statusColIdx < 0) throw new Error("Status column not found in Employers sheet")
+
+  const range = encodeURIComponent(`'Employers'!${colLetter(statusColIdx + 1)}${rowIndex}`)
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueInputOption=USER_ENTERED`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [[status]] }),
+    },
+  )
+  if (!res.ok) throw new Error(`Failed to update employer status (${res.status}): ${await res.text()}`)
 }
 
 /** Whether Google Sheets credentials are configured AND the key looks valid. */

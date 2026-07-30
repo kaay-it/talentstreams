@@ -1,5 +1,5 @@
 @startuml editor-stream-flow
-title Жизненный цикл стрима: подписка → выпуск → рассылка → просмотр
+title Жизненный цикл стрима: подписка → подтверждение → выпуск → рассылка → просмотр
 
 skinparam sequence {
   ArrowColor #1168bd
@@ -39,48 +39,56 @@ note right of sh_streams
   Marketing
 end note
 
-note over editor, sh_streams
-  Для каждого стрима редактор создаёт
-  отдельную адресную книгу в SendPulse
-  и добавляет её ID в SENDPULSE_STREAM_BOOKS:
-  Finance:709647,Tech:800001,…
-end note
-
-== 2. Работодатель подписывается ==
+== 2. Работодатель подписывается (заявка) ==
 
 employer -> app : Открывает сайт, нажимает\n«Подписаться на рассылку»
 app -> sh_streams : getStreams()
 sh_streams --> app : ["Finance", "Tech", "Operations", "Marketing"]
-app --> employer : Форма с выбором стримов (макс. 2)
+app --> employer : Форма с выбором стримов
 
 employer -> app : Заполняет форму\n{ имя, компания, email, телефон,\n  способ связи, Telegram, LinkedIn,\n  streams: ["Finance"] }
 
-app -> sh_emp : appendEmployerRow([...])
+app -> sh_emp : appendEmployerRow([..., Status: "На проверке"])
 sh_emp --> app : OK
 
-app -> sp_master : POST /addressbooks/MASTER/emails\n{ email, variables: { Имя, phone, Telegram,\n  LinkedIn, Primary Contact, Streams } }
-sp_master --> app : { "result": true }
-
-app -> sp_stream : POST /addressbooks/FINANCE_BOOK/emails\n{ email, variables: { Имя, phone, … } }
-sp_stream --> app : { "result": true }
-
-app --> employer : «Заявка отправлена»
+app --> employer : «Заявка отправлена — ожидайте подтверждения»
 
 note over sh_emp
   Лист «Employers»:
-  ──────────────────────────────────────────────────
-  Timestamp | Name    | Company | … | Streams
-  21.07.26  | Alisher | Uzum    | … | Finance
+  ───────────────────────────────────────────────────────────────
+  Timestamp | Name    | Company | … | Streams  | Status
+  21.07.26  | Alisher | Uzum    | … | Finance  | На проверке
+end note
+
+== 2а. Редактор подтверждает работодателя ==
+
+editor -> app : GET /editor?secret=… → секция «Работодатели»
+app -> sh_emp : getEmployers()
+sh_emp --> app : список с Status=«На проверке»
+app --> editor : Группа «На проверке» (раскрыта)
+
+editor -> app : confirmEmployer(rowIndex, employerData)
+app -> sp_master : POST /addressbooks/MASTER/emails\n{ email, variables: { Имя, phone, … } }
+sp_master --> app : { "result": true }
+app -> sp_stream : POST /addressbooks/FINANCE_BOOK/emails\n{ email, variables: { Имя, phone, … } }
+sp_stream --> app : { "result": true }
+app -> sh_emp : updateEmployerStatus(rowIndex, "Подтверждён")
+sh_emp --> app : OK
+app --> editor : Работодатель перемещён в группу «Подтверждён»
+
+note over app, sp_stream
+  TASK-10: здесь же будет отправка
+  приветственного письма работодателю
 end note
 
 == 3. Редактор готовит выпуск ==
 
 editor -> sh_cands : Проверяет и обновляет профили кандидатов
 note right of sh_cands
-  Лист «Candidates»:
-  id (UUID)                             | name     | stream
-  a3f8e2c1-4b0d-4e9a-8f1c-d2e7b3a9c501 | Алия М.  | Finance
-  7c1d4f82-9e3a-4b7d-a2f0-e8c5d1b6f340 | Санжар Р.| Finance
+  Лист «Candidates» (основной):
+  id (UUID)                             | name     | stream   | level  | summary
+  a3f8e2c1-4b0d-4e9a-8f1c-d2e7b3a9c501 | (личное) | Finance  | Senior | Опытный PM…
+  7c1d4f82-9e3a-4b7d-a2f0-e8c5d1b6f340 | (личное) | Finance  | Lead   | Руководил…
 end note
 
 editor -> sh_mail : Создаёт строки нового выпуска\n(List ID — UUID, Stream, Date, Candidate ID — UUID)
@@ -115,8 +123,8 @@ app --> editor : «Кампания #12345 запущена»
 sp_camp -> employer : Email «Talent Stream: Finance — 21.07.2026»\nСсылка: /list/f04a9b3e-…\n({{Имя}} заменяется на имя получателя)
 
 note right of sp_camp
-  SendPulse сам рассылает письма
-  всем контактам в книге стрима «Finance»
+  SendPulse рассылает письма
+  всем подтверждённым контактам в книге «Finance»
   UUID в URL непредсказуем —
   подобрать чужую подборку нельзя
 end note
@@ -128,13 +136,21 @@ app -> sh_mail : getMailingList("f04a9b3e-…")
 sh_mail --> app : { stream, date, candidate_ids: [UUID, UUID] }
 app -> sh_cands : getProfiles() → фильтр по candidate_ids
 sh_cands --> app : профили кандидатов
-app --> employer : Страница выпуска\n(стрим, дата, карточки кандидатов)
+app --> employer : Страница выпуска: анонимные карточки\n(должность, теги, страна, summary)\nБез имён и контактов. Кнопка «Хочу связаться».
 
-== 6. Работодатель смотрит профиль ==
+note over app, employer
+  Страница noindex — недоступна
+  поисковым роботам
+end note
 
-employer -> app : GET /a3f8e2c1-…?back=/list/f04a9b3e-…
-app -> sh_cands : getProfile("a3f8e2c1-…")
-sh_cands --> app : полный профиль
-app --> employer : Профиль кандидата\n(кнопка «К подборке» → /list/f04a9b3e-…)
+== 6. Работодатель запрашивает контакт ==
+
+employer -> app : Нажимает «Хочу связаться» под карточкой
+note over app
+  TASK-01: запрос сохраняется в Sheets
+  «Contact Requests», admin уведомляется.
+  Пока — заглушка (UI готов).
+end note
+app --> employer : «Запрос отправлен — мы уточним интерес кандидата»
 
 @enduml

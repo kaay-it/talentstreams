@@ -54,19 +54,6 @@ export function PublishButton({
     )
   }
 
-  if (state.status === "empty") {
-    return (
-      <button
-        disabled
-        title={state.message}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-sm font-medium text-muted-foreground opacity-50 cursor-not-allowed"
-      >
-        <AlertCircle className="size-4" />
-        Пустая книга
-      </button>
-    )
-  }
-
   if (state.status === "error") {
     return (
       <span className="inline-flex items-center gap-1.5 text-sm text-destructive" title={state.message}>

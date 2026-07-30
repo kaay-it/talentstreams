@@ -1,6 +1,7 @@
 "use server"
 
-import { appendEmployerRow, appendCandidateRow, getMailingList, ensureProfileColumns } from "@/lib/sheets"
+import { revalidatePath } from "next/cache"
+import { appendEmployerRow, appendCandidateRow, getMailingList, ensureProfileColumns, updateEmployerStatus, type Employer } from "@/lib/sheets"
 import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -265,23 +266,33 @@ export async function registerEmployer(data: EmployerData): Promise<void> {
     throw new Error("Укажите LinkedIn-профиль")
   }
 
-  await Promise.all([
-    appendEmployerRow([
-      new Date().toISOString(),
-      data.name,
-      data.company,
-      data.email,
-      data.phone,
-      data.primaryContact,
-      data.telegram || "",
-      data.linkedin || "",
-      data.streams.join(", "),
-    ]),
-    addToSendPulse(data.name, data.email, data.phone, {
-      ...(data.telegram && { Telegram: data.telegram }),
-      ...(data.linkedin && { LinkedIn: data.linkedin }),
-      "Primary Contact": data.primaryContact,
-      Streams: data.streams.join(", "),
-    }),
+  await appendEmployerRow([
+    new Date().toISOString(),
+    data.name,
+    data.company,
+    data.email,
+    data.phone,
+    data.primaryContact,
+    data.telegram || "",
+    data.linkedin || "",
+    data.streams.join(", "),
+    "На проверке",
   ])
+}
+
+export async function confirmEmployer(rowIndex: number, employer: Pick<Employer, "name" | "email" | "phone" | "telegram" | "linkedin" | "primaryContact" | "streams">): Promise<void> {
+  await addToSendPulse(employer.name, employer.email, employer.phone, {
+    ...(employer.telegram && { Telegram: employer.telegram }),
+    ...(employer.linkedin && { LinkedIn: employer.linkedin }),
+    "Primary Contact": employer.primaryContact,
+    Streams: employer.streams.join(", "),
+  })
+  // TASK-10: send welcome email after confirmation
+  await updateEmployerStatus(rowIndex, "Подтверждён")
+  revalidatePath("/editor")
+}
+
+export async function rejectEmployer(rowIndex: number): Promise<void> {
+  await updateEmployerStatus(rowIndex, "Отклонён")
+  revalidatePath("/editor")
 }
