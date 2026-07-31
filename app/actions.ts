@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { appendEmployerRow, appendCandidateRow, getMailingList, ensureProfileColumns, updateEmployerStatus, getEmployers, type Employer } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, appendContactRequest, getMailingList, getMailingLists, ensureProfileColumns, updateEmployerStatus, updateContactRequestStatus, getEmployers, getEmployerByToken, type Employer, type ContactRequestStatus } from "@/lib/sheets"
 import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -310,4 +310,53 @@ export async function confirmEmployer(rowIndex: number, employer: Pick<Employer,
 export async function rejectEmployer(rowIndex: number): Promise<void> {
   await updateEmployerStatus(rowIndex, "Отклонён")
   revalidatePath("/editor")
+}
+
+export async function setContactRequestStatus(rowIndex: number, status: ContactRequestStatus): Promise<void> {
+  await updateContactRequestStatus(rowIndex, status)
+  revalidatePath("/editor")
+}
+
+export async function submitGeneralInquiry(listId: string, employerToken: string): Promise<void> {
+  if (!employerToken) throw new Error("Токен работодателя не найден в URL")
+
+  const employer = await getEmployerByToken(employerToken)
+  if (!employer) throw new Error("Работодатель не найден")
+
+  const lists = await getMailingLists()
+  const list = lists.find((l) => l.listId === listId)
+
+  await appendContactRequest({
+    listId,
+    stream: list?.stream ?? "",
+    candidateId: "",
+    employerToken,
+    employerName: employer.name,
+    employerCompany: employer.company,
+    employerEmail: employer.email,
+  })
+}
+
+export async function submitContactRequest(
+  candidateId: string,
+  listId: string,
+  employerToken: string,
+): Promise<void> {
+  if (!employerToken) throw new Error("Токен работодателя не найден в URL")
+
+  const employer = await getEmployerByToken(employerToken)
+  if (!employer) throw new Error("Работодатель не найден")
+
+  const lists = await getMailingLists()
+  const list = lists.find((l) => l.listId === listId)
+
+  await appendContactRequest({
+    listId,
+    stream: list?.stream ?? "",
+    candidateId,
+    employerToken,
+    employerName: employer.name,
+    employerCompany: employer.company,
+    employerEmail: employer.email,
+  })
 }

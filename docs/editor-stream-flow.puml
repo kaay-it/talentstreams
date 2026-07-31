@@ -23,6 +23,7 @@ participant "Sheets · Streams"      as sh_streams  #d0e8ff
 participant "Sheets · Candidates"   as sh_cands    #d0e8ff
 participant "Sheets · Mailing lists" as sh_mail    #d0e8ff
 participant "Sheets · Employers"    as sh_emp      #d0e8ff
+participant "Sheets · Contact Requests" as sh_contact #d0e8ff
 participant "SendPulse\n(мастер-книга)" as sp_master  #fce8cc
 participant "SendPulse\n(книга стрима)" as sp_stream  #fce8cc
 participant "SendPulse\nCampaigns"  as sp_camp     #fce8cc
@@ -158,14 +159,60 @@ note over app, employer
   поисковым роботам
 end note
 
-== 6. Работодатель запрашивает контакт ==
+== 6. Работодатель запрашивает контакт по кандидату ==
 
-employer -> app : Нажимает «Хочу связаться» под карточкой
-note over app
-  TASK-01: запрос сохраняется в Sheets
-  «Contact Requests», admin уведомляется.
-  Пока — заглушка (UI готов).
+employer -> app : Нажимает «Хочу связаться» под карточкой кандидата
+app -> app : submitContactRequest(candidateId, listId, employerToken)
+app -> sh_emp : getEmployerByToken(employerToken)
+sh_emp --> app : { name, company, email, … }
+app -> sh_mail : getMailingLists() → stream для listId
+sh_mail --> app : { stream: "Finance", … }
+app -> sh_contact : appendContactRequest()\n{ ID: uuid, Timestamp, ListID, stream,\n  candidateId, employerToken, name, company, email,\n  Status: "Новый запрос" }
+sh_contact --> app : OK
+app --> employer : «Запрос отправлен — мы свяжемся с кандидатом»
+
+note over sh_contact
+  Лист «Contact Requests»:
+  ─────────────────────────────────────────────────────────────────────────────
+  ID (UUID) | Timestamp | List ID | Stream  | Candidate ID | Employer Token | … | Status
+  e7f2a1…   | 31.07.26  | f04a9b… | Finance | a3f8e2c1-…   | 8f3a1c…        | … | Новый запрос
 end note
-app --> employer : «Запрос отправлен — мы уточним интерес кандидата»
+
+== 7. Работодатель оставляет общий запрос ==
+
+note over employer, app
+  Блок «Не нашли подходящих кандидатов?»
+  отображается в нижней части страницы подборки
+  только при наличии employerToken (?e=)
+end note
+
+employer -> app : Нажимает «Связаться с нами»
+app -> app : submitGeneralInquiry(listId, employerToken)
+app -> sh_emp : getEmployerByToken(employerToken)
+sh_emp --> app : { name, company, email, … }
+app -> sh_contact : appendContactRequest()\n{ ID: uuid, Timestamp, ListID, stream,\n  candidateId: "", employerToken, name, company, email,\n  Status: "Новый запрос" }
+sh_contact --> app : OK
+app --> employer : «Запрос принят — мы свяжемся с вами»
+
+note over sh_contact
+  candidateId пуст — признак «Общего запроса»
+  Отображается в редакторе отдельно
+  от запросов «По кандидатам»
+end note
+
+== 8. Редактор обрабатывает запросы ==
+
+editor -> app : GET /editor/requests?secret=…
+app -> sh_contact : getContactRequests()
+app -> sh_cands : getProfiles()
+sh_contact --> app : список запросов
+sh_cands --> app : профили кандидатов
+app --> editor : Раздел «Запросы»:\n«Общие запросы» (candidateId пуст, 3 статуса:\nНовый запрос / Взяли в работу / Завершён)\nи «По кандидатам» (7 статусов:\nНовый запрос, Кандидату написали,\nКандидат не отвечает, Связаться с Аленой,\nКандидату интересно, Кандидату не интересно,\nКонтакты переданы)
+
+editor -> app : Меняет статус через выпадающий список
+app -> app : setContactRequestStatus(rowIndex, status)
+app -> sh_contact : updateContactRequestStatus(rowIndex, status)
+sh_contact --> app : OK
+app --> editor : Страница обновлена (revalidatePath)
 
 @enduml

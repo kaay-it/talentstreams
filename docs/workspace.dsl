@@ -31,7 +31,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         editorLayout = component "EditorLayout (/editor/*)" "Общий макет редактора: боковое меню с разделами. Каждый подмаршрут независимо защищён EDITOR_SECRET." "Next.js Layout" "Page"
 
-        editorNav = component "EditorNav" "Боковая навигация редактора: читает ?secret= из URL и передаёт во все ссылки при переходе. Разделы: Выпуски, Работодатели, Настройки." "React Client Component" "UI"
+        editorNav = component "EditorNav" "Боковая навигация редактора: читает ?secret= из URL и передаёт во все ссылки при переходе. Разделы: Выпуски, Работодатели, Запросы, Настройки." "React Client Component" "UI"
 
         releasesPage = component "ReleasesPage (/editor)" "Список выпусков: стрим, дата, кандидаты, история кампаний, кнопка рассылки, проверка пустой адресной книги, ссылка на подборку с секретом." "Next.js Server Component" "Page"
 
@@ -46,19 +46,25 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         profileView = component "ProfileView" "Полная карточка профиля: имя, роль, bio, контакты, теги стримов, дополнительные поля. Кнопка «назад»." "React Client Component" "UI"
 
-        contactButton = component "ContactButton" "Кнопка «Хочу связаться» на карточке подборки. Заглушка — TASK-01." "React Client Component" "UI"
+        contactButton = component "ContactButton" "Кнопка «Хочу связаться» на карточке подборки. Вызывает `submitContactRequest`, записывает запрос в лист «Contact Requests». Без токена — неактивна." "React Client Component" "UI"
 
         employerSection = component "EmployerSection" "Секция редактора: три коллапсируемые группы работодателей (На проверке / Отклонён / Подтверждён). Кнопки «Подтвердить» и «Отклонить»." "React Client Component" "UI"
 
         publishButton = component "PublishButton" "Кнопка запуска рассылки. Отключена если адресная книга пуста. Показывает статус кампании." "React Client Component" "UI"
 
+        requestsPage = component "RequestsPage (/editor/requests)" "Управление запросами: два раздела — «Общие запросы» (без кандидата, 3 статуса) и «По кандидатам» (7 статусов). Выпадающий список для смены статуса." "Next.js Server Component" "Page"
+
+        contactRequestsSection = component "ContactRequestsSection" "Список запросов с цветными бейджами и выпадающим статусом. Разделён на «Общие запросы» и «По кандидатам»." "React Client Component" "UI"
+
+        generalInquiryButton = component "GeneralInquiryButton" "Кнопка «Связаться с нами» в блоке «Не нашли подходящих». Пишет в Contact Requests без candidateId." "React Client Component" "UI"
+
         # Server Actions
-        serverActions = component "Server Actions" "registerEmployer() — пишет со статусом «На проверке», не добавляет в SP.\nregisterCandidate() — пишет в Sheets.\npublishMailingList() — создаёт кампанию в SP.\nconfirmEmployer() — сначала SP, затем статус «Подтверждён».\nrejectEmployer() — статус «Отклонён».\naddProfileColumns() — миграция колонок." "Next.js Server Actions" "Logic"
+        serverActions = component "Server Actions" "registerEmployer() — пишет со статусом «На проверке», не добавляет в SP.\nregisterCandidate() — пишет в Sheets.\npublishMailingList() — создаёт кампанию в SP.\nconfirmEmployer() — сначала SP, затем статус «Подтверждён».\nrejectEmployer() — статус «Отклонён».\naddProfileColumns() — миграция колонок.\nsubmitContactRequest() — записывает запрос по кандидату в «Contact Requests».\nsubmitGeneralInquiry() — записывает общий запрос (без candidateId).\nsetContactRequestStatus() — меняет статус запроса." "Next.js Server Actions" "Logic"
 
         publishApi = component "Publish API (/api/publish/[listId])" "HTTP-роут для запуска рассылки через curl или внешние системы. Защищён EDITOR_SECRET." "Next.js Route Handler" "Logic"
 
         # Integrations
-        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nЧтение: профили, подборки, стримы, работодатели.\nЗапись: регистрации, статусы работодателей.\nМиграция: ensureProfileColumns().\nАвтосоздание листов через ensureSheet().\ngetEmployerByToken() — поиск по токену.\nfilterCandidatesForEmployer() — фильтрация кандидатов по предпочтениям." "TypeScript, Google Sheets API v4" "Integration"
+        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nЧтение: профили, подборки, стримы, работодатели.\nЗапись: регистрации, статусы работодателей.\nМиграция: ensureProfileColumns().\nАвтосоздание листов через ensureSheet().\ngetEmployerByToken() — поиск по токену.\nfilterCandidatesForEmployer() — фильтрация кандидатов по предпочтениям.\nappendContactRequest() — запись запроса в «Contact Requests».\ngetContactRequests() — чтение запросов с динамическим маппингом колонок.\nupdateContactRequestStatus() — обновление статуса конкретной строки." "TypeScript, Google Sheets API v4" "Integration"
 
         sendPulseLib = component "SendPulse Library (lib/sendpulse.ts)" "OAuth 2.0 с кэшем токена (59 мин). Кэш адресных книг с TTL 60 с.\ngetOrCreateBook() — авто-создание книги.\ngetBookEmailCount() — проверка подписчиков до рассылки.\ncreateCampaign() / getCampaigns()." "TypeScript, SendPulse REST API" "Integration"
       }
@@ -116,6 +122,14 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     talentStreams.webApp.sheetsLib -> googleSheets "fetchSheetValues(), appendRow(), values.update()" "HTTPS, Sheets API v4"
     talentStreams.webApp.sendPulseLib -> sendPulse "POST /oauth/access_token, GET /addressbooks, POST /addressbooks/{id}/emails, POST /campaigns" "HTTPS"
+
+    talentStreams.webApp.requestsPage -> talentStreams.webApp.sheetsLib "getContactRequests(), getProfiles()"
+    talentStreams.webApp.requestsPage -> talentStreams.webApp.contactRequestsSection "Рендерит"
+    talentStreams.webApp.mailingListPage -> talentStreams.webApp.generalInquiryButton "Рендерит (при наличии токена)"
+    talentStreams.webApp.contactRequestsSection -> talentStreams.webApp.serverActions "setContactRequestStatus()"
+    talentStreams.webApp.generalInquiryButton -> talentStreams.webApp.serverActions "submitGeneralInquiry()"
+    talentStreams.webApp.contactButton -> talentStreams.webApp.serverActions "submitContactRequest()"
+    editor -> talentStreams.webApp.requestsPage "Управляет запросами"
   }
 
   views {
@@ -175,6 +189,17 @@ workspace "TalentStreams" "Платформа подборки проверен�
       talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
       talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "createCampaign(bookId, subject, html)"
       talentStreams.webApp.sendPulseLib -> sendPulse "POST /oauth/access_token → POST /campaigns"
+      autolayout lr
+    }
+
+    dynamic talentStreams.webApp "ContactRequest" "Сценарий запроса работодателя на контакт с кандидатом" {
+      talentStreams.webApp.contactButton -> talentStreams.webApp.serverActions "submitContactRequest(candidateId, listId, employerToken)"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "getEmployerByToken(token)"
+      talentStreams.webApp.sheetsLib -> googleSheets "GET Employers — поиск по token"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "getMailingLists() — получение stream"
+      talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendContactRequest({ID, Timestamp, stream, candidateId, …, Status: 'Новый запрос'})"
+      talentStreams.webApp.sheetsLib -> googleSheets "POST /values/Contact Requests!A1:append"
       autolayout lr
     }
 
