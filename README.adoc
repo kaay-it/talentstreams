@@ -1,0 +1,168 @@
+= TalentStreams
+:toc: left
+:toc-title: Содержание
+:toclevels: 2
+
+Платформа персонализированных подборок проверенных кандидатов для работодателей Центральной Азии.
+
+Работодатели получают email-рассылку с анонимными карточками кандидатов.
+Ссылка в письме персонализирована — каждый работодатель видит только тех кандидатов, кто не исключил его компанию или отрасль из своих предпочтений.
+
+== Технический стек
+
+* *Next.js 14* (App Router, Server Components, Server Actions)
+* *TypeScript*
+* *Google Sheets* — единственная база данных (Service Account API v4)
+* *SendPulse* — email-рассылки (адресные книги, кампании, merge-теги)
+* *Tailwind CSS + lucide-react*
+
+== Переменные окружения
+
+Создайте файл `.env.local` в корне проекта:
+
+[source,env]
+----
+# Google Sheets
+GOOGLE_SHEET_ID=...
+GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}
+
+# SendPulse
+SENDPULSE_CLIENT_ID=...
+SENDPULSE_CLIENT_SECRET=...
+SENDPULSE_MASTER_BOOK_NAME=Default
+SENDPULSE_FROM_EMAIL=hello@example.com
+SENDPULSE_FROM_NAME=TalentStreams
+
+# Приложение
+APP_URL=https://your-domain.com
+EDITOR_SECRET=your-secret-string
+----
+
+`EDITOR_SECRET` защищает `/editor` — без него страница возвращает 404.
+
+== Запуск локально
+
+[source,bash]
+----
+npm install
+npm run dev
+----
+
+Приложение доступно на http://localhost:3000.
+
+== Структура проекта
+
+----
+app/
+  page.tsx                   # Главная: лендинг, формы регистрации
+  list/[listId]/page.tsx     # Страница подборки (требует ?e= или ?secret=)
+  profile/[id]/page.tsx      # Полный профиль кандидата
+  editor/
+    layout.tsx               # Боковое меню редактора
+    page.tsx                 # Выпуски (Releases)
+    employers/page.tsx       # Управление работодателями
+    settings/page.tsx        # Настройки и миграция колонок
+  api/publish/[listId]/      # API-роут для curl-запуска рассылки
+  actions.ts                 # Все Server Actions
+
+lib/
+  sheets.ts                  # Google Sheets: чтение, запись, типы
+  sendpulse.ts               # SendPulse: OAuth, книги, кампании
+
+components/
+  employer-registration-modal.tsx   # Форма работодателя
+  candidate-registration-modal.tsx  # Форма кандидата
+  employer-section.tsx              # UI подтверждения/отклонения заявок
+  contact-button.tsx                # Кнопка «Хочу связаться»
+  publish-button.tsx                # Кнопка запуска рассылки
+  editor-nav.tsx                    # Боковая навигация редактора
+
+docs/
+  spec.adoc                  # Техническое задание
+  backlog.adoc               # Задачи: выполненные и активные
+  workspace.dsl              # C4-архитектура (Structurizr)
+  editor-stream-flow.puml    # Sequence-диаграмма жизненного цикла стрима
+----
+
+== Google Sheets — структура листов
+
+Все листы создаются автоматически при первой записи.
+Листы `Candidates` и `Mailing lists` заполняются редактором вручную.
+
+=== Candidates (основной лист)
+
+Обязательные колонки: `id`, `name`, `stream`.
+Дополнительные добавляются кнопкой *«Добавить колонки»* в `/editor/settings`:
+`Level`, `Industry`, `Function`, `Country Primary`, `Country Desired`, `Summary`,
+`Excluded Companies`, `Excluded Industries`.
+
+=== Mailing lists
+
+`List ID` (UUID), `Stream`, `Date`, `Candidate ID` — по одной строке на кандидата в выпуске.
+
+=== Employers
+
+`ID` (UUID = employer token), `Timestamp`, `Name`, `Company`, `Email`, `Phone`,
+`Primary Contact`, `Telegram`, `LinkedIn`, `Streams`, `Status`.
+
+Статус: `На проверке` → `Подтверждён` / `Отклонён`.
+При подтверждении работодатель добавляется в SendPulse с переменной `employer_token`.
+
+=== Streams
+
+Одна колонка: названия стримов, по одному на строку.
+Используется для формирования выпадающего списка в форме регистрации.
+
+== Доступ к подборке `/list/[listId]`
+
+|===
+| Параметр | Результат
+
+| `?e=[employer_token]`
+| Персонализированная подборка: кандидаты фильтруются по предпочтениям работодателя
+
+| `?secret=[EDITOR_SECRET]`
+| Все кандидаты без фильтрации (просмотр редактора)
+
+| *(без параметров)*
+| 404
+|===
+
+== Добавление новой функциональности
+
+=== Новое поле в профиле кандидата
+
+. Добавьте ключ в массив `KNOWN_KEYS` (`lib/sheets.ts`).
+. Добавьте поле в тип `Profile` (`lib/sheets.ts`).
+. Добавьте алиасы в `HEADER_ALIASES` (английское и русское название заголовка).
+. Заполните поле в `buildProfile`.
+. Если колонку нужно создавать автоматически — добавьте название в `DISTRIBUTION_COLUMNS`.
+
+=== Новый Server Action
+
+Добавьте async-функцию с директивой `"use server"` в `app/actions.ts`.
+Для мутаций, которые должны обновить UI редактора, вызывайте `revalidatePath("/editor")`.
+
+=== Новый раздел редактора
+
+. Создайте `app/editor/<раздел>/page.tsx` с проверкой `EDITOR_SECRET`.
+. Добавьте пункт в массив `NAV_ITEMS` в `components/editor-nav.tsx`.
+
+=== Новая SendPulse-переменная контакта
+
+Добавьте ключ в объект `variables` внутри `addToSendPulse` (`app/actions.ts`).
+В шаблоне письма используйте `{{имя_переменной}}`.
+
+== Документация
+
+* `docs/spec.adoc` — полное техническое задание с описанием всех сценариев
+* `docs/backlog.adoc` — список задач с приоритетами и зависимостями
+* `docs/workspace.dsl` — C4-модель (открывается в https://structurizr.com/dsl[Structurizr DSL])
+* `docs/editor-stream-flow.puml` — PlantUML sequence-диаграмма
+
+== Запуск рассылки через API
+
+[source,bash]
+----
+curl "https://your-domain.com/api/publish/{listId}?token={EDITOR_SECRET}"
+----

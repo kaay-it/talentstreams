@@ -8,7 +8,7 @@ export default function NotFound() {
         <p className="font-mono text-sm font-medium text-primary">404</p>
         <h1 className="mt-3 text-2xl font-semibold tracking-tight text-foreground">Страница не найдена</h1>
         <p className="mx-auto mt-2 max-w-sm text-pretty text-muted-foreground">
-          Такого профиля нет в таблице, либо ссылка устарела.
+          Страница недоступна: ссылка устарела, подборка закрыта или у вас нет прав для просмотра.
         </p>
         <Link
           href="/"
