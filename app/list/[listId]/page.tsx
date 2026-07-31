@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft, CalendarDays, MapPin } from "lucide-react"
-import { getMailingList, isSheetsConfigured, type MailingListEntry } from "@/lib/sheets"
+import { getMailingList, getEmployerByToken, filterCandidatesForEmployer, isSheetsConfigured, type MailingListEntry } from "@/lib/sheets"
 import { ContactButton } from "@/components/contact-button"
 
 export const dynamic = "force-dynamic"
@@ -22,10 +22,17 @@ export async function generateMetadata({
 
 export default async function MailingListPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ listId: string }>
+  searchParams: Promise<{ e?: string; secret?: string }>
 }) {
-  const { listId } = await params
+  const [{ listId }, { e: employerToken, secret }] = await Promise.all([params, searchParams])
+
+  const editorSecret = process.env.EDITOR_SECRET
+  const isEditor = editorSecret && secret === editorSecret
+
+  if (!employerToken && !isEditor) notFound()
 
   if (!isSheetsConfigured()) notFound()
 
@@ -38,7 +45,16 @@ export default async function MailingListPage({
 
   if (!mailingList) notFound()
 
-  const { date, entries } = mailingList
+  let entries: MailingListEntry[] = mailingList.entries
+  const { date } = mailingList
+
+  if (!isEditor && employerToken) {
+    const employer = await getEmployerByToken(employerToken)
+    if (!employer) notFound()
+    const filtered = filterCandidatesForEmployer(entries.map((e) => e.profile), employer)
+    const filteredIds = new Set(filtered.map((p) => p.id))
+    entries = entries.filter((e) => filteredIds.has(e.profile.id))
+  }
 
   return (
     <main className="min-h-svh bg-background">
@@ -82,7 +98,7 @@ export default async function MailingListPage({
 
         <div className="grid gap-4">
           {entries.map((entry) => (
-            <EntryCard key={entry.profile.id} entry={entry} listId={listId} />
+            <EntryCard key={entry.profile.id} entry={entry} listId={listId} employerToken={employerToken} />
           ))}
         </div>
       </div>
@@ -90,7 +106,7 @@ export default async function MailingListPage({
   )
 }
 
-function EntryCard({ entry, listId }: { entry: MailingListEntry; listId: string }) {
+function EntryCard({ entry, listId, employerToken }: { entry: MailingListEntry; listId: string; employerToken?: string }) {
   const { profile } = entry
 
   const tags = [profile.level, profile.industry, profile.func].filter(Boolean)
@@ -138,7 +154,7 @@ function EntryCard({ entry, listId }: { entry: MailingListEntry; listId: string 
       )}
 
       <div className="mt-5 border-t pt-4">
-        <ContactButton candidateId={profile.id} listId={listId} />
+        <ContactButton candidateId={profile.id} listId={listId} employerToken={employerToken} />
       </div>
     </article>
   )

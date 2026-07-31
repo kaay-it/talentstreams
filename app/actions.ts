@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { appendEmployerRow, appendCandidateRow, getMailingList, ensureProfileColumns, updateEmployerStatus, type Employer } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, getMailingList, ensureProfileColumns, updateEmployerStatus, getEmployers, type Employer } from "@/lib/sheets"
 import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -133,9 +133,9 @@ function buildEmailHtml(stream: string, date: string, url: string, count: number
 
       <tr>
         <td style="padding:16px 32px;background:#f8fafc;border-top:1px solid #f1f5f9">
-          <p style="margin:0;font-size:11px;color:#94a3b8;line-height:1.6;word-break:break-all;font-family:${font}">
-            Если кнопка не открывается, скопируйте ссылку:<br>
-            <a href="${url}" style="color:#94a3b8;text-decoration:underline">${url}</a>
+          <p style="margin:0;font-size:11px;color:#94a3b8;line-height:1.6;font-family:${font}">
+            Если кнопка не открывается —
+            <a href="${url}" style="color:#94a3b8;text-decoration:underline">открыть в браузере</a>.
           </p>
         </td>
       </tr>
@@ -213,7 +213,7 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
 
   const bookId = await getOrCreateBook(list.stream, token)
   const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
-  const listUrl = `${appUrl}/list/${listId}`
+  const listUrl = `${appUrl}/list/${listId}?e={{employer_token}}`
   const subject = `Talent Stream: ${list.stream} — выпуск ${list.date}`
   const campaignName = `${list.stream} — ${list.date}`
   const html = buildEmailHtml(list.stream, list.date, listUrl, list.entries.length)
@@ -266,26 +266,41 @@ export async function registerEmployer(data: EmployerData): Promise<void> {
     throw new Error("Укажите LinkedIn-профиль")
   }
 
-  await appendEmployerRow([
-    new Date().toISOString(),
-    data.name,
-    data.company,
-    data.email,
-    data.phone,
-    data.primaryContact,
-    data.telegram || "",
-    data.linkedin || "",
-    data.streams.join(", "),
-    "На проверке",
-  ])
+  const existing = await getEmployers()
+  const active = existing.filter((e) => e.status === "На проверке" || e.status === "Подтверждён")
+  const emailNorm = data.email.trim().toLowerCase()
+  const digitsOnly = (p: string) => p.replace(/\D/g, "")
+  const phoneNorm = digitsOnly(data.phone)
+
+  if (active.some((e) => e.email.toLowerCase() === emailNorm)) {
+    throw new Error("Работодатель с таким email уже зарегистрирован")
+  }
+  if (phoneNorm && active.some((e) => digitsOnly(e.phone) === phoneNorm)) {
+    throw new Error("Работодатель с таким номером телефона уже зарегистрирован")
+  }
+
+  await appendEmployerRow({
+    "ID": crypto.randomUUID(),
+    "Timestamp": new Date().toISOString(),
+    "Name": data.name,
+    "Company": data.company,
+    "Email": data.email,
+    "Phone": data.phone,
+    "Primary Contact": data.primaryContact,
+    "Telegram": data.telegram || "",
+    "LinkedIn": data.linkedin || "",
+    "Streams": data.streams.join(", "),
+    "Status": "На проверке",
+  })
 }
 
-export async function confirmEmployer(rowIndex: number, employer: Pick<Employer, "name" | "email" | "phone" | "telegram" | "linkedin" | "primaryContact" | "streams">): Promise<void> {
+export async function confirmEmployer(rowIndex: number, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "telegram" | "linkedin" | "primaryContact" | "streams">): Promise<void> {
   await addToSendPulse(employer.name, employer.email, employer.phone, {
     ...(employer.telegram && { Telegram: employer.telegram }),
     ...(employer.linkedin && { LinkedIn: employer.linkedin }),
     "Primary Contact": employer.primaryContact,
     Streams: employer.streams.join(", "),
+    ...(employer.token && { employer_token: employer.token }),
   })
   // TASK-10: send welcome email after confirmation
   await updateEmployerStatus(rowIndex, "Подтверждён")

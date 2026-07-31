@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Handshake } from "lucide-react"
 
-export function ContactButton({ candidateId, listId }: { candidateId: string; listId: string }) {
+export function ContactButton({ candidateId, listId, employerToken }: { candidateId: string; listId: string; employerToken?: string }) {
   const [sent, setSent] = useState(false)
 
   if (sent) {
