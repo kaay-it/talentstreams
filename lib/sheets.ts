@@ -31,6 +31,10 @@ export type Profile = {
   countryDesired: string
   /** Anonymized free-text description written by the editor (no personal data). */
   summary: string
+  /** Company names the candidate does not want to be shown to (comma-separated). */
+  excludedCompanies: string[]
+  /** Industry tags the candidate does not want to be shown to (comma-separated). */
+  excludedIndustries: string[]
   /** Any additional columns from the sheet, keyed by header name. */
   extra: Record<string, string>
 }
@@ -166,6 +170,7 @@ async function fetchSheetValues(sheetId: string, range: string): Promise<string[
 const KNOWN_KEYS = [
   "id", "name", "title", "bio", "email", "phone", "website", "location", "stream",
   "level", "industry", "func", "countryPrimary", "countryDesired", "summary",
+  "excludedCompanies", "excludedIndustries",
 ]
 
 const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
@@ -196,6 +201,10 @@ const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   "желаемая страна": "countryDesired",
   summary: "summary",
   саммари: "summary",
+  "excluded companies": "excludedCompanies",
+  "исключённые компании": "excludedCompanies",
+  "excluded industries": "excludedIndustries",
+  "исключённые отрасли": "excludedIndustries",
 }
 
 function mapHeader(header: string): string {
@@ -252,6 +261,8 @@ function buildProfile(headers: string[], row: string[]): Profile {
     countryPrimary: record.countryPrimary || "",
     countryDesired: record.countryDesired || "",
     summary: record.summary || "",
+    excludedCompanies: parseMultiValue(record.excludedCompanies || ""),
+    excludedIndustries: parseMultiValue(record.excludedIndustries || ""),
     extra,
   }
 }
@@ -456,11 +467,36 @@ async function appendRow(sheetTitle: string, headers: string[], values: string[]
   }
 }
 
-const EMPLOYERS_HEADERS = ["Timestamp", "Name", "Company", "Email", "Phone", "Primary Contact", "Telegram", "LinkedIn", "Streams", "Status"]
+const EMPLOYERS_HEADERS = ["ID", "Timestamp", "Name", "Company", "Email", "Phone", "Primary Contact", "Telegram", "LinkedIn", "Streams", "Status"]
 const CANDIDATES_HEADERS = ["Timestamp", "Name", "Email", "Phone", "Resume URL", "Cover Letter"]
 
-export async function appendEmployerRow(values: string[]): Promise<void> {
-  await appendRow("Employers", EMPLOYERS_HEADERS, values)
+/** Append an employer row, mapping field names to actual column positions in the sheet. */
+export async function appendEmployerRow(data: Record<string, string>): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  await ensureSheet(sheetId, token, "Employers", EMPLOYERS_HEADERS)
+
+  // Read actual header row to determine column order
+  const headerRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Employers'!A1:Z1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  const headerData = (await headerRes.json()) as { values?: string[][] }
+  const headers = (headerData.values?.[0] ?? []).map((h) => h.trim())
+
+  const values = headers.map((h) => data[h] ?? "")
+
+  const range = encodeURIComponent("Employers!A1")
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}:append` +
+    `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ values: [values] }),
+  })
+  if (!res.ok) throw new Error(`Sheets append failed (${res.status}): ${await res.text()}`)
 }
 
 export async function appendCandidateRow(values: string[]): Promise<void> {
@@ -519,6 +555,7 @@ export type EmployerStatus = "На проверке" | "Подтверждён" 
 
 export type Employer = {
   rowIndex: number
+  token: string
   name: string
   company: string
   email: string
@@ -533,6 +570,7 @@ export type Employer = {
 function parseEmployerRows(values: string[][]): Employer[] {
   if (values.length < 2) return []
   const headers = values[0].map((h) => (h ?? "").trim().toLowerCase())
+  const idIdx = headers.indexOf("id")
   const nameIdx = headers.indexOf("name")
   const companyIdx = headers.indexOf("company")
   const emailIdx = headers.indexOf("email")
@@ -547,6 +585,7 @@ function parseEmployerRows(values: string[][]): Employer[] {
 
   return values.slice(1).map((row, i) => ({
     rowIndex: i + 2, // row 1 is header
+    token: idIdx >= 0 ? (row[idIdx] ?? "").trim() : "",
     name: nameIdx >= 0 ? (row[nameIdx] ?? "").trim() : "",
     company: companyIdx >= 0 ? (row[companyIdx] ?? "").trim() : "",
     email: emailIdx >= 0 ? (row[emailIdx] ?? "").trim() : "",
@@ -563,11 +602,37 @@ function parseEmployerRows(values: string[][]): Employer[] {
 export async function getEmployers(): Promise<Employer[]> {
   const { sheetId } = getEnv()
   try {
-    const values = await fetchSheetValues(sheetId, "'Employers'!A1:J1000")
+    const values = await fetchSheetValues(sheetId, "'Employers'!A1:L1000")
     return parseEmployerRows(values)
   } catch {
     return []
   }
+}
+
+/** Find a single employer by their token (ID column). Returns undefined if not found. */
+export async function getEmployerByToken(token: string): Promise<Employer | undefined> {
+  if (!token) return undefined
+  const employers = await getEmployers()
+  return employers.find((e) => e.token === token)
+}
+
+/**
+ * Filter candidates for a specific employer, removing those who have excluded
+ * the employer's company or industry from their preferences.
+ */
+export function filterCandidatesForEmployer(candidates: Profile[], employer: Employer): Profile[] {
+  const companyLower = employer.company.trim().toLowerCase()
+  const industryLower = employer.streams.map((s) => s.trim().toLowerCase())
+
+  return candidates.filter((c) => {
+    if (companyLower && c.excludedCompanies.some((ec) => ec.toLowerCase() === companyLower)) {
+      return false
+    }
+    if (industryLower.length && c.excludedIndustries.some((ei) => industryLower.includes(ei.toLowerCase()))) {
+      return false
+    }
+    return true
+  })
 }
 
 /** Fetch all employers subscribed to a given stream from the Employers sheet. */
@@ -615,7 +680,7 @@ export function isSheetsConfigured(): boolean {
 
 // ── Profile column migration ──────────────────────────────────────────────────
 
-const DISTRIBUTION_COLUMNS = ["Level", "Industry", "Function", "Country Primary", "Country Desired", "Summary"]
+const DISTRIBUTION_COLUMNS = ["Level", "Industry", "Function", "Country Primary", "Country Desired", "Summary", "Excluded Companies", "Excluded Industries"]
 
 function colLetter(n: number): string {
   let s = ""

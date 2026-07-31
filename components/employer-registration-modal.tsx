@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
-import { X, Check } from "lucide-react"
+import { X, Check, AlertCircle } from "lucide-react"
 import { registerEmployer, type EmployerData } from "@/app/actions"
 
 const CONTACT_OPTIONS = [
@@ -304,9 +304,10 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                   </Field>
 
                   {status === "error" && (
-                    <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                      {errorMsg}
-                    </p>
+                    <div className="flex items-start gap-2.5 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
+                      <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+                      <p className="text-sm font-medium text-destructive">{errorMsg}</p>
+                    </div>
                   )}
 
                   <button

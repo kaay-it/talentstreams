@@ -48,7 +48,7 @@ app --> employer : Форма с выбором стримов
 
 employer -> app : Заполняет форму\n{ имя, компания, email, телефон,\n  способ связи, Telegram, LinkedIn,\n  streams: ["Finance"] }
 
-app -> sh_emp : appendEmployerRow([..., Status: "На проверке"])
+app -> sh_emp : appendEmployerRow({ ID: uuid, …, Status: "На проверке" })
 sh_emp --> app : OK
 
 app --> employer : «Заявка отправлена — ожидайте подтверждения»
@@ -56,8 +56,8 @@ app --> employer : «Заявка отправлена — ожидайте по
 note over sh_emp
   Лист «Employers»:
   ───────────────────────────────────────────────────────────────
-  Timestamp | Name    | Company | … | Streams  | Status
-  21.07.26  | Alisher | Uzum    | … | Finance  | На проверке
+  ID (UUID)   | Timestamp | Name    | Company | … | Streams  | Status
+  8f3a1c…     | 21.07.26  | Alisher | Uzum    | … | Finance  | На проверке
 end note
 
 == 2а. Редактор подтверждает работодателя ==
@@ -68,9 +68,9 @@ sh_emp --> app : список с Status=«На проверке»
 app --> editor : Группа «На проверке» (раскрыта)
 
 editor -> app : confirmEmployer(rowIndex, employerData)
-app -> sp_master : POST /addressbooks/MASTER/emails\n{ email, variables: { Имя, phone, … } }
+app -> sp_master : POST /addressbooks/MASTER/emails\n{ email, variables: { Имя, phone, employer_token: UUID, … } }
 sp_master --> app : { "result": true }
-app -> sp_stream : POST /addressbooks/FINANCE_BOOK/emails\n{ email, variables: { Имя, phone, … } }
+app -> sp_stream : POST /addressbooks/FINANCE_BOOK/emails\n{ email, variables: { Имя, phone, employer_token: UUID, … } }
 sp_stream --> app : { "result": true }
 app -> sh_emp : updateEmployerStatus(rowIndex, "Подтверждён")
 sh_emp --> app : OK
@@ -120,23 +120,38 @@ app --> editor : «Кампания #12345 запущена»
 
 == 4а. SendPulse доставляет письма подписчикам ==
 
-sp_camp -> employer : Email «Talent Stream: Finance — 21.07.2026»\nСсылка: /list/f04a9b3e-…\n({{Имя}} заменяется на имя получателя)
+sp_camp -> employer : Email «Talent Stream: Finance — 21.07.2026»\nСсылка: /list/f04a9b3e-…?e={{employer_token}}\n({{Имя}} и {{employer_token}} заменяются на значения получателя)
 
 note right of sp_camp
   SendPulse рассылает письма
   всем подтверждённым контактам в книге «Finance»
-  UUID в URL непредсказуем —
-  подобрать чужую подборку нельзя
+  Каждый получатель видит ссылку со своим токеном —
+  подборка персонализирована и закрыта от посторонних
 end note
 
 == 5. Работодатель просматривает подборку ==
 
-employer -> app : GET /list/f04a9b3e-2c7d-4e1f-b8a0-3d6c9e5f1027
+alt ?e=[token] — персонализированный доступ работодателя
+employer -> app : GET /list/f04a9b3e-…?e=8f3a1c…
+app -> sh_emp : getEmployerByToken("8f3a1c…")
+sh_emp --> app : { name, company, industry, … }
 app -> sh_mail : getMailingList("f04a9b3e-…")
 sh_mail --> app : { stream, date, candidate_ids: [UUID, UUID] }
 app -> sh_cands : getProfiles() → фильтр по candidate_ids
 sh_cands --> app : профили кандидатов
+app -> app : filterCandidatesForEmployer(candidates, employer)\n(in-memory: исключает по excludedCompanies/excludedIndustries)
 app --> employer : Страница выпуска: анонимные карточки\n(должность, теги, страна, summary)\nБез имён и контактов. Кнопка «Хочу связаться».
+else ?secret=[EDITOR_SECRET] — доступ редактора (все кандидаты)
+editor -> app : GET /list/f04a9b3e-…?secret=…
+app -> sh_mail : getMailingList("f04a9b3e-…")
+sh_mail --> app : { stream, date, candidate_ids: [UUID, UUID] }
+app -> sh_cands : getProfiles() → фильтр по candidate_ids
+sh_cands --> app : все профили (без фильтрации)
+app --> editor : Страница выпуска: все кандидаты без исключений
+else без параметров — 404
+employer -> app : GET /list/f04a9b3e-… (без токена)
+app --> employer : 404 Not Found
+end
 
 note over app, employer
   Страница noindex — недоступна

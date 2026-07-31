@@ -1,15 +1,13 @@
 import { notFound } from "next/navigation"
-import { CalendarDays, Users, Layers, CheckCircle2, UserCheck } from "lucide-react"
-import { getMailingLists, getEmployers } from "@/lib/sheets"
+import { CalendarDays, Users, Info, CheckCircle2 } from "lucide-react"
+import { getMailingLists } from "@/lib/sheets"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
 import { CampaignHistory } from "@/components/campaign-history"
-import { AddColumnsButton } from "@/components/add-columns-button"
-import { EmployerSection } from "@/components/employer-section"
 
 export const dynamic = "force-dynamic"
 
-export default async function EditorPage({
+export default async function ReleasesPage({
   searchParams,
 }: {
   searchParams: Promise<{ secret?: string }>
@@ -21,7 +19,7 @@ export default async function EditorPage({
     notFound()
   }
 
-  const [lists, campaigns, employers] = await Promise.all([getMailingLists(), getCampaigns(), getEmployers()])
+  const [lists, campaigns] = await Promise.all([getMailingLists(), getCampaigns()])
 
   const campaignsByTitle = new Map<string, Campaign[]>()
   for (const c of campaigns) {
@@ -41,104 +39,82 @@ export default async function EditorPage({
     )
   }
 
-
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-card px-6 py-4">
-        <div className="mx-auto max-w-4xl flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">TalentStreams</p>
-            <h1 className="text-lg font-semibold text-card-foreground">Редактор выпусков</h1>
-          </div>
-          <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">
-            {lists.length} {mailingPlural(lists.length)}
-          </span>
+    <div className="px-6 py-8 max-w-3xl">
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-lg font-semibold">Выпуски</h1>
+        <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">
+          {lists.length} {mailingPlural(lists.length)}
+        </span>
+      </div>
+
+      <div className="mb-6 flex items-start gap-2 rounded-xl border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
+        <Info className="mt-0.5 size-4 shrink-0" />
+        <p>
+          Выпуски формируются вручную в Google Sheets (лист «Mailing lists»).
+          Кнопка «Отправить» создаёт кампанию в SendPulse и рассылает письмо всем работодателям стрима.
+          Убедитесь, что заданы переменные окружения <code>APP_URL</code>, <code>SENDPULSE_FROM_EMAIL</code> и <code>SENDPULSE_FROM_NAME</code>.
+        </p>
+      </div>
+
+      {lists.length === 0 ? (
+        <div className="rounded-xl border border-dashed p-12 text-center text-muted-foreground">
+          Подборок пока нет. Добавьте строки в лист «Mailing lists» в Google Sheets.
         </div>
-      </header>
-
-      <main className="mx-auto max-w-4xl px-6 py-8">
-        {lists.length === 0 ? (
-          <div className="rounded-xl border border-dashed p-12 text-center text-muted-foreground">
-            Подборок пока нет. Добавьте строки в лист «Mailing lists» в Google Sheets.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {lists.map((list) => {
-              const campaignTitle = `${list.stream} — ${list.date}`
-              const matchedCampaigns = campaignsByTitle.get(campaignTitle) ?? []
-              const alreadySent = matchedCampaigns.length > 0
-              const bookEmpty = (streamBookCounts.get(list.stream) ?? 0) === 0
-              return (
-                <div
-                  key={list.listId}
-                  className="rounded-xl border bg-card overflow-hidden"
-                >
-                  <div className="flex items-center gap-4 px-5 py-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-                          {list.stream || "—"}
-                        </span>
-                        {list.date && (
-                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                            <CalendarDays className="size-3" />
-                            {list.date}
-                          </span>
-                        )}
+      ) : (
+        <div className="space-y-3">
+          {lists.map((list) => {
+            const campaignTitle = `${list.stream} — ${list.date}`
+            const matchedCampaigns = campaignsByTitle.get(campaignTitle) ?? []
+            const alreadySent = matchedCampaigns.length > 0
+            const bookEmpty = (streamBookCounts.get(list.stream) ?? 0) === 0
+            return (
+              <div key={list.listId} className="rounded-xl border bg-card overflow-hidden">
+                <div className="flex items-center gap-4 px-5 py-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                        {list.stream || "—"}
+                      </span>
+                      {list.date && (
                         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                          <Users className="size-3" />
-                          {list.candidateCount} {candidatePlural(list.candidateCount)}
+                          <CalendarDays className="size-3" />
+                          {list.date}
                         </span>
-                        {alreadySent && (
-                          <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
-                            <CheckCircle2 className="size-3" />
-                            Отправлено
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                        <a
-                          href={`/list/${list.listId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:text-foreground hover:underline"
-                        >
-                          /list/{list.listId}
-                        </a>
-                      </p>
+                      )}
+                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                        <Users className="size-3" />
+                        {list.candidateCount} {candidatePlural(list.candidateCount)}
+                      </span>
+                      {alreadySent && (
+                        <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
+                          <CheckCircle2 className="size-3" />
+                          Отправлено
+                        </span>
+                      )}
                     </div>
-
-                    <PublishButton listId={list.listId} alreadySent={alreadySent} bookEmpty={bookEmpty} />
+                    <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                      <a
+                        href={`/list/${list.listId}${editorSecret ? `?secret=${editorSecret}` : ""}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:text-foreground hover:underline"
+                      >
+                        /list/{list.listId}
+                      </a>
+                    </p>
                   </div>
 
-                  <CampaignHistory campaigns={matchedCampaigns} />
+                  <PublishButton listId={list.listId} alreadySent={alreadySent} bookEmpty={bookEmpty} />
                 </div>
-              )
-            })}
-          </div>
-        )}
 
-        <section className="mt-8">
-          <div className="mb-3 flex items-center gap-2">
-            <UserCheck className="size-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Работодатели</h2>
-          </div>
-          <EmployerSection employers={employers} />
-        </section>
-
-        <div className="mt-8 rounded-xl border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
-          <div className="flex items-start gap-2">
-            <Layers className="mt-0.5 size-4 shrink-0" />
-            <div className="space-y-1">
-              <p>Кнопка «Отправить» рассылает письмо всем работодателям, подписанным на стрим этого выпуска.</p>
-              <p>Убедитесь, что в переменных окружения заданы <code>APP_URL</code>, <code>SENDPULSE_FROM_EMAIL</code> и <code>SENDPULSE_FROM_NAME</code>.</p>
-              <div className="pt-1 border-t border-border/50">
-                <AddColumnsButton />
+                <CampaignHistory campaigns={matchedCampaigns} />
               </div>
-            </div>
-          </div>
+            )
+          })}
         </div>
-      </main>
+      )}
+
     </div>
   )
 }

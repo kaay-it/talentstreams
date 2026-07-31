@@ -25,11 +25,19 @@ workspace "TalentStreams" "Платформа подборки проверен�
         # Pages (Server Components)
         homePage = component "HomePage (/)" "Лендинг: описание сервиса, формы регистрации работодателя и кандидата, список стримов с сервера" "Next.js Server Component" "Page"
 
-        mailingListPage = component "MailingListPage (/list/[listId])" "Страница подборки: анонимные карточки кандидатов (без имён и контактов), теги, summary, disclaimer. Noindex." "Next.js Server Component" "Page"
+        mailingListPage = component "MailingListPage (/list/[listId])" "Страница подборки: анонимные карточки кандидатов (без имён и контактов), теги, summary, disclaimer. Noindex. Доступ: ?e=[token] → персонализированная подборка с фильтрацией; ?secret=[EDITOR_SECRET] → все кандидаты; без параметров → 404." "Next.js Server Component" "Page"
 
         profilePage = component "ProfilePage (/profile/[id])" "Полный профиль кандидата. Недоступна со страниц подборок. Noindex." "Next.js Server Component" "Page"
 
-        editorPage = component "EditorPage (/editor)" "Редактор: список выпусков (стрим, дата, кандидаты, история кампаний, кнопка публикации), секция подтверждения работодателей. Защищён EDITOR_SECRET." "Next.js Server Component" "Page"
+        editorLayout = component "EditorLayout (/editor/*)" "Общий макет редактора: боковое меню с разделами. Каждый подмаршрут независимо защищён EDITOR_SECRET." "Next.js Layout" "Page"
+
+        editorNav = component "EditorNav" "Боковая навигация редактора: читает ?secret= из URL и передаёт во все ссылки при переходе. Разделы: Выпуски, Работодатели, Настройки." "React Client Component" "UI"
+
+        releasesPage = component "ReleasesPage (/editor)" "Список выпусков: стрим, дата, кандидаты, история кампаний, кнопка рассылки, проверка пустой адресной книги, ссылка на подборку с секретом." "Next.js Server Component" "Page"
+
+        employersPage = component "EmployersPage (/editor/employers)" "Управление работодателями: три коллапсируемые группы (На проверке / Отклонён / Подтверждён). Кнопки «Подтвердить» и «Отклонить»." "Next.js Server Component" "Page"
+
+        settingsPage = component "SettingsPage (/editor/settings)" "Настройки: миграция колонок Google Sheets через AddColumnsButton." "Next.js Server Component" "Page"
 
         # Client Components
         employerModal = component "EmployerRegistrationModal" "Форма подписки работодателя: имя, компания, email, телефон, способ связи, выбор стримов. После отправки — статус «На проверке»." "React Client Component" "UI"
@@ -50,7 +58,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
         publishApi = component "Publish API (/api/publish/[listId])" "HTTP-роут для запуска рассылки через curl или внешние системы. Защищён EDITOR_SECRET." "Next.js Route Handler" "Logic"
 
         # Integrations
-        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nЧтение: профили, подборки, стримы, работодатели.\nЗапись: регистрации, статусы работодателей.\nМиграция: ensureProfileColumns().\nАвтосоздание листов через ensureSheet()." "TypeScript, Google Sheets API v4" "Integration"
+        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nЧтение: профили, подборки, стримы, работодатели.\nЗапись: регистрации, статусы работодателей.\nМиграция: ensureProfileColumns().\nАвтосоздание листов через ensureSheet().\ngetEmployerByToken() — поиск по токену.\nfilterCandidatesForEmployer() — фильтрация кандидатов по предпочтениям." "TypeScript, Google Sheets API v4" "Integration"
 
         sendPulseLib = component "SendPulse Library (lib/sendpulse.ts)" "OAuth 2.0 с кэшем токена (59 мин). Кэш адресных книг с TTL 60 с.\ngetOrCreateBook() — авто-создание книги.\ngetBookEmailCount() — проверка подписчиков до рассылки.\ncreateCampaign() / getCampaigns()." "TypeScript, SendPulse REST API" "Integration"
       }
@@ -80,14 +88,16 @@ workspace "TalentStreams" "Платформа подборки проверен�
     talentStreams.webApp.homePage -> talentStreams.webApp.candidateModal "Рендерит"
     talentStreams.webApp.profilePage -> talentStreams.webApp.profileView "Рендерит"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.contactButton "Рендерит (по одной на карточку)"
-    talentStreams.webApp.editorPage -> talentStreams.webApp.publishButton "Рендерит (по одной на выпуск)"
-    talentStreams.webApp.editorPage -> talentStreams.webApp.employerSection "Рендерит"
+    talentStreams.webApp.releasesPage -> talentStreams.webApp.publishButton "Рендерит (по одной на выпуск)"
+    talentStreams.webApp.employersPage -> talentStreams.webApp.employerSection "Рендерит"
+    talentStreams.webApp.editorLayout -> talentStreams.webApp.editorNav "Рендерит"
 
     talentStreams.webApp.homePage -> talentStreams.webApp.sheetsLib "getStreams()"
     talentStreams.webApp.profilePage -> talentStreams.webApp.sheetsLib "getProfile(id)"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
-    talentStreams.webApp.editorPage -> talentStreams.webApp.sheetsLib "getMailingLists(), getEmployers()"
-    talentStreams.webApp.editorPage -> talentStreams.webApp.sendPulseLib "getBookEmailCount() — проверка пустой книги"
+    talentStreams.webApp.releasesPage -> talentStreams.webApp.sheetsLib "getMailingLists()"
+    talentStreams.webApp.releasesPage -> talentStreams.webApp.sendPulseLib "getBookEmailCount() — проверка пустой книги"
+    talentStreams.webApp.employersPage -> talentStreams.webApp.sheetsLib "getEmployers()"
 
     talentStreams.webApp.employerModal -> talentStreams.webApp.serverActions "registerEmployer(EmployerData)"
     talentStreams.webApp.candidateModal -> talentStreams.webApp.serverActions "registerCandidate(CandidateData)"
@@ -99,7 +109,9 @@ workspace "TalentStreams" "Платформа подборки проверен�
     talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendEmployerRow(), appendCandidateRow(), getMailingList(), updateEmployerStatus()"
     talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "addToSendPulse() / createCampaign()"
 
-    editor -> talentStreams.webApp.editorPage "Просматривает выпуски, подтверждает работодателей, запускает рассылку"
+    editor -> talentStreams.webApp.releasesPage "Просматривает выпуски, запускает рассылку"
+    editor -> talentStreams.webApp.employersPage "Подтверждает и отклоняет заявки работодателей"
+    editor -> talentStreams.webApp.settingsPage "Управляет настройками и миграцией колонок"
     editor -> talentStreams.webApp.publishApi "curl /api/publish/{listId}?token=…"
 
     talentStreams.webApp.sheetsLib -> googleSheets "fetchSheetValues(), appendRow(), values.update()" "HTTPS, Sheets API v4"
@@ -143,18 +155,21 @@ workspace "TalentStreams" "Платформа подборки проверен�
       autolayout lr
     }
 
-    dynamic talentStreams.webApp "MailingListView" "Сценарий просмотра анонимной подборки" {
+    dynamic talentStreams.webApp "MailingListView" "Сценарий просмотра персонализированной подборки" {
+      talentStreams.webApp.mailingListPage -> talentStreams.webApp.sheetsLib "getEmployerByToken(?e= из searchParams)"
+      talentStreams.webApp.sheetsLib -> googleSheets "GET Employers — поиск по token"
       talentStreams.webApp.mailingListPage -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
       talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000"
       talentStreams.webApp.sheetsLib -> googleSheets "GET профили основного листа"
-      talentStreams.webApp.mailingListPage -> talentStreams.webApp.contactButton "Рендерит кнопку под каждой анонимной карточкой"
+      talentStreams.webApp.mailingListPage -> talentStreams.webApp.sheetsLib "filterCandidatesForEmployer(entries, employer)"
+      talentStreams.webApp.mailingListPage -> talentStreams.webApp.contactButton "Рендерит кнопку под каждой анонимной карточкой (с employerToken)"
       autolayout lr
     }
 
     dynamic talentStreams.webApp "PublishMailingList" "Сценарий публикации выпуска редактором" {
-      talentStreams.webApp.editorPage -> talentStreams.webApp.sheetsLib "getMailingLists(), getEmployers()"
-      talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000, GET 'Employers'!A1:J1000"
-      talentStreams.webApp.editorPage -> talentStreams.webApp.sendPulseLib "getBookEmailCount(stream)"
+      talentStreams.webApp.releasesPage -> talentStreams.webApp.sheetsLib "getMailingLists()"
+      talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000"
+      talentStreams.webApp.releasesPage -> talentStreams.webApp.sendPulseLib "getBookEmailCount(stream)"
       talentStreams.webApp.sendPulseLib -> sendPulse "GET /addressbooks?limit=500"
       talentStreams.webApp.publishButton -> talentStreams.webApp.serverActions "publishMailingList(listId)"
       talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
