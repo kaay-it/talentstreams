@@ -503,6 +503,34 @@ export async function appendCandidateRow(values: string[]): Promise<void> {
   await appendRow("Candidates", CANDIDATES_HEADERS, values)
 }
 
+const CONTACT_REQUESTS_HEADERS = [
+  "ID", "Timestamp", "List ID", "Stream", "Candidate ID",
+  "Employer Token", "Employer Name", "Company", "Employer Email", "Status",
+]
+
+export async function appendContactRequest(data: {
+  listId: string
+  stream: string
+  candidateId: string
+  employerToken: string
+  employerName: string
+  employerCompany: string
+  employerEmail: string
+}): Promise<void> {
+  await appendRow("Contact Requests", CONTACT_REQUESTS_HEADERS, [
+    crypto.randomUUID(),
+    new Date().toISOString(),
+    data.listId,
+    data.stream,
+    data.candidateId,
+    data.employerToken,
+    data.employerName,
+    data.employerCompany,
+    data.employerEmail,
+    "Новый запрос",
+  ])
+}
+
 export type MailingListSummary = {
   listId: string
   stream: string
@@ -667,6 +695,82 @@ export async function updateEmployerStatus(rowIndex: number, status: EmployerSta
     },
   )
   if (!res.ok) throw new Error(`Failed to update employer status (${res.status}): ${await res.text()}`)
+}
+
+export type ContactRequestStatus =
+  | "Новый запрос"
+  | "Кандидату написали"
+  | "Кандидат не отвечает"
+  | "Связаться с Аленой"
+  | "Кандидату интересно"
+  | "Кандидату не интересно"
+  | "Контакты переданы"
+  | "Взяли в работу"
+  | "Завершён"
+
+export type ContactRequest = {
+  id: string
+  rowIndex: number
+  timestamp: string
+  listId: string
+  stream: string
+  candidateId: string
+  employerToken: string
+  employerName: string
+  company: string
+  employerEmail: string
+  status: ContactRequestStatus
+}
+
+export async function getContactRequests(): Promise<ContactRequest[]> {
+  const { sheetId } = getEnv()
+  try {
+    const values = await fetchSheetValues(sheetId, "'Contact Requests'!A1:J1000")
+    if (values.length < 2) return []
+    const headers = values[0].map((h) => (h ?? "").trim().toLowerCase())
+    const col = (name: string) => headers.indexOf(name)
+
+    return values.slice(1).map((row, i) => ({
+      id: (row[col("id")] ?? "").trim(),
+      rowIndex: i + 2,
+      timestamp: (row[col("timestamp")] ?? "").trim(),
+      listId: (row[col("list id")] ?? "").trim(),
+      stream: (row[col("stream")] ?? "").trim(),
+      candidateId: (row[col("candidate id")] ?? "").trim(),
+      employerToken: (row[col("employer token")] ?? "").trim(),
+      employerName: (row[col("employer name")] ?? "").trim(),
+      company: (row[col("company")] ?? "").trim(),
+      employerEmail: (row[col("employer email")] ?? "").trim(),
+      status: ((row[col("status")] ?? "").trim() || "Новый запрос") as ContactRequestStatus,
+    })).filter((r) => r.id)
+  } catch {
+    return []
+  }
+}
+
+export async function updateContactRequestStatus(rowIndex: number, status: ContactRequestStatus): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const headerRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Contact Requests'!A1:J1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  const headerData = (await headerRes.json()) as { values?: string[][] }
+  const headers = (headerData.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
+  const statusColIdx = headers.indexOf("status")
+  if (statusColIdx < 0) throw new Error("Status column not found in Contact Requests sheet")
+
+  const range = encodeURIComponent(`'Contact Requests'!${colLetter(statusColIdx + 1)}${rowIndex}`)
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueInputOption=USER_ENTERED`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [[status]] }),
+    },
+  )
+  if (!res.ok) throw new Error(`Failed to update contact request status (${res.status}): ${await res.text()}`)
 }
 
 /** Whether Google Sheets credentials are configured AND the key looks valid. */

@@ -4,6 +4,7 @@ import Link from "next/link"
 import { ArrowLeft, CalendarDays, MapPin } from "lucide-react"
 import { getMailingList, getEmployerByToken, filterCandidatesForEmployer, isSheetsConfigured, type MailingListEntry } from "@/lib/sheets"
 import { ContactButton } from "@/components/contact-button"
+import { GeneralInquiryButton } from "@/components/general-inquiry-button"
 
 export const dynamic = "force-dynamic"
 
@@ -101,6 +102,16 @@ export default async function MailingListPage({
             <EntryCard key={entry.profile.id} entry={entry} listId={listId} employerToken={employerToken} />
           ))}
         </div>
+
+        {employerToken && (
+          <div className="mt-8 rounded-2xl border bg-card p-6">
+            <h2 className="text-base font-semibold text-card-foreground">Не нашли подходящих кандидатов?</h2>
+            <p className="mt-1 mb-4 text-sm text-muted-foreground">
+              Оставьте запрос — мы подберём кандидатов специально под ваши требования.
+            </p>
+            <GeneralInquiryButton listId={listId} employerToken={employerToken} />
+          </div>
+        )}
       </div>
     </main>
   )
