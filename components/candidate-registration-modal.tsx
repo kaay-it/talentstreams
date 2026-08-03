@@ -38,6 +38,7 @@ export function CandidateRegistrationModal() {
   const [phone, setPhone] = useState("")
   const [resumeUrl, setResumeUrl] = useState("")
   const [coverLetter, setCoverLetter] = useState("")
+  const [consent, setConsent] = useState(false)
 
   const nameRef = useRef<HTMLInputElement>(null)
 
@@ -64,6 +65,7 @@ export function CandidateRegistrationModal() {
     setPhone("")
     setResumeUrl("")
     setCoverLetter("")
+    setConsent(false)
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -181,6 +183,18 @@ export function CandidateRegistrationModal() {
                     />
                   </Field>
 
+                  <label className="flex cursor-pointer select-none items-start gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={consent}
+                      onChange={(e) => setConsent(e.target.checked)}
+                      className="mt-0.5 size-4 shrink-0 accent-primary"
+                    />
+                    <span className="text-sm leading-snug text-muted-foreground">
+                      Я подтверждаю согласие на обработку персональных данных и рассмотрение моей кандидатуры для публикации в рассылках сервиса.
+                    </span>
+                  </label>
+
                   {status === "error" && (
                     <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
                       {errorMsg}
@@ -189,7 +203,7 @@ export function CandidateRegistrationModal() {
 
                   <button
                     type="submit"
-                    disabled={status === "submitting"}
+                    disabled={status === "submitting" || !consent}
                     className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {status === "submitting" ? "Отправка…" : "Отправить заявку"}

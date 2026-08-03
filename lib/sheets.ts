@@ -593,6 +593,8 @@ export type Employer = {
   linkedin: string
   streams: string[]
   status: EmployerStatus
+  country: string
+  additionalCountries: string[]
 }
 
 function parseEmployerRows(values: string[][]): Employer[] {
@@ -608,6 +610,8 @@ function parseEmployerRows(values: string[][]): Employer[] {
   const linkedinIdx = headers.indexOf("linkedin")
   const streamsIdx = headers.indexOf("streams")
   const statusIdx = headers.indexOf("status")
+  const countryIdx = headers.indexOf("country")
+  const additionalCountriesIdx = headers.indexOf("additional countries")
 
   if (emailIdx < 0) return []
 
@@ -623,6 +627,8 @@ function parseEmployerRows(values: string[][]): Employer[] {
     linkedin: linkedinIdx >= 0 ? (row[linkedinIdx] ?? "").trim() : "",
     streams: parseMultiValue(streamsIdx >= 0 ? (row[streamsIdx] ?? "") : ""),
     status: ((statusIdx >= 0 ? (row[statusIdx] ?? "").trim() : "") || "На проверке") as EmployerStatus,
+    country: countryIdx >= 0 ? (row[countryIdx] ?? "").trim() : "",
+    additionalCountries: parseMultiValue(additionalCountriesIdx >= 0 ? (row[additionalCountriesIdx] ?? "") : ""),
   })).filter((e) => e.email)
 }
 
@@ -630,7 +636,7 @@ function parseEmployerRows(values: string[][]): Employer[] {
 export async function getEmployers(): Promise<Employer[]> {
   const { sheetId } = getEnv()
   try {
-    const values = await fetchSheetValues(sheetId, "'Employers'!A1:L1000")
+    const values = await fetchSheetValues(sheetId, "'Employers'!A1:Z1000")
     return parseEmployerRows(values)
   } catch {
     return []
@@ -677,7 +683,7 @@ export async function updateEmployerStatus(rowIndex: number, status: EmployerSta
   const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
 
   const headerRes = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Employers'!A1:J1")}`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Employers'!A1:Z1")}`,
     { headers: { Authorization: `Bearer ${token}` } },
   )
   const headerData = (await headerRes.json()) as { values?: string[][] }
@@ -783,6 +789,43 @@ export function isSheetsConfigured(): boolean {
 }
 
 // ── Profile column migration ──────────────────────────────────────────────────
+
+const EMPLOYER_EXTRA_COLUMNS = ["Country", "Additional Countries"]
+
+export async function ensureEmployerColumns(): Promise<{ added: string[] }> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Employers'!A1:Z1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) throw new Error(`Failed to read Employers header row (${res.status}): ${await res.text()}`)
+
+  const data = (await res.json()) as { values?: string[][] }
+  const currentHeaders = (data.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
+
+  const missing = EMPLOYER_EXTRA_COLUMNS.filter(
+    (col) => !currentHeaders.includes(col.toLowerCase()),
+  )
+  if (!missing.length) return { added: [] }
+
+  const startIdx = currentHeaders.length + 1
+  const endIdx = startIdx + missing.length - 1
+  const range = `'Employers'!${colLetter(startIdx)}1:${colLetter(endIdx)}1`
+
+  const updateRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [missing] }),
+    },
+  )
+  if (!updateRes.ok) throw new Error(`Failed to add employer columns (${updateRes.status}): ${await updateRes.text()}`)
+
+  return { added: missing }
+}
 
 const DISTRIBUTION_COLUMNS = ["Level", "Industry", "Function", "Country Primary", "Country Desired", "Summary", "Excluded Companies", "Excluded Industries"]
 

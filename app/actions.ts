@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { appendEmployerRow, appendCandidateRow, appendContactRequest, getMailingList, getMailingLists, ensureProfileColumns, updateEmployerStatus, updateContactRequestStatus, getEmployers, getEmployerByToken, type Employer, type ContactRequestStatus } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, appendContactRequest, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, updateEmployerStatus, updateContactRequestStatus, getEmployers, getEmployerByToken, type Employer, type ContactRequestStatus } from "@/lib/sheets"
 import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -48,6 +48,12 @@ async function addToSendPulse(
 export async function addProfileColumns(): Promise<{ added: string[] }> {
   return ensureProfileColumns()
 }
+
+export async function addAllColumns(): Promise<{ added: string[] }> {
+  const [profiles, employers] = await Promise.all([ensureProfileColumns(), ensureEmployerColumns()])
+  return { added: [...profiles.added, ...employers.added] }
+}
+
 
 export type PublishResult = {
   listId: string
@@ -231,6 +237,8 @@ export type EmployerData = {
   telegram: string
   linkedin: string
   streams: string[]
+  country: string
+  additionalCountries: string[]
 }
 
 export type CandidateData = {
@@ -291,6 +299,8 @@ export async function registerEmployer(data: EmployerData): Promise<void> {
     "LinkedIn": data.linkedin || "",
     "Streams": data.streams.join(", "),
     "Status": "На проверке",
+    "Country": data.country,
+    "Additional Countries": data.additionalCountries.join(", "),
   })
 }
 
