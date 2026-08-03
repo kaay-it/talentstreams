@@ -14,6 +14,30 @@ const CONTACT_OPTIONS = [
 
 const MAX_STREAMS = 2
 
+const PRIMARY_COUNTRIES = [
+  "Узбекистан",
+  "Казахстан",
+  "Кыргызстан",
+  "Таджикистан",
+]
+
+const ADDITIONAL_COUNTRIES = [
+  "Узбекистан",
+  "Казахстан",
+  "Кыргызстан",
+  "Таджикистан",
+  "Туркменистан",
+  "Азербайджан",
+  "Армения",
+  "Беларусь",
+  "Грузия",
+  "Молдова",
+  "Россия",
+  "Украина",
+]
+
+const ANY_COUNTRY = "Любая"
+
 type ContactMethod = EmployerData["primaryContact"]
 
 const inputCls =
@@ -55,14 +79,16 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
   const [telegram, setTelegram] = useState("")
   const [linkedin, setLinkedin] = useState("")
   const [selectedStreams, setSelectedStreams] = useState<string[]>([])
+  const [country, setCountry] = useState("")
+  const [additionalCountries, setAdditionalCountries] = useState<string[]>([])
   const [consent, setConsent] = useState(false)
 
-  const emailRef = useRef<HTMLInputElement>(null)
+  const nameRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!open) return
     document.body.style.overflow = "hidden"
-    emailRef.current?.focus()
+    nameRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") handleClose()
     }
@@ -85,7 +111,21 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     setTelegram("")
     setLinkedin("")
     setSelectedStreams([])
+    setCountry("")
+    setAdditionalCountries([])
     setConsent(false)
+  }
+
+  function toggleAdditionalCountry(c: string) {
+    setAdditionalCountries((prev) => {
+      if (c === ANY_COUNTRY) {
+        return prev.includes(ANY_COUNTRY) ? [] : [ANY_COUNTRY]
+      }
+      const withoutAny = prev.filter((x) => x !== ANY_COUNTRY)
+      return withoutAny.includes(c)
+        ? withoutAny.filter((x) => x !== c)
+        : [...withoutAny, c]
+    })
   }
 
   function toggleStream(s: string) {
@@ -100,7 +140,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     e.preventDefault()
     setStatus("submitting")
     try {
-      await registerEmployer({ name, company, email, phone, primaryContact, telegram, linkedin, streams: selectedStreams })
+      await registerEmployer({ name, company, email, phone, primaryContact, telegram, linkedin, streams: selectedStreams, country, additionalCountries })
       setStatus("success")
     } catch (err) {
       setStatus("error")
@@ -114,6 +154,13 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     (primaryContact !== "telegram" || telegram.trim()) &&
     (primaryContact !== "linkedin" || linkedin.trim()) &&
     consent
+
+  const anySelected = additionalCountries.includes(ANY_COUNTRY)
+  const additionalHint = anySelected
+    ? "Рассматриваете кандидатов из любой страны"
+    : additionalCountries.length
+    ? `Выбрано: ${additionalCountries.length}`
+    : "Необязательно — если рассматриваете кандидатов из нескольких стран"
 
   return (
     <>
@@ -132,7 +179,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
               role="dialog"
               aria-modal="true"
               aria-labelledby="reg-modal-title"
-              className="relative w-full max-w-md rounded-2xl border bg-card shadow-xl"
+              className="relative w-full max-w-2xl rounded-2xl border bg-card shadow-xl"
             >
               {/* Header */}
               <div className="flex items-center justify-between border-b px-6 py-4">
@@ -167,50 +214,56 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                 </div>
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
-                  <Field label="Имя" required>
-                    <input
-                      ref={emailRef}
-                      type="text"
-                      required
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Иван Иванов"
-                      className={inputCls}
-                    />
-                  </Field>
 
-                  <Field label="Компания">
-                    <input
-                      type="text"
-                      value={company}
-                      onChange={(e) => setCompany(e.target.value)}
-                      placeholder="ООО Пример"
-                      className={inputCls}
-                    />
-                  </Field>
+                  {/* Имя + Компания */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Имя" required>
+                      <input
+                        ref={nameRef}
+                        type="text"
+                        required
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="Иван Иванов"
+                        className={inputCls}
+                      />
+                    </Field>
+                    <Field label="Компания">
+                      <input
+                        type="text"
+                        value={company}
+                        onChange={(e) => setCompany(e.target.value)}
+                        placeholder="ООО Пример"
+                        className={inputCls}
+                      />
+                    </Field>
+                  </div>
 
-                  <Field label="Email" required>
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@company.com"
-                      className={inputCls}
-                    />
-                  </Field>
+                  {/* Email + Телефон */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Email" required>
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="you@company.com"
+                        className={inputCls}
+                      />
+                    </Field>
+                    <Field label="Телефон" required>
+                      <input
+                        type="tel"
+                        required
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="+_ ___ ___ ____"
+                        className={inputCls}
+                      />
+                    </Field>
+                  </div>
 
-                  <Field label="Телефон" required>
-                    <input
-                      type="tel"
-                      required
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+_ ___ ___ ____"
-                      className={inputCls}
-                    />
-                  </Field>
-
+                  {/* Способ связи */}
                   <Field label="Предпочтительный способ связи" required>
                     <div className="flex gap-2">
                       {CONTACT_OPTIONS.map((opt) => (
@@ -266,46 +319,100 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                     </Field>
                   )}
 
-                  <Field
-                    label="Стримы для рассылки"
-                    required
-                    hint={
-                      selectedStreams.length === 0
-                        ? `Выберите от 1 до ${MAX_STREAMS}`
-                        : selectedStreams.length === MAX_STREAMS
-                        ? `Выбрано максимум (${MAX_STREAMS})`
-                        : undefined
-                    }
-                  >
-                    {streams.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {streams.map((s) => {
-                          const selected = selectedStreams.includes(s)
-                          const disabled = !selected && selectedStreams.length >= MAX_STREAMS
-                          return (
-                            <button
-                              key={s}
-                              type="button"
-                              onClick={() => toggleStream(s)}
-                              disabled={disabled}
-                              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                                selected
-                                  ? "border-primary bg-primary/10 text-primary"
-                                  : disabled
-                                  ? "cursor-not-allowed opacity-35"
-                                  : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
-                              }`}
-                            >
-                              {s}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">Стримы не настроены</p>
-                    )}
+                  {/* Стримы + Основная страна */}
+                  <div className="grid grid-cols-2 gap-4 items-start">
+                    <Field
+                      label="Стримы для рассылки"
+                      required
+                      hint={
+                        selectedStreams.length === 0
+                          ? `Выберите от 1 до ${MAX_STREAMS}`
+                          : selectedStreams.length === MAX_STREAMS
+                          ? `Выбрано максимум (${MAX_STREAMS})`
+                          : undefined
+                      }
+                    >
+                      {streams.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {streams.map((s) => {
+                            const selected = selectedStreams.includes(s)
+                            const disabled = !selected && selectedStreams.length >= MAX_STREAMS
+                            return (
+                              <button
+                                key={s}
+                                type="button"
+                                onClick={() => toggleStream(s)}
+                                disabled={disabled}
+                                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                  selected
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : disabled
+                                    ? "cursor-not-allowed opacity-35"
+                                    : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                                }`}
+                              >
+                                {s}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Стримы не настроены</p>
+                      )}
+                    </Field>
+
+                    <Field label="Страна нахождения" hint="Страна, в которой работает ваша компания">
+                      <select
+                        value={country}
+                        onChange={(e) => setCountry(e.target.value)}
+                        className={inputCls}
+                      >
+                        <option value="">— выберите —</option>
+                        {PRIMARY_COUNTRIES.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+
+                  {/* Дополнительные страны */}
+                  <Field label="Дополнительные страны" hint={additionalHint}>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleAdditionalCountry(ANY_COUNTRY)}
+                        className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          anySelected
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                        }`}
+                      >
+                        Любая
+                      </button>
+                      {ADDITIONAL_COUNTRIES.filter((c) => c !== country).map((c) => {
+                        const selected = additionalCountries.includes(c)
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => toggleAdditionalCountry(c)}
+                            disabled={anySelected}
+                            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                              selected
+                                ? "border-primary bg-primary/10 text-primary"
+                                : anySelected
+                                ? "cursor-not-allowed opacity-35"
+                                : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                            }`}
+                          >
+                            {c}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </Field>
 
+                  {/* Согласие */}
                   <label className="flex cursor-pointer select-none items-start gap-2.5">
                     <input
                       type="checkbox"

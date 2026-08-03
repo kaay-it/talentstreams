@@ -103,6 +103,8 @@ function EmployerRow({ employer }: { employer: Employer }) {
           <p className="text-xs text-muted-foreground truncate">
             {employer.email}
             {employer.streams.length ? ` · ${employer.streams.join(", ")}` : ""}
+            {employer.country ? ` · ${employer.country}` : ""}
+            {employer.additionalCountries.length ? ` (+ ${employer.additionalCountries.join(", ")})` : ""}
           </p>
         </div>
 

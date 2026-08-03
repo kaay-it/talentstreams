@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { TableProperties, CheckCircle, AlertCircle, Loader2 } from "lucide-react"
-import { addProfileColumns } from "@/app/actions"
+import { addAllColumns } from "@/app/actions"
 
 type State =
   | { status: "idle" }
@@ -17,7 +17,7 @@ export function AddColumnsButton() {
     if (state.status === "loading") return
     setState({ status: "loading" })
     try {
-      const { added } = await addProfileColumns()
+      const { added } = await addAllColumns()
       setState({ status: "done", added })
     } catch (err) {
       setState({ status: "error", message: err instanceof Error ? err.message : "Неизвестная ошибка" })

@@ -24,10 +24,11 @@ export default async function SettingsPage({
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Google Sheets</h2>
         <div className="rounded-xl border bg-card px-5 py-4">
-          <p className="text-sm font-medium mb-1">Колонки профилей кандидатов</p>
+          <p className="text-sm font-medium mb-1">Колонки Google Sheets</p>
           <p className="text-sm text-muted-foreground mb-4">
-            Добавляет в основной лист Google Sheets недостающие колонки дистрибуционных тегов:
-            Level, Industry, Function, Country Primary, Country Desired, Summary.
+            Добавляет недостающие колонки в листы кандидатов и работодателей:
+            профили — Level, Industry, Function, Country Primary, Country Desired, Summary, Excluded Companies, Excluded Industries;
+            работодатели — Country, Additional Countries.
             Операция идемпотентна — уже существующие колонки не затрагиваются.
           </p>
           <AddColumnsButton />
