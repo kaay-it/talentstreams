@@ -55,6 +55,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
   const [telegram, setTelegram] = useState("")
   const [linkedin, setLinkedin] = useState("")
   const [selectedStreams, setSelectedStreams] = useState<string[]>([])
+  const [consent, setConsent] = useState(false)
 
   const emailRef = useRef<HTMLInputElement>(null)
 
@@ -84,6 +85,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     setTelegram("")
     setLinkedin("")
     setSelectedStreams([])
+    setConsent(false)
   }
 
   function toggleStream(s: string) {
@@ -110,7 +112,8 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     name.trim().length > 0 &&
     selectedStreams.length > 0 &&
     (primaryContact !== "telegram" || telegram.trim()) &&
-    (primaryContact !== "linkedin" || linkedin.trim())
+    (primaryContact !== "linkedin" || linkedin.trim()) &&
+    consent
 
   return (
     <>
@@ -302,6 +305,18 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                       <p className="text-sm text-muted-foreground">Стримы не настроены</p>
                     )}
                   </Field>
+
+                  <label className="flex cursor-pointer select-none items-start gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={consent}
+                      onChange={(e) => setConsent(e.target.checked)}
+                      className="mt-0.5 size-4 shrink-0 accent-primary"
+                    />
+                    <span className="text-sm leading-snug text-muted-foreground">
+                      Я подтверждаю согласие на обработку персональных данных и получение информационных сообщений сервиса.
+                    </span>
+                  </label>
 
                   {status === "error" && (
                     <div className="flex items-start gap-2.5 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
