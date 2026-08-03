@@ -2,11 +2,12 @@
 
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
-import { MailOpen, Building2, Handshake, Settings } from "lucide-react"
+import { MailOpen, Building2, Handshake, Settings, Users } from "lucide-react"
 
 const NAV_ITEMS = [
   { label: "Выпуски", href: "/editor", icon: MailOpen },
   { label: "Работодатели", href: "/editor/employers", icon: Building2 },
+  { label: "Кандидаты", href: "/editor/candidates", icon: Users },
   { label: "Запросы", href: "/editor/requests", icon: Handshake },
   { label: "Настройки", href: "/editor/settings", icon: Settings },
 ]

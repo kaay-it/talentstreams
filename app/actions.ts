@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { appendEmployerRow, appendCandidateRow, appendContactRequest, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, updateEmployerStatus, updateContactRequestStatus, getEmployers, getEmployerByToken, type Employer, type ContactRequestStatus } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, appendContactRequest, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateContactRequestStatus, getEmployers, getEmployerByToken, type Employer, type ContactRequestStatus, type CandidateStatus } from "@/lib/sheets"
 import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -50,10 +50,24 @@ export async function addProfileColumns(): Promise<{ added: string[] }> {
 }
 
 export async function addAllColumns(): Promise<{ added: string[] }> {
-  const [profiles, employers] = await Promise.all([ensureProfileColumns(), ensureEmployerColumns()])
-  return { added: [...profiles.added, ...employers.added] }
+  const [profiles, employers, candidates] = await Promise.all([
+    ensureProfileColumns(),
+    ensureEmployerColumns(),
+    ensureCandidateColumns(),
+  ])
+  return { added: [...profiles.added, ...employers.added, ...candidates.added] }
 }
 
+export async function approveCandidate(rowIndex: number): Promise<void> {
+  const today = new Date().toLocaleDateString("ru-RU")
+  await updateCandidateStatus(rowIndex, "Активный" as CandidateStatus, today)
+  revalidatePath("/editor/candidates")
+}
+
+export async function rejectCandidate(rowIndex: number): Promise<void> {
+  await updateCandidateStatus(rowIndex, "Отклонён" as CandidateStatus)
+  revalidatePath("/editor/candidates")
+}
 
 export type PublishResult = {
   listId: string
@@ -253,14 +267,16 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
   if (!data.name.trim()) throw new Error("Укажите имя")
   if (!data.email.trim()) throw new Error("Укажите email")
 
-  await appendCandidateRow([
-    new Date().toISOString(),
-    data.name,
-    data.email,
-    data.phone,
-    data.resumeUrl,
-    data.coverLetter,
-  ])
+  await appendCandidateRow({
+    "id": crypto.randomUUID(),
+    "timestamp": new Date().toISOString(),
+    "name": data.name,
+    "email": data.email,
+    "phone": data.phone,
+    "resume url": data.resumeUrl,
+    "cover letter": data.coverLetter,
+    "status": "На проверке",
+  })
 }
 
 export async function registerEmployer(data: EmployerData): Promise<void> {

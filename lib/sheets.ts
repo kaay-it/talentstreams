@@ -1,11 +1,15 @@
 import "server-only"
 import { createSign } from "crypto"
 
+/** Moderation status of a candidate. Empty string = legacy row without this column (treated as "Активный"). */
+export type CandidateStatus = "На проверке" | "Активный" | "Отклонён"
+
 /**
- * A single profile/visiting-card record.
- * Columns are read dynamically from the header row of the sheet, but these
- * fields are the ones the UI knows how to render nicely. Any extra columns
- * are preserved in `extra` so nothing is lost.
+ * A single profile/visiting-card record from the main Candidates Database sheet.
+ * Registration form submissions write basic fields here (id, name, email, phone,
+ * cover letter, resume url, status "На проверке"). Editor enriches the remaining
+ * fields (title, bio, stream, level, etc.) and approves/rejects via the editor UI.
+ * Columns are read dynamically from the header row — any extra columns land in `extra`.
  */
 export type Profile = {
   id: string
@@ -19,23 +23,21 @@ export type Profile = {
   /** One or more stream tags from a multi-select dropdown in the sheet. */
   stream: string[]
   // ── Distribution tags (§5 spec) ───────────────────────────────────────────
-  /** Middle | Senior | Lead | Директор/VP */
   level: string
-  /** Startup | Fintech & Banking | E-commerce & Retail | AI | IT, SaaS, Software & Data | Telecom & Enterprise */
   industry: string
-  /** Product | Tech | Back Office | Commercial */
   func: string
-  /** Current country */
   countryPrimary: string
-  /** Desired country for relocation (empty if not open to relocation) */
   countryDesired: string
-  /** Anonymized free-text description written by the editor (no personal data). */
   summary: string
-  /** Company names the candidate does not want to be shown to (comma-separated). */
   excludedCompanies: string[]
-  /** Industry tags the candidate does not want to be shown to (comma-separated). */
   excludedIndustries: string[]
-  /** Any additional columns from the sheet, keyed by header name. */
+  // ── Registration / moderation fields ──────────────────────────────────────
+  /** Empty string = legacy row without status column → treated as "Активный". */
+  status: CandidateStatus | ""
+  activeSince: string
+  registrationTimestamp: string
+  coverLetter: string
+  resumeUrl: string
   extra: Record<string, string>
 }
 
@@ -171,6 +173,7 @@ const KNOWN_KEYS = [
   "id", "name", "title", "bio", "email", "phone", "website", "location", "stream",
   "level", "industry", "func", "countryPrimary", "countryDesired", "summary",
   "excludedCompanies", "excludedIndustries",
+  "status", "activeSince", "registrationTimestamp", "coverLetter", "resumeUrl",
 ]
 
 const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
@@ -205,6 +208,14 @@ const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   "исключённые компании": "excludedCompanies",
   "excluded industries": "excludedIndustries",
   "исключённые отрасли": "excludedIndustries",
+  "status": "status",
+  "статус": "status",
+  "active since": "activeSince",
+  "timestamp": "registrationTimestamp",
+  "cover letter": "coverLetter",
+  "сопроводительное письмо": "coverLetter",
+  "resume url": "resumeUrl",
+  "ссылка на резюме": "resumeUrl",
 }
 
 function mapHeader(header: string): string {
@@ -263,6 +274,11 @@ function buildProfile(headers: string[], row: string[]): Profile {
     summary: record.summary || "",
     excludedCompanies: parseMultiValue(record.excludedCompanies || ""),
     excludedIndustries: parseMultiValue(record.excludedIndustries || ""),
+    status: (record.status || "") as CandidateStatus | "",
+    activeSince: record.activeSince || "",
+    registrationTimestamp: record.registrationTimestamp || "",
+    coverLetter: record.coverLetter || "",
+    resumeUrl: record.resumeUrl || "",
     extra,
   }
 }
@@ -274,7 +290,7 @@ function rowsToProfiles(rows: string[][]): Profile[] {
   return rows
     .slice(1)
     .map((row) => buildProfile(headers, row))
-    .filter((p) => p.id)
+    .filter((p) => p.id && (!p.status || p.status === "Активный"))
 }
 
 function slugify(value: string): string {
@@ -468,7 +484,17 @@ async function appendRow(sheetTitle: string, headers: string[], values: string[]
 }
 
 const EMPLOYERS_HEADERS = ["ID", "Timestamp", "Name", "Company", "Email", "Phone", "Primary Contact", "Telegram", "LinkedIn", "Streams", "Status"]
-const CANDIDATES_HEADERS = ["Timestamp", "Name", "Email", "Phone", "Resume URL", "Cover Letter"]
+export type Candidate = {
+  rowIndex: number
+  timestamp: string
+  name: string
+  email: string
+  phone: string
+  resumeUrl: string
+  coverLetter: string
+  status: CandidateStatus
+  activeSince: string
+}
 
 /** Append an employer row, mapping field names to actual column positions in the sheet. */
 export async function appendEmployerRow(data: Record<string, string>): Promise<void> {
@@ -499,8 +525,141 @@ export async function appendEmployerRow(data: Record<string, string>): Promise<v
   if (!res.ok) throw new Error(`Sheets append failed (${res.status}): ${await res.text()}`)
 }
 
-export async function appendCandidateRow(values: string[]): Promise<void> {
-  await appendRow("Candidates", CANDIDATES_HEADERS, values)
+/** Append a candidate row to the main profiles sheet (case-insensitive header matching). */
+export async function appendCandidateRow(data: Record<string, string>): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const headerRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("A1:AZ1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  const headerData = (await headerRes.json()) as { values?: string[][] }
+  const headers = (headerData.values?.[0] ?? []).map((h) => h.trim())
+  const dataLower = Object.fromEntries(Object.entries(data).map(([k, v]) => [k.toLowerCase(), v]))
+  const values = headers.map((h) => dataLower[h.toLowerCase()] ?? "")
+
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("A1")}:append` +
+    `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ values: [values] }),
+  })
+  if (!res.ok) throw new Error(`Sheets append failed (${res.status}): ${await res.text()}`)
+}
+
+/** Returns all candidates from the main sheet for editor moderation (all statuses). */
+export async function getCandidates(): Promise<Candidate[]> {
+  const { sheetId } = getEnv()
+  try {
+    const values = await fetchSheetValues(sheetId, SHEET_RANGE)
+    if (values.length < 2) return []
+    const headers = values[0].map((h) => (h ?? "").trim())
+
+    return values.slice(1).map((row, i) => {
+      // Use rowToRecord so HEADER_ALIASES resolves "Кандидат" → name, "Статус" → status, etc.
+      const r = rowToRecord(headers, row)
+      return {
+        rowIndex: i + 2,
+        timestamp: r.registrationTimestamp || "",
+        name: r.name || "",
+        email: r.email || "",
+        phone: r.phone || "",
+        resumeUrl: r.resumeUrl || "",
+        coverLetter: r.coverLetter || "",
+        // Legacy rows without a Status column default to Активный
+        status: ((r.status || "").trim() || "Активный") as CandidateStatus,
+        activeSince: r.activeSince || "",
+      }
+    }).filter((c) => c.name || c.email)
+  } catch {
+    return []
+  }
+}
+
+export async function updateCandidateStatus(
+  rowIndex: number,
+  status: CandidateStatus,
+  activeSince?: string,
+): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const headerRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("A1:AZ1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  const headerData = (await headerRes.json()) as { values?: string[][] }
+  const headers = (headerData.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
+
+  const statusColIdx = headers.indexOf("status")
+  if (statusColIdx < 0) throw new Error("Status column not found in main sheet")
+
+  const statusRange = encodeURIComponent(`${colLetter(statusColIdx + 1)}${rowIndex}`)
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${statusRange}?valueInputOption=USER_ENTERED`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [[status]] }),
+    },
+  )
+  if (!res.ok) throw new Error(`Failed to update candidate status (${res.status}): ${await res.text()}`)
+
+  if (activeSince !== undefined) {
+    const activeSinceColIdx = headers.indexOf("active since")
+    if (activeSinceColIdx >= 0) {
+      const asRange = encodeURIComponent(`${colLetter(activeSinceColIdx + 1)}${rowIndex}`)
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${asRange}?valueInputOption=USER_ENTERED`,
+        {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ values: [[activeSince]] }),
+        },
+      )
+    }
+  }
+}
+
+// Registration and moderation columns added to the main profiles sheet
+const CANDIDATE_EXTRA_COLUMNS = ["id", "Status", "Active Since", "Timestamp", "Cover Letter", "Resume URL"]
+
+export async function ensureCandidateColumns(): Promise<{ added: string[] }> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("A1:AZ1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) return { added: [] }
+
+  const data = (await res.json()) as { values?: string[][] }
+  const currentHeaders = (data.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
+
+  const missing = CANDIDATE_EXTRA_COLUMNS.filter(
+    (col) => !currentHeaders.includes(col.toLowerCase()),
+  )
+  if (!missing.length) return { added: [] }
+
+  const startIdx = currentHeaders.length + 1
+  const endIdx = startIdx + missing.length - 1
+  const range = `${colLetter(startIdx)}1:${colLetter(endIdx)}1`
+
+  const updateRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [missing] }),
+    },
+  )
+  if (!updateRes.ok) throw new Error(`Failed to add candidate columns (${updateRes.status}): ${await updateRes.text()}`)
+
+  return { added: missing }
 }
 
 const CONTACT_REQUESTS_HEADERS = [
