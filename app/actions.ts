@@ -328,7 +328,6 @@ export async function confirmEmployer(rowIndex: number, employer: Pick<Employer,
     Streams: employer.streams.join(", "),
     ...(employer.token && { employer_token: employer.token }),
   })
-  // TASK-10: send welcome email after confirmation
   await updateEmployerStatus(rowIndex, "Подтверждён")
   revalidatePath("/editor")
 }

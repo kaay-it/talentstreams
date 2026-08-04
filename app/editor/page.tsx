@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation"
-import { CalendarDays, Users, Info, CheckCircle2 } from "lucide-react"
+import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle } from "lucide-react"
 import { getMailingLists } from "@/lib/sheets"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
@@ -86,6 +86,12 @@ export default async function ReleasesPage({
                         <Users className="size-3" />
                         {list.candidateCount} {candidatePlural(list.candidateCount)}
                       </span>
+                      {(list.candidateCount < 6 || list.candidateCount > 10) && (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
+                          <AlertTriangle className="size-3" />
+                          {list.candidateCount < 6 ? "Мало кандидатов (менее 6)" : "Много кандидатов (более 10)"}
+                        </span>
+                      )}
                       {alreadySent && (
                         <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
                           <CheckCircle2 className="size-3" />
