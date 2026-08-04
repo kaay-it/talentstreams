@@ -18,6 +18,7 @@ skinparam ArrowFontSize 12
 
 actor       "Редактор"              as editor
 actor       "Работодатель"          as employer
+actor       "Кандидат"              as candidate
 participant "TalentStreams\nWeb App" as app
 participant "Sheets · Streams"      as sh_streams  #d0e8ff
 participant "Sheets · Candidates"   as sh_cands    #d0e8ff
@@ -40,7 +41,48 @@ note right of sh_streams
   Marketing
 end note
 
-== 2. Работодатель подписывается (заявка) ==
+== 2. Кандидат подаёт анкету ==
+
+candidate -> app : Открывает сайт, нажимает\n«Стать кандидатом»
+app --> candidate : Форма (Имя, Email, Телефон, Резюме, Сопроводительное письмо,\nчекбокс согласия на обработку персональных данных)
+
+candidate -> app : Заполняет и отправляет форму
+app -> sh_cands : appendCandidateRow({ Name, Email, Phone, …,\n  Status: "На проверке" })
+sh_cands --> app : OK
+app --> candidate : «Заявка отправлена — мы рассмотрим и свяжемся»
+
+note over sh_cands
+  Лист «Candidates»:
+  ────────────────────────────────────────────────────────────────
+  Timestamp  | Name    | Email          | … | Status       | Active Since
+  2026-08-03 | Иван И. | ivan@mail.com  | … | На проверке  |
+end note
+
+== 2а. Редактор модерирует анкеты кандидатов ==
+
+editor -> app : GET /editor/candidates?secret=…
+app -> sh_cands : getCandidates()
+sh_cands --> app : список кандидатов
+app --> editor : Раздел «Кандидаты»:\nгруппа «На проверке» открыта (badge с количеством),\nгруппы «Активные» и «Отклонённые» свёрнуты
+
+alt Редактор одобряет кандидата
+  editor -> app : approveCandidate(rowIndex)
+  app -> sh_cands : updateCandidateStatus(rowIndex, "Активный", today)
+  sh_cands --> app : OK
+  app --> editor : Страница обновлена (revalidatePath)
+else Редактор отклоняет кандидата
+  editor -> app : rejectCandidate(rowIndex)
+  app -> sh_cands : updateCandidateStatus(rowIndex, "Отклонён")
+  sh_cands --> app : OK
+  app --> editor : Страница обновлена
+end
+
+note over app, sh_cands
+  TASK-10 (кандидат): email-уведомление рекрутера
+  о новой анкете не реализовано — отложено
+end note
+
+== 3. Работодатель подписывается (заявка) ==
 
 employer -> app : Открывает сайт, нажимает\n«Подписаться на рассылку»
 app -> sh_streams : getStreams()
@@ -61,7 +103,7 @@ note over sh_emp
   8f3a1c…     | 21.07.26  | Alisher | Uzum    | … | Finance  | На проверке
 end note
 
-== 2а. Редактор подтверждает работодателя ==
+== 3а. Редактор подтверждает работодателя ==
 
 editor -> app : GET /editor?secret=… → секция «Работодатели»
 app -> sh_emp : getEmployers()
@@ -82,14 +124,18 @@ note over app, sp_stream
   приветственного письма работодателю
 end note
 
-== 3. Редактор готовит выпуск ==
+== 4. Редактор готовит выпуск ==
 
-editor -> sh_cands : Проверяет и обновляет профили кандидатов
+editor -> sh_cands : Обогащает профили одобренных кандидатов\n(заполняет title, bio, stream, level, industry, summary, …)
 note right of sh_cands
-  Лист «Candidates» (основной):
-  id (UUID)                             | name     | stream   | level  | summary
-  a3f8e2c1-4b0d-4e9a-8f1c-d2e7b3a9c501 | (личное) | Finance  | Senior | Опытный PM…
-  7c1d4f82-9e3a-4b7d-a2f0-e8c5d1b6f340 | (личное) | Finance  | Lead   | Руководил…
+  Главный лист «Candidates Database» — единый источник правды.
+  Регистрационная форма и рассылки используют один и тот же лист.
+  ─────────────────────────────────────────────────────────────────────────────
+  id (UUID)  | name     | title | stream  | level  | summary     | Status    | …
+  a3f8e2c1-… | (личное) | PM    | Finance | Senior | Опытный PM… | Активный  |
+  7c1d4f82-… | (личное) | CTO   | Finance | Lead   | Руководил…  | Активный  |
+  b2e9a3f1-… | (личное) |       |         |        |             | На проверке |  ← ещё не одобрен, в рассылки не попадёт
+  getProfiles() фильтрует: Status = «Активный» или пустой (legacy)
 end note
 
 editor -> sh_mail : Создаёт строки нового выпуска\n(List ID — UUID, Stream, Date, Candidate ID — UUID)
@@ -99,7 +145,7 @@ note right of sh_mail
   f04a9b3e-2c7d-4e1f-b8a0-3d6c9e5f1027 | Finance | 21.07.2026 | 7c1d4f82-…
 end note
 
-== 4. Редактор запускает рассылку ==
+== 5. Редактор запускает рассылку ==
 
 note over editor, app
   Два равнозначных способа запуска:
@@ -119,7 +165,7 @@ sp_camp --> app : { id: 12345 }
 
 app --> editor : «Кампания #12345 запущена»
 
-== 4а. SendPulse доставляет письма подписчикам ==
+== 5а. SendPulse доставляет письма подписчикам ==
 
 sp_camp -> employer : Email «Talent Stream: Finance — 21.07.2026»\nСсылка: /list/f04a9b3e-…?e={{employer_token}}\n({{Имя}} и {{employer_token}} заменяются на значения получателя)
 
@@ -130,7 +176,7 @@ note right of sp_camp
   подборка персонализирована и закрыта от посторонних
 end note
 
-== 5. Работодатель просматривает подборку ==
+== 6. Работодатель просматривает подборку ==
 
 alt ?e=[token] — персонализированный доступ работодателя
 employer -> app : GET /list/f04a9b3e-…?e=8f3a1c…
@@ -159,7 +205,7 @@ note over app, employer
   поисковым роботам
 end note
 
-== 6. Работодатель запрашивает контакт по кандидату ==
+== 7. Работодатель запрашивает контакт по кандидату ==
 
 employer -> app : Нажимает «Хочу связаться» под карточкой кандидата
 app -> app : submitContactRequest(candidateId, listId, employerToken)
@@ -178,7 +224,7 @@ note over sh_contact
   e7f2a1…   | 31.07.26  | f04a9b… | Finance | a3f8e2c1-…   | 8f3a1c…        | … | Новый запрос
 end note
 
-== 7. Работодатель оставляет общий запрос ==
+== 8. Работодатель оставляет общий запрос ==
 
 note over employer, app
   Блок «Не нашли подходящих кандидатов?»
@@ -200,7 +246,7 @@ note over sh_contact
   от запросов «По кандидатам»
 end note
 
-== 8. Редактор обрабатывает запросы ==
+== 9. Редактор обрабатывает запросы ==
 
 editor -> app : GET /editor/requests?secret=…
 app -> sh_contact : getContactRequests()
