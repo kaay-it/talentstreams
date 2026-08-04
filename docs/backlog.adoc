@@ -377,3 +377,221 @@
 . *TASK-12* — Summary в теле письма.
 . *TASK-20* — письмо кандидату со ссылкой на анкету.
 . *TASK-19* — загрузка файла резюме.
+
+== Переход на реляционную СУБД
+
+=== Анализ
+
+Google Sheets достаточен для MVP, но создаёт структурные ограничения по мере роста:
+
+* *Производительность:* каждый запрос — HTTP-вызов к Sheets API; нет индексов, фильтрация только in-memory. При 500+ кандидатах и 100+ работодателях это станет ощутимым.
+* *Целостность данных:* нет foreign keys и транзакций — связи между листами поддерживаются вручную (candidateId, employerToken — строки без ограничений).
+* *Сложные запросы:* фильтрация, JOIN-подобные операции (подборка → кандидаты → работодатели) делаются in-memory в `lib/sheets.ts`, что увеличивает объём данных, которые нужно держать в памяти.
+* *Параллельные записи:* append-only подход с `rowIndex` — хрупкий при одновременных операциях.
+* *Лимиты API:* Google Sheets API — 300 запросов в минуту на проект.
+
+=== Стоимость и выбор хранилища
+
+==== Контекст: Vercel Postgres закрыт
+
+Vercel Postgres (декабрь 2024) был упразднён и перенесён на Neon напрямую. Сейчас Neon доступен через Vercel Marketplace — подключается из того же дашборда, переменные окружения проставляются автоматически. Это меняет картину по сравнению со сторонними сервисами.
+
+==== Стек для Vercel-проекта: Neon + Vercel Blob
+
+Поскольку проект хостится на Vercel, естественный выбор — держать все сервисы в одной экосистеме.
+
+*База данных — Neon (через Vercel Marketplace):*
+
+[cols="1,1,3", options="header"]
+|===
+| Tier | Цена | Что включено
+
+| Free
+| $0/мес
+| 0.5 ГБ хранилища, 100 compute-unit-hours/мес (~400 ч на минимальном инстансе). Compute засыпает при простое — *без принудительной паузы проекта*. Технически пригодно для продакшена с низким трафиком.
+
+| Launch
+| $19/мес
+| Usage-based ($0.106/CU-час). Без лимитов на время работы. Подходит при ежедневном трафике.
+|===
+
+*Файловое хранилище — Vercel Blob:*
+
+[cols="1,1,3", options="header"]
+|===
+| Tier | Цена | Что включено
+
+| Hobby (с Vercel Hobby)
+| $0/мес
+| 1 ГБ хранилища, 10 ГБ transfer, 10 000 read-операций, 2 000 write-операций. При превышении — блокировка до конца расчётного периода (без доплаты).
+
+| Pro (с Vercel Pro)
+| Входит в $20/мес Vercel Pro
+| 5 ГБ хранилища, 100 ГБ transfer, 100 000 read-операций, 10 000 write-операций. Сверх лимитов — $0.023/ГБ.
+|===
+
+==== Vercel Global Config (бывший Edge Config) — не БД
+
+Отдельный продукт Vercel: глобально реплицированное key-value хранилище, читается прямо на CDN-ноде в регионе пользователя — без обращения к серверу. Чтение < 1 мс, P99 ≈ 15 мс.
+
+*Лимиты:* 1 МБ на стор, 100 000 чтений/мес (бесплатно), 100 записей/мес (бесплатно), распространение записи — до 10 секунд по всем регионам.
+
+*Когда подходит:* данные читаются постоянно, записываются редко — feature flags, списки стран/тегов, конфигурация. Не подходит для транзакционных данных, фильтрации, запросов — это не база данных.
+
+*Применимость для TalentStreams:* список стримов (`getStreams()`) — идеальный кандидат. Стримов меньше 20, они меняются крайне редко, но запрашиваются при каждой загрузке регистрационной формы. Вместо чтения из БД можно хранить в Global Config и читать за < 1 мс. Остальные данные (кандидаты, работодатели, запросы) — слишком динамичны и не вписываются в 1 МБ.
+
+==== Итоговые сценарии для TalentStreams
+
+[cols="2,1,1,1", options="header"]
+|===
+| Критерий | Neon Free + Blob Hobby | Neon Launch + Blob Pro | Supabase Pro (отдельно)
+
+| Стоимость/мес (доп. к Vercel)
+| *$0*
+| *$19* (+ $20 Vercel Pro)
+| *$25* (+ Vercel)
+
+| Приостановка БД в продакшене
+| ✅ Нет (sleep, не пауза)
+| ✅ Нет
+| ⛔ Free: да. Pro: нет.
+
+| Файловое хранилище (резюме)
+| ✅ Vercel Blob
+| ✅ Vercel Blob
+| ✅ Supabase Storage
+
+| Интеграция с Vercel
+| ✅ Нативная (Marketplace)
+| ✅ Нативная (Marketplace)
+| ⚠ Сторонний сервис
+
+| Один дашборд / один счёт
+| ✅ Да
+| ✅ Да
+| ❌ Нет
+
+| Риски при текущем масштабе
+| ⚠ 400 ч/мес (риск при росте)
+| ✅ Нет
+| ✅ Нет
+|===
+
+=== Рекомендация
+
+*На этапе разработки и раннего MVP* — Neon Free + Vercel Blob Hobby. Никаких дополнительных расходов, нет паузы проекта, резюме хранятся в Vercel Blob (1 ГБ хватит на сотни файлов).
+
+*При регулярном ежедневном трафике* (появились реальные клиенты) — апгрейд Neon до Launch ($19/мес). Vercel Blob Hobby, скорее всего, продолжит покрывать потребности.
+
+*Против Supabase:* при хостинге на Vercel Supabase становится лишним сторонним сервисом — отдельный аккаунт, отдельный счёт, ручная настройка env vars. Преимуществ перед Neon+Blob нет: оба дают PostgreSQL + файловое хранилище, но Neon нативно интегрирован в Vercel.
+
+*Технический выигрыш от перехода:* `lib/sheets.ts` (1039 строк, весь header-mapping и `ensureColumns`-код) заменяется на `lib/db.ts` с Prisma Client — типы генерируются автоматически из схемы. TASK-DB-5 (резюме) реализуется через `@vercel/blob`.
+
+=== Схема данных (PostgreSQL)
+
+[source,sql]
+----
+candidates       -- профили + регистрации (текущий главный лист)
+  id UUID PK, name, title, bio, email, phone, website, location,
+  stream, level, industry, func, country_primary, country_desired,
+  summary, excluded_companies TEXT[], excluded_industries TEXT[],
+  status, active_since, registration_timestamp, cover_letter, resume_url
+
+employers        -- работодатели
+  id UUID PK, timestamp, name, company, email, phone,
+  telegram, linkedin, primary_contact, streams TEXT[],
+  country, additional_countries TEXT[], status
+
+streams          -- список стримов
+  id SERIAL PK, name TEXT UNIQUE
+
+mailing_lists    -- выпуски
+  id UUID PK, stream, date
+mailing_list_candidates   -- связь выпуск ↔ кандидат
+  list_id UUID FK, candidate_id UUID FK
+
+contact_requests -- запросы на контакт
+  id UUID PK, timestamp, list_id UUID FK, stream,
+  candidate_id UUID FK (nullable — общий запрос),
+  employer_id UUID FK, employer_name, company, employer_email, status
+----
+
+=== Задачи
+
+==== TASK-DB-1: Инфраструктура — Neon + Vercel Blob
+
+. Подключить Neon через Vercel Marketplace (Storage → Neon) — переменные `DATABASE_URL`, `DATABASE_URL_UNPOOLED` проставятся в Vercel автоматически и в `.env.local` через `vercel env pull`.
+. Установить зависимости: `prisma`, `@prisma/client`.
+. Описать схему в `prisma/schema.prisma` (5 таблиц: `candidates`, `employers`, `streams`, `mailing_lists`, `mailing_list_candidates`, `contact_requests`).
+. Запустить `prisma migrate dev --name init` — создать таблицы в Neon.
+. Создать `lib/db.ts` с экспортом Prisma Client (singleton-паттерн для Next.js).
+. Vercel Blob не требует отдельной настройки — `BLOB_READ_WRITE_TOKEN` добавляется автоматически при подключении через Vercel Storage.
+
+*Сложность:* низкая. Блокирует все остальные DB-задачи.
+
+---
+
+==== TASK-DB-2: Разовая миграция данных из Google Sheets
+
+. Написать скрипт `scripts/migrate-from-sheets.ts` — читает данные через текущий `lib/sheets.ts`, пишет в Neon через Prisma.
+. Обработать особые случаи: legacy-строки без `status` → `status: "Активный"`; строки без `id` → сгенерировать UUID; `excludedCompanies`/`excludedIndustries` как строки → распарсить в массивы.
+. Запустить скрипт (`npx tsx scripts/migrate-from-sheets.ts`), проверить количество строк и связи.
+. После проверки скрипт можно удалить.
+
+*Сложность:* средняя — грязные данные потребуют ручной проверки результата.
+
+---
+
+==== TASK-DB-3: Замена операций чтения
+
+Переписать в `lib/db.ts` все функции чтения. Сигнатуры остаются прежними — `app/actions.ts` и страницы не меняются.
+
+* `getProfiles()` / `getProfile(id)` → `prisma.candidate.findMany/findUnique`
+* `getCandidates()` → `prisma.candidate.findMany` (все статусы)
+* `getEmployers()` / `getEmployerByToken()` / `getEmployersByStream()` → `prisma.employer.findMany/findFirst`
+* `getMailingLists()` / `getMailingList()` → `prisma.mailingList.findUnique` с `include: { candidates: true }`
+* `getContactRequests()` → `prisma.contactRequest.findMany`
+* `getStreams()` → `prisma.stream.findMany` (или Vercel Global Config — см. анализ выше)
+
+*Сложность:* средняя. Основной объём работы.
+
+---
+
+==== TASK-DB-4: Замена операций записи
+
+* `appendCandidateRow()` / `updateCandidateStatus()` → `prisma.candidate.create/update`
+* `appendEmployerRow()` / `updateEmployerStatus()` → `prisma.employer.create/update`
+* `appendContactRequest()` / `updateContactRequestStatus()` → `prisma.contactRequest.create/update`
+* Удалить: `ensureProfileColumns()`, `ensureEmployerColumns()`, `ensureCandidateColumns()`, `ensureSheet()`, `colLetter()`, весь header-mapping код, `getAccessToken()`, `fetchSheetValues()`.
+* Убрать из UI кнопку «Проверить или добавить колонки» и раздел Настройки если в нём больше ничего не останется.
+
+*Сложность:* низкая — проще, чем чтение.
+
+---
+
+==== TASK-DB-5: Загрузка резюме через Vercel Blob
+
+Реализовать TASK-19 (загрузка файла резюме) через `@vercel/blob`:
+
+. Установить `@vercel/blob`.
+. В форме кандидата добавить `input[type=file]` рядом с полем ссылки (одно или другое).
+. Server Action загружает файл через `put()` в Vercel Blob, сохраняет публичный URL в `candidate.resume_url`.
+. Лимит файла на клиенте: 10 МБ. Допустимые типы: PDF, DOC, DOCX.
+
+*Сложность:* средняя. Зависит от TASK-DB-4.
+
+---
+
+==== TASK-DB-6: Вывод Google Sheets из эксплуатации
+
+. Убедиться, что все операции идут через Neon (проверить логи Vercel).
+. Удалить `lib/sheets.ts` и зависимость `googleapis` (если использовалась).
+. Убрать переменные окружения `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEET_ID` из `.env` и Vercel.
+. Отозвать права у Service Account в Google Cloud Console.
+. Оставить Google Sheet в режиме read-only как архив.
+
+*Сложность:* низкая. Финальный шаг.
+
+---
+
+NOTE: `lib/sendpulse.ts` миграции не требует — SendPulse не зависит от источника данных.
