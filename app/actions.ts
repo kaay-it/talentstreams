@@ -1,7 +1,8 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { appendEmployerRow, appendCandidateRow, appendContactRequest, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateContactRequestStatus, getEmployers, getEmployerByToken, type Employer, type ContactRequestStatus, type CandidateStatus } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
+import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -337,8 +338,8 @@ export async function rejectEmployer(rowIndex: number): Promise<void> {
   revalidatePath("/editor")
 }
 
-export async function setContactRequestStatus(rowIndex: number, status: ContactRequestStatus): Promise<void> {
-  await updateContactRequestStatus(rowIndex, status)
+export async function setContactRequestStatus(id: string, status: ContactRequestStatus): Promise<void> {
+  await updateContactRequestStatus(id, status)
   revalidatePath("/editor")
 }
 

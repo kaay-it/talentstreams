@@ -49,7 +49,13 @@
 | Реализована: токен работодателя (`crypto.randomUUID()`, колонка `ID` в Employers); `employer_token` передаётся в SendPulse; ссылка в письме `/list/[listId]?e={{employer_token}}`; `getEmployerByToken()` и `filterCandidatesForEmployer()` в `lib/sheets.ts`; поля `excludedCompanies`/`excludedIndustries` в `Profile`.
 
 | Запросы на контакт (Contact Requests)
-| Реализованы: лист «Contact Requests» в Google Sheets автосоздаётся при первом обращении. Два типа запросов: по кандидату (`candidateId` заполнен, 7 статусов) и общий (`candidateId` пуст, 3 статуса — «Новый запрос» / «Взяли в работу» / «Завершён»). Поля строки: ID (UUID), Timestamp, List ID, Stream, Candidate ID, Employer Token, Employer Name, Company, Employer Email, Status.
+| Хранятся в PostgreSQL (Neon) через Drizzle ORM — таблица `contactRequests`. Два типа: по кандидату (`candidateId` заполнен, 7 статусов) и общий (`candidateId` пуст, 3 статуса). Функции в `lib/db/contact-requests.ts`. Исторические данные в Google Sheets остаются как архив.
+
+| Neon + Drizzle ORM
+| ✅ TASK-DB-1 + TASK-DB-2. PostgreSQL через Vercel Marketplace (Neon). Схема — `lib/db/schema.ts`, клиент — `lib/db/index.ts` (neon-http driver). Миграция — `scripts/migrate.mjs`. Обход TLS корпоративного прокси в локальной среде: `NODE_TLS_REJECT_UNAUTHORIZED=0` при `NODE_ENV !== "production"` в `lib/db/index.ts`.
+
+| Стримы — раздел редактора
+| Страница `/editor/streams` — отображение стримов из Google Sheets (Stream / Тип / Описание). Только чтение. Пункт «Стримы» добавлен в `EditorNav` (иконка Layers, между «Запросы» и «Настройки»).
 |===
 
 == Выполненные задачи
@@ -131,22 +137,26 @@
 * Server Action `submitContactRequest(candidateId, listId, employerToken)` добавлен в `app/actions.ts` — находит работодателя по токену через `getEmployerByToken`, получает стрим через `getMailingLists`, вызывает `appendContactRequest`.
 * `ContactButton` (`components/contact-button.tsx`) полностью функциональна: вызывает Server Action, показывает «Отправка…» в процессе, подтверждение об успехе, inline-ошибку с иконкой AlertCircle. При отсутствии `employerToken` (вид редактора): кнопка неактивна, метка «работодатель не определён».
 
+NOTE: `appendContactRequest()` перенесена в Neon в рамках TASK-DB-2 ✅. Актуальная реализация — `lib/db/contact-requests.ts`.
+
 ---
 
 === ✅ TASK-02: Интерфейс управления запросами в редакторе
 
 *Выполнено:*
 
-* Тип `ContactRequest` и union-тип `ContactRequestStatus` добавлены в `lib/sheets.ts`.
-* `getContactRequests()` — читает лист «Contact Requests» с динамическим маппингом колонок по заголовкам.
-* `updateContactRequestStatus(rowIndex, status)` — читает заголовочную строку для поиска колонки Status, обновляет конкретную ячейку.
-* Server Action `setContactRequestStatus(rowIndex, status)` добавлен в `app/actions.ts` с `revalidatePath("/editor")`.
+* Типы `ContactRequest` и `ContactRequestStatus` определены (изначально в `lib/sheets.ts`, перенесены в `lib/db/contact-requests.ts` при TASK-DB-2).
+* `getContactRequests()` — выборка запросов, сортировка по убыванию даты.
+* `updateContactRequestStatus(id, status)` — обновление статуса по `id` (UUID).
+* Server Action `setContactRequestStatus(id, status)` добавлен в `app/actions.ts` с `revalidatePath("/editor")`.
 * Страница `app/editor/requests/page.tsx` — загружает запросы и профили параллельно, показывает бейдж «N новых».
 * `components/contact-requests-section.tsx` — два раздела:
   ** «Общие запросы»: запросы без `candidateId` — 3 статуса (Новый запрос / Взяли в работу / Завершён).
   ** «По кандидатам»: запросы с `candidateId` — 7 статусов (Новый запрос, Кандидату написали, Кандидат не отвечает, Связаться с Аленой, Кандидату интересно, Кандидату не интересно, Контакты переданы).
   ** Цветные бейджи статусов; `<select>` выпадающий список меняет статус через `useTransition`.
 * «Запросы» добавлен в `EditorNav` (иконка Handshake, между Работодатели и Настройки).
+
+NOTE: Реализация перенесена в Neon (TASK-DB-2 ✅). `lib/sheets.ts` больше не содержит функций Contact Requests. Актуальные функции — `lib/db/contact-requests.ts`. `setContactRequestStatus` принимает `id: string` (UUID) вместо `rowIndex: number`.
 
 ---
 
@@ -323,6 +333,49 @@
 
 ---
 
+=== ✅ TASK-DB-1: Инфраструктура Neon + Drizzle
+
+*Выполнено:*
+
+* Neon подключён через Vercel Marketplace; переменные `DATABASE_URL`, `DATABASE_URL_UNPOOLED` проставлены в Vercel и добавлены в `.env`.
+* Зависимости: `drizzle-orm`, `@neondatabase/serverless` (runtime); `drizzle-kit`, `dotenv`, `ws` (dev).
+* `lib/db/schema.ts` — схема таблицы `contactRequests` (10 колонок camelCase, без underscores).
+* `lib/db/index.ts` — клиент `neon()` + `drizzle()` (neon-http driver, HTTP вместо WebSocket). Установлен `NODE_TLS_REJECT_UNAUTHORIZED=0` при `NODE_ENV !== "production"` — обход TLS-перехвата корпоративного прокси в локальной среде.
+* `scripts/migrate.mjs` — скрипт миграции через `drizzle-orm/neon-http/migrator` (HTTP, не WebSocket). Загружает `.env.local` и `.env` через dotenv. Запуск: `npm run db:migrate`.
+* `drizzle.config.ts` — конфигурация drizzle-kit для генерации миграций (`db:generate`).
+* Миграция `lib/db/migrations/0000_high_wraith.sql` сгенерирована и применена к Neon.
+
+---
+
+=== ✅ TASK-DB-2: Перенос Contact Requests в Neon
+
+*Выполнено:*
+
+* Создан `lib/db/contact-requests.ts` — типы `ContactRequest`, `ContactRequestStatus` и три функции через Drizzle:
+** `appendContactRequest()` → `db.insert(contactRequests).values(...)`
+** `getContactRequests()` → `db.select().from(contactRequests).orderBy(desc(contactRequests.timestamp))`
+** `updateContactRequestStatus(id, status)` → `db.update(...).set({ status }).where(eq(contactRequests.id, id))`
+* `lib/sheets.ts` — удалены `appendContactRequest`, `getContactRequests`, `updateContactRequestStatus`, `ContactRequest`, `ContactRequestStatus`, `appendRow` (больше нигде не использовалась).
+* `app/actions.ts` — обновлены импорты; `setContactRequestStatus(rowIndex: number, status)` → `setContactRequestStatus(id: string, status)`.
+* `components/contact-requests-section.tsx` — `req.rowIndex` → `req.id`, импорт типов из `lib/db/contact-requests`.
+* `app/editor/requests/page.tsx` — `getContactRequests` из `lib/db/contact-requests`, `getProfiles` по-прежнему из `lib/sheets`.
+* Исторические данные в листе «Contact Requests» остаются как архив; новые запросы накапливаются в Neon.
+
+---
+
+=== ✅ Стримы — отображение в редакторе (чтение из Sheets)
+
+*Выполнено:*
+
+* `lib/sheets.ts` — добавлен тип `StreamRecord` и функция `getStreamsDetailed()`: читает колонки Stream / Type / Description из листа «Streams», возвращает `StreamRecord[]`.
+* `app/editor/streams/page.tsx` — новая страница с auth-проверкой, отображает таблицу стримов (Название / Тип / Описание). Пустые ячейки → «—».
+* `components/editor-nav.tsx` — добавлен пункт «Стримы» (иконка Layers, между «Запросы» и «Настройки»).
+* `getStreams()` (возвращает `string[]` для формы регистрации) — не изменена.
+
+NOTE: Страница только читает из Sheets. Управление стримами (добавление, удаление, переименование через Global Config) — TASK-GC-1/2/3.
+
+---
+
 === ⚪ Вне MVP (задокументировано, реализовать позже)
 
 [cols="1,3", options="header"]
@@ -485,7 +538,7 @@ Vercel Postgres (декабрь 2024) был упразднён и перене�
 
 *Против Supabase:* при хостинге на Vercel Supabase становится лишним сторонним сервисом — отдельный аккаунт, отдельный счёт, ручная настройка env vars. Преимуществ перед Neon+Blob нет: оба дают PostgreSQL + файловое хранилище, но Neon нативно интегрирован в Vercel.
 
-*Технический выигрыш от перехода:* `lib/sheets.ts` (1039 строк, весь header-mapping и `ensureColumns`-код) заменяется на `lib/db.ts` с Prisma Client — типы генерируются автоматически из схемы. TASK-DB-5 (резюме) реализуется через `@vercel/blob`.
+*Технический выигрыш от перехода:* `lib/sheets.ts` (1039 строк, весь header-mapping и `ensureColumns`-код) заменяется на `lib/db/` с Drizzle — схема на TypeScript, SQL-like запросы, минимальный бандл без cold-start штрафа на Vercel. TASK-DB-5 (резюме) реализуется через `@vercel/blob`.
 
 === Схема данных (PostgreSQL)
 
@@ -516,82 +569,177 @@ contact_requests -- запросы на контакт
   employer_id UUID FK, employer_name, company, employer_email, status
 ----
 
+=== Стратегия: постепенный переход
+
+Таблицы делятся по тому, кто в них пишет:
+
+[cols="2,1,1,1", options="header"]
+|===
+| Таблица | Пишет приложение | Правит редактор в Sheets | Решение
+
+| Contact Requests | ✅ Только оно | ❌ Никогда | → *Neon сейчас*
+| Employers | ✅ Форма | ⚠ Иногда вручную | → Sheets, отложить
+| Candidates | ✅ Регистрация | ✅ Профиль целиком | → Sheets, нужен редактор профилей в UI
+| Mailing Lists | ❌ | ✅ Полностью | → Sheets, нужен конструктор выпусков в UI
+| Streams | ❌ | ✅ | → Sheets / Global Config, отложить
+|===
+
+Первый шаг — только Contact Requests. Это единственная таблица, которую редактор никогда не трогает вручную. Все остальные остаются в Sheets до появления соответствующего UI в приложении.
+
 === Задачи
 
-==== TASK-DB-1: Инфраструктура — Neon + Vercel Blob
+==== ✅ TASK-DB-1: Инфраструктура — Neon + Drizzle
 
-. Подключить Neon через Vercel Marketplace (Storage → Neon) — переменные `DATABASE_URL`, `DATABASE_URL_UNPOOLED` проставятся в Vercel автоматически и в `.env.local` через `vercel env pull`.
-. Установить зависимости: `prisma`, `@prisma/client`.
-. Описать схему в `prisma/schema.prisma` (5 таблиц: `candidates`, `employers`, `streams`, `mailing_lists`, `mailing_list_candidates`, `contact_requests`).
-. Запустить `prisma migrate dev --name init` — создать таблицы в Neon.
-. Создать `lib/db.ts` с экспортом Prisma Client (singleton-паттерн для Next.js).
-. Vercel Blob не требует отдельной настройки — `BLOB_READ_WRITE_TOKEN` добавляется автоматически при подключении через Vercel Storage.
+Выполнено. Подробности — в разделе «Выполненные задачи → TASK-DB-1».
 
-*Сложность:* низкая. Блокирует все остальные DB-задачи.
+NOTE: Drizzle выбран вместо Prisma — меньше бандл, быстрее cold start на Vercel serverless, нативная интеграция Neon через HTTP без постоянного соединения. Миграция применяется через `scripts/migrate.mjs` (HTTP-driver, не drizzle-kit migrate — последний зависал из-за WebSocket в Node.js).
 
 ---
 
-==== TASK-DB-2: Разовая миграция данных из Google Sheets
+==== ✅ TASK-DB-2: Перенос Contact Requests в Neon
 
-. Написать скрипт `scripts/migrate-from-sheets.ts` — читает данные через текущий `lib/sheets.ts`, пишет в Neon через Prisma.
-. Обработать особые случаи: legacy-строки без `status` → `status: "Активный"`; строки без `id` → сгенерировать UUID; `excludedCompanies`/`excludedIndustries` как строки → распарсить в массивы.
-. Запустить скрипт (`npx tsx scripts/migrate-from-sheets.ts`), проверить количество строк и связи.
-. После проверки скрипт можно удалить.
+Выполнено. Подробности — в разделе «Выполненные задачи → TASK-DB-2».
 
-*Сложность:* средняя — грязные данные потребуют ручной проверки результата.
+*Актуальная схема (`lib/db/schema.ts`):*
+[source,ts]
+----
+export const contactRequests = pgTable("contactRequests", {
+  id:            text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  timestamp:     timestamp("timestamp").defaultNow().notNull(),
+  listId:        text("listId").notNull().default(""),
+  stream:        text("stream").notNull().default(""),
+  candidateId:   text("candidateId").notNull().default(""),
+  employerToken: text("employerToken").notNull().default(""),
+  employerName:  text("employerName").notNull().default(""),
+  company:       text("company").notNull().default(""),
+  employerEmail: text("employerEmail").notNull().default(""),
+  status:        text("status").notNull().default("Новый запрос"),
+})
+----
 
----
-
-==== TASK-DB-3: Замена операций чтения
-
-Переписать в `lib/db.ts` все функции чтения. Сигнатуры остаются прежними — `app/actions.ts` и страницы не меняются.
-
-* `getProfiles()` / `getProfile(id)` → `prisma.candidate.findMany/findUnique`
-* `getCandidates()` → `prisma.candidate.findMany` (все статусы)
-* `getEmployers()` / `getEmployerByToken()` / `getEmployersByStream()` → `prisma.employer.findMany/findFirst`
-* `getMailingLists()` / `getMailingList()` → `prisma.mailingList.findUnique` с `include: { candidates: true }`
-* `getContactRequests()` → `prisma.contactRequest.findMany`
-* `getStreams()` → `prisma.stream.findMany` (или Vercel Global Config — см. анализ выше)
-
-*Сложность:* средняя. Основной объём работы.
-
----
-
-==== TASK-DB-4: Замена операций записи
-
-* `appendCandidateRow()` / `updateCandidateStatus()` → `prisma.candidate.create/update`
-* `appendEmployerRow()` / `updateEmployerStatus()` → `prisma.employer.create/update`
-* `appendContactRequest()` / `updateContactRequestStatus()` → `prisma.contactRequest.create/update`
-* Удалить: `ensureProfileColumns()`, `ensureEmployerColumns()`, `ensureCandidateColumns()`, `ensureSheet()`, `colLetter()`, весь header-mapping код, `getAccessToken()`, `fetchSheetValues()`.
-* Убрать из UI кнопку «Проверить или добавить колонки» и раздел Настройки если в нём больше ничего не останется.
-
-*Сложность:* низкая — проще, чем чтение.
+`candidateId` и `employerToken` — строки без FK: кандидаты и работодатели пока остаются в Sheets. Пустой `candidateId` = общий запрос. Функции — в `lib/db/contact-requests.ts`. `updateContactRequestStatus` принимает `id: string` (UUID), не `rowIndex`.
 
 ---
 
-==== TASK-DB-5: Загрузка резюме через Vercel Blob
+==== TASK-DB-3 (отложено): Employers → Neon
 
-Реализовать TASK-19 (загрузка файла резюме) через `@vercel/blob`:
-
-. Установить `@vercel/blob`.
-. В форме кандидата добавить `input[type=file]` рядом с полем ссылки (одно или другое).
-. Server Action загружает файл через `put()` в Vercel Blob, сохраняет публичный URL в `candidate.resume_url`.
-. Лимит файла на клиенте: 10 МБ. Допустимые типы: PDF, DOC, DOCX.
-
-*Сложность:* средняя. Зависит от TASK-DB-4.
+Откладывается до принятия решения о редакторе работодателей в UI приложения. Пока редактор правит данные работодателей напрямую в Sheets — переход невозможен без потери этой возможности.
 
 ---
 
-==== TASK-DB-6: Вывод Google Sheets из эксплуатации
+==== TASK-DB-4 (отложено): Candidates → Neon
 
-. Убедиться, что все операции идут через Neon (проверить логи Vercel).
-. Удалить `lib/sheets.ts` и зависимость `googleapis` (если использовалась).
-. Убрать переменные окружения `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEET_ID` из `.env` и Vercel.
-. Отозвать права у Service Account в Google Cloud Console.
-. Оставить Google Sheet в режиме read-only как архив.
-
-*Сложность:* низкая. Финальный шаг.
+Требует построения редактора профиля кандидата в приложении (поля title, bio, stream, level, industry, summary и др.). До этого редактор работает с профилями напрямую в Sheets.
 
 ---
 
-NOTE: `lib/sendpulse.ts` миграции не требует — SendPulse не зависит от источника данных.
+==== TASK-DB-5 (отложено): Mailing Lists → Neon
+
+Требует построения конструктора выпусков в редакторе. Сейчас выпуски создаются вручную в листе «Mailing lists» — это основной редакторский инструмент.
+
+---
+
+==== TASK-DB-6 (отложено): Загрузка резюме через Vercel Blob
+
+Реализовать TASK-19 поверх `@vercel/blob`. Зависит от TASK-DB-4 (candidates в Neon).
+
+---
+
+==== TASK-DB-7 (отложено): Полный вывод Google Sheets из эксплуатации
+
+Финальный шаг после переноса всех таблиц. Удаление `lib/sheets.ts`, отзыв прав Service Account, удаление переменных окружения.
+
+---
+
+NOTE: `lib/sendpulse.ts` миграции не требует. Схема Drizzle расширяется по мере переноса таблиц — новые таблицы добавляются в `lib/db/schema.ts` в TASK-DB-3/4/5.
+
+== Перенос стримов в Vercel Global Config
+
+Стримы — идеальный кандидат для Global Config: их меньше 20, меняются редко (раз в несколько месяцев), но читаются при каждой загрузке регистрационной формы. Чтение из Global Config происходит на CDN-ноде за < 1 мс без обращения к серверу.
+
+*Ограничение:* Global Config доступен только для чтения из app-кода. Запись — только через Vercel Management API с `VERCEL_API_TOKEN`. Это нормально: изменения стримов редкие, а UI в редакторе будет вызывать этот API через Server Action.
+
+*Независимость:* задачи не зависят от TASK-DB — Global Config и Neon это разные продукты.
+
+=== TASK-GC-1: Инфраструктура и первичное наполнение
+
+. Создать Edge Config store в Vercel Dashboard (Storage → Edge Config).
+. Установить `@vercel/edge-config`.
+. Добавить переменные окружения:
+  * `EDGE_CONFIG` — connection string (проставляется автоматически при подключении через Marketplace)
+  * `VERCEL_API_TOKEN` — токен с правом на запись в Edge Config (создать в Vercel Account Settings → Tokens)
+  * `EDGE_CONFIG_ID` — ID стора (вида `ecfg_...`, виден в дашборде)
+. Записать начальные данные вручную через Vercel Dashboard или API: `{ "streams": ["Finance", "Tech", ...] }`.
+. Убрать лист «Streams» из Google Sheets (или оставить как резервный).
+
+*Сложность:* низкая.
+
+---
+
+=== TASK-GC-2: Замена getStreams()
+
+Заменить реализацию `getStreams()` — сигнатура и все вызовы остаются прежними.
+
+[source,ts]
+----
+// lib/streams.ts
+import { get } from "@vercel/edge-config"
+
+export async function getStreams(): Promise<string[]> {
+  try {
+    const streams = await get<string[]>("streams")
+    return streams ?? []
+  } catch {
+    return []
+  }
+}
+----
+
+Обновить импорты в `app/page.tsx` и `app/actions.ts` (где используется `getStreams`): заменить `from "@/lib/sheets"` на `from "@/lib/streams"`.
+
+*Сложность:* низкая.
+
+---
+
+=== TASK-GC-3: UI управления стримами в редакторе
+
+NOTE: Страница `/editor/streams` уже существует (display-only, читает из Sheets — см. «Выполненные задачи → Стримы»). TASK-GC-3 добавляет к ней возможность изменения через Global Config.
+
+Расширить существующую страницу `app/editor/streams/page.tsx`.
+
+*Функциональность:*
+
+* Список текущих стримов с кнопкой удаления у каждого.
+* Форма добавления нового стрима (одно текстовое поле + кнопка).
+* Переименование: клик по названию → inline-редактирование.
+
+*Server Actions* (`app/actions.ts`):
+
+[source,ts]
+----
+// Все три action-а читают текущий массив из Global Config,
+// вносят изменение и пишут обновлённый массив обратно через Vercel API.
+
+async function updateStreamsInConfig(streams: string[]): Promise<void> {
+  await fetch(`https://api.vercel.com/v1/edge-config/${process.env.EDGE_CONFIG_ID}/items`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${process.env.VERCEL_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ items: [{ operation: "upsert", key: "streams", value: streams }] }),
+  })
+}
+
+export async function addStream(name: string): Promise<void>     // append + updateStreamsInConfig
+export async function deleteStream(name: string): Promise<void>  // filter out + updateStreamsInConfig
+export async function renameStream(old: string, next: string): Promise<void> // map + updateStreamsInConfig
+----
+
+Все три action-а вызывают `revalidatePath("/editor/streams")` и `revalidatePath("/")` (форма регистрации на главной обновит список стримов).
+
+Добавить пункт «Стримы» в `EditorNav` (между Настройками или как отдельный раздел).
+
+*Сложность:* средняя — новая страница + три action-а + inline-редактирование.
+
+NOTE: Задержка записи в Global Config — до 10 секунд до глобального распространения. Для управления стримами это несущественно.

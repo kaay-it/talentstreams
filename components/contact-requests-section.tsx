@@ -2,7 +2,7 @@
 
 import { useTransition } from "react"
 import { setContactRequestStatus } from "@/app/actions"
-import type { ContactRequest, ContactRequestStatus } from "@/lib/sheets"
+import type { ContactRequest, ContactRequestStatus } from "@/lib/db/contact-requests"
 
 const CANDIDATE_STATUSES: ContactRequestStatus[] = [
   "Новый запрос",
@@ -92,7 +92,7 @@ function RequestRow({
 
   const handleStatusChange = (status: ContactRequestStatus) => {
     startTransition(async () => {
-      await setContactRequestStatus(req.rowIndex, status)
+      await setContactRequestStatus(req.id, status)
     })
   }
 
