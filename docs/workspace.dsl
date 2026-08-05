@@ -12,7 +12,9 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     # ── Внешние системы ──────────────────────────────────────────────────────
 
-    googleSheets = softwareSystem "Google Sheets" "Единое хранилище данных: профили кандидатов, подборки рассылок, стримы, заявки работодателей (со статусом), заявки кандидатов" "External"
+    googleSheets = softwareSystem "Google Sheets" "Хранилище данных: профили кандидатов, подборки рассылок, стримы (Stream/Type/Description), заявки работодателей. Contact Requests перенесены в Neon." "External"
+
+    neon = softwareSystem "Neon (PostgreSQL)" "Serverless PostgreSQL через Vercel Marketplace. Таблица contactRequests. Подключение через neon-http driver (HTTP, без WebSocket)." "External"
 
     sendPulse = softwareSystem "SendPulse" "Email-маркетинг: адресные книги подписчиков (мастер + по стримам), рассылки кампаний" "External"
 
@@ -54,17 +56,21 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         requestsPage = component "RequestsPage (/editor/requests)" "Управление запросами: два раздела — «Общие запросы» (без кандидата, 3 статуса) и «По кандидатам» (7 статусов). Выпадающий список для смены статуса." "Next.js Server Component" "Page"
 
+        streamsPage = component "StreamsPage (/editor/streams)" "Отображение стримов из Google Sheets: Stream / Тип / Описание. Только чтение. Пункт «Стримы» в EditorNav." "Next.js Server Component" "Page"
+
         contactRequestsSection = component "ContactRequestsSection" "Список запросов с цветными бейджами и выпадающим статусом. Разделён на «Общие запросы» и «По кандидатам»." "React Client Component" "UI"
 
         generalInquiryButton = component "GeneralInquiryButton" "Кнопка «Связаться с нами» в блоке «Не нашли подходящих». Пишет в Contact Requests без candidateId." "React Client Component" "UI"
 
         # Server Actions
-        serverActions = component "Server Actions" "registerEmployer() — пишет со статусом «На проверке», не добавляет в SP.\nregisterCandidate() — пишет в Sheets.\npublishMailingList() — создаёт кампанию в SP.\nconfirmEmployer() — сначала SP, затем статус «Подтверждён».\nrejectEmployer() — статус «Отклонён».\naddProfileColumns() — миграция колонок.\nsubmitContactRequest() — записывает запрос по кандидату в «Contact Requests».\nsubmitGeneralInquiry() — записывает общий запрос (без candidateId).\nsetContactRequestStatus() — меняет статус запроса." "Next.js Server Actions" "Logic"
+        serverActions = component "Server Actions" "registerEmployer() — пишет в Sheets со статусом «На проверке».\nregisterCandidate() — пишет в Sheets.\npublishMailingList() — создаёт кампанию в SendPulse.\nconfirmEmployer() — добавляет в SendPulse, затем статус «Подтверждён» в Sheets.\nrejectEmployer() — статус «Отклонён» в Sheets.\napproveCandidate() / rejectCandidate() — статусы кандидата в Sheets.\naddAllColumns() — миграция колонок (Sheets).\nsubmitContactRequest() — записывает запрос по кандидату в Neon.\nsubmitGeneralInquiry() — записывает общий запрос (candidateId='') в Neon.\nsetContactRequestStatus(id, status) — меняет статус запроса в Neon по id (UUID)." "Next.js Server Actions" "Logic"
 
         publishApi = component "Publish API (/api/publish/[listId])" "HTTP-роут для запуска рассылки через curl или внешние системы. Защищён EDITOR_SECRET." "Next.js Route Handler" "Logic"
 
         # Integrations
-        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nЧтение: профили, подборки, стримы, работодатели.\nЗапись: регистрации, статусы работодателей.\nМиграция: ensureProfileColumns().\nАвтосоздание листов через ensureSheet().\ngetEmployerByToken() — поиск по токену.\nfilterCandidatesForEmployer() — фильтрация кандидатов по предпочтениям.\nappendContactRequest() — запись запроса в «Contact Requests».\ngetContactRequests() — чтение запросов с динамическим маппингом колонок.\nupdateContactRequestStatus() — обновление статуса конкретной строки." "TypeScript, Google Sheets API v4" "Integration"
+        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nЧтение: профили, подборки, стримы (getStreamsDetailed), работодатели.\nЗапись: регистрации работодателей и кандидатов; статусы работодателей и кандидатов.\nМиграция: ensureProfileColumns(), ensureEmployerColumns(), ensureCandidateColumns().\nАвтосоздание листов через ensureSheet().\ngetEmployerByToken() — поиск по токену.\nfilterCandidatesForEmployer() — фильтрация по предпочтениям кандидата.\nContact Requests перенесены в Neon → lib/db/contact-requests.ts." "TypeScript, Google Sheets API v4" "Integration"
+
+        dbLib = component "DB Library (lib/db/)" "Drizzle ORM + @neondatabase/serverless (neon-http driver).\nschema.ts — схема таблицы contactRequests.\nindex.ts — клиент drizzle(neon(DATABASE_URL)).\ncontact-requests.ts — appendContactRequest(), getContactRequests(), updateContactRequestStatus(id).\nMigrations: scripts/migrate.mjs." "TypeScript, Drizzle ORM, Neon" "Integration"
 
         sendPulseLib = component "SendPulse Library (lib/sendpulse.ts)" "OAuth 2.0 с кэшем токена (59 мин). Кэш адресных книг с TTL 60 с.\ngetOrCreateBook() — авто-создание книги.\ngetBookEmailCount() — проверка подписчиков до рассылки.\ncreateCampaign() / getCampaigns()." "TypeScript, SendPulse REST API" "Integration"
       }
@@ -78,6 +84,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
     editor -> talentStreams "Подтверждает работодателей, запускает рассылки через /editor"
 
     talentStreams -> googleSheets "Читает профили, подборки, стримы, работодателей; пишет заявки и статусы" "HTTPS, Sheets API v4"
+    talentStreams -> neon "INSERT/SELECT/UPDATE contactRequests" "HTTPS, Neon HTTP API"
     talentStreams -> sendPulse "Добавляет подтверждённых работодателей; создаёт кампании" "HTTPS, REST API"
 
     # ── Отношения: контейнерный уровень ──────────────────────────────────────
@@ -86,6 +93,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
     candidate -> talentStreams.webApp "HTTPS"
     editor -> talentStreams.webApp "HTTPS (/editor)"
     talentStreams.webApp -> googleSheets "Sheets API v4 / Service Account JWT" "HTTPS"
+    talentStreams.webApp -> neon "Neon HTTP API / Drizzle ORM" "HTTPS"
     talentStreams.webApp -> sendPulse "OAuth 2.0 + REST API" "HTTPS"
 
     # ── Отношения: компонентный уровень ──────────────────────────────────────
@@ -114,19 +122,24 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendEmployerRow(), appendCandidateRow(), getMailingList(), updateEmployerStatus()"
     talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "addToSendPulse() / createCampaign()"
+    talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "appendContactRequest() / updateContactRequestStatus(id)"
 
     editor -> talentStreams.webApp.releasesPage "Просматривает выпуски, запускает рассылку"
     editor -> talentStreams.webApp.employersPage "Подтверждает и отклоняет заявки работодателей"
     editor -> talentStreams.webApp.settingsPage "Управляет настройками и миграцией колонок"
+    editor -> talentStreams.webApp.streamsPage "Просматривает список стримов"
     editor -> talentStreams.webApp.publishApi "curl /api/publish/{listId}?token=…"
 
-    talentStreams.webApp.sheetsLib -> googleSheets "fetchSheetValues(), appendRow(), values.update()" "HTTPS, Sheets API v4"
+    talentStreams.webApp.sheetsLib -> googleSheets "fetchSheetValues(), values.update()" "HTTPS, Sheets API v4"
+    talentStreams.webApp.dbLib -> neon "INSERT / SELECT / UPDATE contactRequests" "HTTPS, Neon HTTP API"
     talentStreams.webApp.sendPulseLib -> sendPulse "POST /oauth/access_token, GET /addressbooks, POST /addressbooks/{id}/emails, POST /campaigns" "HTTPS"
 
-    talentStreams.webApp.requestsPage -> talentStreams.webApp.sheetsLib "getContactRequests(), getProfiles()"
+    talentStreams.webApp.requestsPage -> talentStreams.webApp.dbLib "getContactRequests()"
+    talentStreams.webApp.requestsPage -> talentStreams.webApp.sheetsLib "getProfiles()"
     talentStreams.webApp.requestsPage -> talentStreams.webApp.contactRequestsSection "Рендерит"
+    talentStreams.webApp.streamsPage -> talentStreams.webApp.sheetsLib "getStreamsDetailed()"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.generalInquiryButton "Рендерит (при наличии токена)"
-    talentStreams.webApp.contactRequestsSection -> talentStreams.webApp.serverActions "setContactRequestStatus()"
+    talentStreams.webApp.contactRequestsSection -> talentStreams.webApp.serverActions "setContactRequestStatus(id)"
     talentStreams.webApp.generalInquiryButton -> talentStreams.webApp.serverActions "submitGeneralInquiry()"
     talentStreams.webApp.contactButton -> talentStreams.webApp.serverActions "submitContactRequest()"
     editor -> talentStreams.webApp.requestsPage "Управляет запросами"
@@ -198,8 +211,8 @@ workspace "TalentStreams" "Платформа подборки проверен�
       talentStreams.webApp.sheetsLib -> googleSheets "GET Employers — поиск по token"
       talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "getMailingLists() — получение stream"
       talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000"
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendContactRequest({ID, Timestamp, stream, candidateId, …, Status: 'Новый запрос'})"
-      talentStreams.webApp.sheetsLib -> googleSheets "POST /values/Contact Requests!A1:append"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "appendContactRequest({id: uuid, listId, stream, candidateId, …, status: 'Новый запрос'})"
+      talentStreams.webApp.dbLib -> neon "INSERT INTO contactRequests"
       autolayout lr
     }
 

@@ -24,7 +24,7 @@ participant "Sheets · Streams"      as sh_streams  #d0e8ff
 participant "Sheets · Candidates"   as sh_cands    #d0e8ff
 participant "Sheets · Mailing lists" as sh_mail    #d0e8ff
 participant "Sheets · Employers"    as sh_emp      #d0e8ff
-participant "Sheets · Contact Requests" as sh_contact #d0e8ff
+participant "Neon · contactRequests" as neonDb       #d4f0d4
 participant "SendPulse\n(мастер-книга)" as sp_master  #fce8cc
 participant "SendPulse\n(книга стрима)" as sp_stream  #fce8cc
 participant "SendPulse\nCampaigns"  as sp_camp     #fce8cc
@@ -213,15 +213,15 @@ app -> sh_emp : getEmployerByToken(employerToken)
 sh_emp --> app : { name, company, email, … }
 app -> sh_mail : getMailingLists() → stream для listId
 sh_mail --> app : { stream: "Finance", … }
-app -> sh_contact : appendContactRequest()\n{ ID: uuid, Timestamp, ListID, stream,\n  candidateId, employerToken, name, company, email,\n  Status: "Новый запрос" }
-sh_contact --> app : OK
+app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, stream,\n  candidateId, employerToken, employerName, company, employerEmail,\n  status: "Новый запрос" }
+neonDb --> app : OK
 app --> employer : «Запрос отправлен — мы свяжемся с кандидатом»
 
-note over sh_contact
-  Лист «Contact Requests»:
-  ─────────────────────────────────────────────────────────────────────────────
-  ID (UUID) | Timestamp | List ID | Stream  | Candidate ID | Employer Token | … | Status
-  e7f2a1…   | 31.07.26  | f04a9b… | Finance | a3f8e2c1-…   | 8f3a1c…        | … | Новый запрос
+note over neonDb
+  Таблица contactRequests (Neon / PostgreSQL):
+  ──────────────────────────────────────────────────────────────────────────────
+  id (UUID)  | timestamp   | listId  | stream  | candidateId | employerToken | … | status
+  e7f2a1…    | 2026-08-05  | f04a9b… | Finance | a3f8e2c1-…  | 8f3a1c…       | … | Новый запрос
 end note
 
 == 8. Работодатель оставляет общий запрос ==
@@ -236,12 +236,12 @@ employer -> app : Нажимает «Связаться с нами»
 app -> app : submitGeneralInquiry(listId, employerToken)
 app -> sh_emp : getEmployerByToken(employerToken)
 sh_emp --> app : { name, company, email, … }
-app -> sh_contact : appendContactRequest()\n{ ID: uuid, Timestamp, ListID, stream,\n  candidateId: "", employerToken, name, company, email,\n  Status: "Новый запрос" }
-sh_contact --> app : OK
+app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, stream,\n  candidateId: "", employerToken, employerName, company, employerEmail,\n  status: "Новый запрос" }
+neonDb --> app : OK
 app --> employer : «Запрос принят — мы свяжемся с вами»
 
-note over sh_contact
-  candidateId пуст — признак «Общего запроса»
+note over neonDb
+  candidateId = "" — признак «Общего запроса»
   Отображается в редакторе отдельно
   от запросов «По кандидатам»
 end note
@@ -249,16 +249,16 @@ end note
 == 9. Редактор обрабатывает запросы ==
 
 editor -> app : GET /editor/requests?secret=…
-app -> sh_contact : getContactRequests()
+app -> neonDb : SELECT * FROM contactRequests\nORDER BY timestamp DESC
 app -> sh_cands : getProfiles()
-sh_contact --> app : список запросов
+neonDb --> app : список запросов
 sh_cands --> app : профили кандидатов
-app --> editor : Раздел «Запросы»:\n«Общие запросы» (candidateId пуст, 3 статуса:\nНовый запрос / Взяли в работу / Завершён)\nи «По кандидатам» (7 статусов:\nНовый запрос, Кандидату написали,\nКандидат не отвечает, Связаться с Аленой,\nКандидату интересно, Кандидату не интересно,\nКонтакты переданы)
+app --> editor : Раздел «Запросы»:\n«Общие запросы» (candidateId = "", 3 статуса:\nНовый запрос / Взяли в работу / Завершён)\nи «По кандидатам» (7 статусов:\nНовый запрос, Кандидату написали,\nКандидат не отвечает, Связаться с Аленой,\nКандидату интересно, Кандидату не интересно,\nКонтакты переданы)
 
 editor -> app : Меняет статус через выпадающий список
-app -> app : setContactRequestStatus(rowIndex, status)
-app -> sh_contact : updateContactRequestStatus(rowIndex, status)
-sh_contact --> app : OK
+app -> app : setContactRequestStatus(id, status)
+app -> neonDb : UPDATE contactRequests\nSET status=… WHERE id=…
+neonDb --> app : OK
 app --> editor : Страница обновлена (revalidatePath)
 
 @enduml

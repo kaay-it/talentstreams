@@ -428,6 +428,26 @@ export async function getStreams(): Promise<string[]> {
   }
 }
 
+export type StreamRecord = { name: string; type: string; description: string }
+
+/** Return streams with Type and Description columns for the editor. */
+export async function getStreamsDetailed(): Promise<StreamRecord[]> {
+  try {
+    const { sheetId } = getEnv()
+    const values = await fetchSheetValues(sheetId, "'Streams'!A1:C1000")
+    return values
+      .slice(1)
+      .map((row) => ({
+        name: (row[0] ?? "").trim(),
+        type: (row[1] ?? "").trim(),
+        description: (row[2] ?? "").trim(),
+      }))
+      .filter((s) => s.name)
+  } catch {
+    return []
+  }
+}
+
 const WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
 async function ensureSheet(sheetId: string, token: string, title: string, headers: string[]): Promise<void> {
@@ -461,27 +481,6 @@ async function ensureSheet(sheetId: string, token: string, title: string, header
   )
 }
 
-async function appendRow(sheetTitle: string, headers: string[], values: string[]): Promise<void> {
-  const { email, privateKey, sheetId } = getEnv()
-  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
-  await ensureSheet(sheetId, token, sheetTitle, headers)
-
-  const range = encodeURIComponent(sheetTitle + "!A1")
-  const url =
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}:append` +
-    `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ values: [values] }),
-  })
-
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`Sheets append failed (${res.status}): ${body}`)
-  }
-}
 
 const EMPLOYERS_HEADERS = ["ID", "Timestamp", "Name", "Company", "Email", "Phone", "Primary Contact", "Telegram", "LinkedIn", "Streams", "Status"]
 export type Candidate = {
@@ -662,33 +661,7 @@ export async function ensureCandidateColumns(): Promise<{ added: string[] }> {
   return { added: missing }
 }
 
-const CONTACT_REQUESTS_HEADERS = [
-  "ID", "Timestamp", "List ID", "Stream", "Candidate ID",
-  "Employer Token", "Employer Name", "Company", "Employer Email", "Status",
-]
 
-export async function appendContactRequest(data: {
-  listId: string
-  stream: string
-  candidateId: string
-  employerToken: string
-  employerName: string
-  employerCompany: string
-  employerEmail: string
-}): Promise<void> {
-  await appendRow("Contact Requests", CONTACT_REQUESTS_HEADERS, [
-    crypto.randomUUID(),
-    new Date().toISOString(),
-    data.listId,
-    data.stream,
-    data.candidateId,
-    data.employerToken,
-    data.employerName,
-    data.employerCompany,
-    data.employerEmail,
-    "Новый запрос",
-  ])
-}
 
 export type MailingListSummary = {
   listId: string
@@ -862,81 +835,6 @@ export async function updateEmployerStatus(rowIndex: number, status: EmployerSta
   if (!res.ok) throw new Error(`Failed to update employer status (${res.status}): ${await res.text()}`)
 }
 
-export type ContactRequestStatus =
-  | "Новый запрос"
-  | "Кандидату написали"
-  | "Кандидат не отвечает"
-  | "Связаться с Аленой"
-  | "Кандидату интересно"
-  | "Кандидату не интересно"
-  | "Контакты переданы"
-  | "Взяли в работу"
-  | "Завершён"
-
-export type ContactRequest = {
-  id: string
-  rowIndex: number
-  timestamp: string
-  listId: string
-  stream: string
-  candidateId: string
-  employerToken: string
-  employerName: string
-  company: string
-  employerEmail: string
-  status: ContactRequestStatus
-}
-
-export async function getContactRequests(): Promise<ContactRequest[]> {
-  const { sheetId } = getEnv()
-  try {
-    const values = await fetchSheetValues(sheetId, "'Contact Requests'!A1:J1000")
-    if (values.length < 2) return []
-    const headers = values[0].map((h) => (h ?? "").trim().toLowerCase())
-    const col = (name: string) => headers.indexOf(name)
-
-    return values.slice(1).map((row, i) => ({
-      id: (row[col("id")] ?? "").trim(),
-      rowIndex: i + 2,
-      timestamp: (row[col("timestamp")] ?? "").trim(),
-      listId: (row[col("list id")] ?? "").trim(),
-      stream: (row[col("stream")] ?? "").trim(),
-      candidateId: (row[col("candidate id")] ?? "").trim(),
-      employerToken: (row[col("employer token")] ?? "").trim(),
-      employerName: (row[col("employer name")] ?? "").trim(),
-      company: (row[col("company")] ?? "").trim(),
-      employerEmail: (row[col("employer email")] ?? "").trim(),
-      status: ((row[col("status")] ?? "").trim() || "Новый запрос") as ContactRequestStatus,
-    })).filter((r) => r.id)
-  } catch {
-    return []
-  }
-}
-
-export async function updateContactRequestStatus(rowIndex: number, status: ContactRequestStatus): Promise<void> {
-  const { email, privateKey, sheetId } = getEnv()
-  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
-
-  const headerRes = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Contact Requests'!A1:J1")}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  )
-  const headerData = (await headerRes.json()) as { values?: string[][] }
-  const headers = (headerData.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
-  const statusColIdx = headers.indexOf("status")
-  if (statusColIdx < 0) throw new Error("Status column not found in Contact Requests sheet")
-
-  const range = encodeURIComponent(`'Contact Requests'!${colLetter(statusColIdx + 1)}${rowIndex}`)
-  const res = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueInputOption=USER_ENTERED`,
-    {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ values: [[status]] }),
-    },
-  )
-  if (!res.ok) throw new Error(`Failed to update contact request status (${res.status}): ${await res.text()}`)
-}
 
 /** Whether Google Sheets credentials are configured AND the key looks valid. */
 export function isSheetsConfigured(): boolean {

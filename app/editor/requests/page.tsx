@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation"
 import { Info } from "lucide-react"
-import { getContactRequests, getProfiles } from "@/lib/sheets"
+import { getContactRequests } from "@/lib/db/contact-requests"
+import { getProfiles } from "@/lib/sheets"
 import { ContactRequestsSection } from "@/components/contact-requests-section"
 
 export const dynamic = "force-dynamic"
