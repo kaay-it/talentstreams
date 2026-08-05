@@ -556,7 +556,7 @@ employers        -- работодатели
   country, additional_countries TEXT[], status
 
 streams          -- список стримов
-  id SERIAL PK, name TEXT UNIQUE
+  id SERIAL PK, name TEXT UNIQUE, type TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT ''
 
 mailing_lists    -- выпуски
   id UUID PK, stream, date
@@ -581,7 +581,7 @@ contact_requests -- запросы на контакт
 | Employers | ✅ Форма | ⚠ Иногда вручную | → Sheets, отложить
 | Candidates | ✅ Регистрация | ✅ Профиль целиком | → Sheets, нужен редактор профилей в UI
 | Mailing Lists | ❌ | ✅ Полностью | → Sheets, нужен конструктор выпусков в UI
-| Streams | ❌ | ✅ | → Sheets / Global Config, отложить
+| Streams | ❌ | ✅ | → Neon + UI в редакторе (отложить)
 |===
 
 Первый шаг — только Contact Requests. Это единственная таблица, которую редактор никогда не трогает вручную. Все остальные остаются в Sheets до появления соответствующего UI в приложении.
@@ -651,17 +651,41 @@ export const contactRequests = pgTable("contactRequests", {
 
 ---
 
-NOTE: `lib/sendpulse.ts` миграции не требует. Схема Drizzle расширяется по мере переноса таблиц — новые таблицы добавляются в `lib/db/schema.ts` в TASK-DB-3/4/5.
+==== TASK-DB-8 (отложено): Streams → Neon
 
-== Перенос стримов в Vercel Global Config
+Стримы сейчас читаются из Google Sheets (`getStreamsDetailed()` в `lib/sheets.ts`, страница `/editor/streams` отображает их). Основной подход — перенести в Neon вместе с UI управления в редакторе.
 
-Стримы — идеальный кандидат для Global Config: их меньше 20, меняются редко (раз в несколько месяцев), но читаются при каждой загрузке регистрационной формы. Чтение из Global Config происходит на CDN-ноде за < 1 мс без обращения к серверу.
+*Схема (`lib/db/schema.ts`):*
+[source,ts]
+----
+export const streams = pgTable("streams", {
+  id:          serial("id").primaryKey(),
+  name:        text("name").notNull().unique(),
+  type:        text("type").notNull().default(""),
+  description: text("description").notNull().default(""),
+})
+----
 
-*Ограничение:* Global Config доступен только для чтения из app-кода. Запись — только через Vercel Management API с `VERCEL_API_TOKEN`. Это нормально: изменения стримов редкие, а UI в редакторе будет вызывать этот API через Server Action.
+*Что делаем:*
 
-*Независимость:* задачи не зависят от TASK-DB — Global Config и Neon это разные продукты.
+. Добавить таблицу `streams` в схему, сгенерировать и применить миграцию.
+. Заменить `getStreams()` и `getStreamsDetailed()` в `lib/sheets.ts` на Drizzle-запросы из `lib/db/streams.ts`.
+. Расширить страницу `app/editor/streams/page.tsx`: добавить, удалить, переименовать стрим (Server Actions).
+. Перенести начальные данные из Sheets в Neon вручную или скриптом.
 
-=== TASK-GC-1: Инфраструктура и первичное наполнение
+*Сложность:* низкая (схема + CRUD).
+
+---
+
+NOTE: `lib/sendpulse.ts` миграции не требует. Схема Drizzle расширяется по мере переноса таблиц — новые таблицы добавляются в `lib/db/schema.ts` в TASK-DB-3/4/5/8.
+
+== Vercel Global Config — опциональная оптимизация производительности
+
+NOTE: Основной подход для стримов — Neon (TASK-DB-8). Global Config рассматривается опционально, если возникнут проблемы с производительностью: чтение из CDN-ноды за < 1 мс против ~50 мс запроса к Neon.
+
+Vercel Global Config (Edge Config) — глобально реплицированное key-value хранилище, читается прямо на CDN-ноде без обращения к серверу. Лимиты: 1 МБ, 100 000 чтений/мес, 100 записей/мес, задержка записи до 10 секунд.
+
+=== TASK-GC-1 (опционально): Инфраструктура и первичное наполнение
 
 . Создать Edge Config store в Vercel Dashboard (Storage → Edge Config).
 . Установить `@vercel/edge-config`.
@@ -676,7 +700,7 @@ NOTE: `lib/sendpulse.ts` миграции не требует. Схема Drizzl
 
 ---
 
-=== TASK-GC-2: Замена getStreams()
+=== TASK-GC-2 (опционально): Замена getStreams() на Edge Config
 
 Заменить реализацию `getStreams()` — сигнатура и все вызовы остаются прежними.
 
@@ -701,7 +725,7 @@ export async function getStreams(): Promise<string[]> {
 
 ---
 
-=== TASK-GC-3: UI управления стримами в редакторе
+=== TASK-GC-3 (опционально): UI управления стримами через Edge Config
 
 NOTE: Страница `/editor/streams` уже существует (display-only, читает из Sheets — см. «Выполненные задачи → Стримы»). TASK-GC-3 добавляет к ней возможность изменения через Global Config.
 
