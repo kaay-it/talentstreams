@@ -414,39 +414,6 @@ export async function getMailingList(listId: string): Promise<MailingList | null
   return { listId, stream, date, entries }
 }
 
-/** Return all streams from the "Streams" sheet tab (first column, skipping header row). */
-export async function getStreams(): Promise<string[]> {
-  try {
-    const { sheetId } = getEnv()
-    const values = await fetchSheetValues(sheetId, "'Streams'!A1:A1000")
-    return values
-      .slice(1)
-      .map((row) => (row[0] ?? "").trim())
-      .filter(Boolean)
-  } catch {
-    return []
-  }
-}
-
-export type StreamRecord = { name: string; type: string; description: string }
-
-/** Return streams with Type and Description columns for the editor. */
-export async function getStreamsDetailed(): Promise<StreamRecord[]> {
-  try {
-    const { sheetId } = getEnv()
-    const values = await fetchSheetValues(sheetId, "'Streams'!A1:C1000")
-    return values
-      .slice(1)
-      .map((row) => ({
-        name: (row[0] ?? "").trim(),
-        type: (row[1] ?? "").trim(),
-        description: (row[2] ?? "").trim(),
-      }))
-      .filter((s) => s.name)
-  } catch {
-    return []
-  }
-}
 
 const WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
+import { updateStreamRecord, createStreamRecord, deleteStreamRecord } from "@/lib/db/streams"
 import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -385,4 +386,26 @@ export async function submitContactRequest(
     employerCompany: employer.company,
     employerEmail: employer.email,
   })
+}
+
+export async function updateStream(
+  id: number,
+  data: { name: string; type: string; description: string },
+): Promise<void> {
+  await updateStreamRecord(id, data)
+  revalidatePath("/editor/streams")
+}
+
+export async function createStream(data: {
+  name: string
+  type: string
+  description: string
+}): Promise<void> {
+  await createStreamRecord(data)
+  revalidatePath("/editor/streams")
+}
+
+export async function deleteStream(id: number): Promise<void> {
+  await deleteStreamRecord(id)
+  revalidatePath("/editor/streams")
 }

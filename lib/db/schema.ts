@@ -1,4 +1,11 @@
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core"
+import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core"
+
+export const streams = pgTable("streams", {
+  id:          serial("id").primaryKey(),
+  name:        text("name").notNull().unique(),
+  type:        text("type").notNull().default(""),
+  description: text("description").notNull().default(""),
+})
 
 export const contactRequests = pgTable("contactRequests", {
   id:            text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),

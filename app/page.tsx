@@ -1,4 +1,5 @@
-import { isSheetsConfigured, getStreams } from "@/lib/sheets"
+import { isSheetsConfigured } from "@/lib/sheets"
+import { getStreams } from "@/lib/db/streams"
 import { EmployerRegistrationModal } from "@/components/employer-registration-modal"
 import { CandidateRegistrationModal } from "@/components/candidate-registration-modal"
 import {

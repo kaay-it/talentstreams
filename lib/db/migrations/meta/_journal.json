@@ -8,6 +8,13 @@
       "when": 1785922178143,
       "tag": "0000_high_wraith",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785935369759,
+      "tag": "0001_real_wendell_vaughn",
+      "breakpoints": true
     }
   ]
 }
