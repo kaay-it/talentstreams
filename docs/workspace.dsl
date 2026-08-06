@@ -12,11 +12,13 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     # ── Внешние системы ──────────────────────────────────────────────────────
 
-    googleSheets = softwareSystem "Google Sheets" "Хранилище данных: профили кандидатов, подборки рассылок, стримы (Stream/Type/Description), заявки работодателей. Contact Requests перенесены в Neon." "External"
+    googleSheets = softwareSystem "Google Sheets" "Хранилище данных: профили кандидатов, подборки рассылок, заявки работодателей. Стримы и Contact Requests перенесены в Neon." "External"
 
-    neon = softwareSystem "Neon (PostgreSQL)" "Serverless PostgreSQL через Vercel Marketplace. Таблица contactRequests. Подключение через neon-http driver (HTTP, без WebSocket)." "External"
+    neon = softwareSystem "Neon (PostgreSQL)" "Serverless PostgreSQL через Vercel Marketplace. Таблицы: contactRequests, streams. Подключение через neon-http driver (HTTP, без WebSocket)." "External"
 
     sendPulse = softwareSystem "SendPulse" "Email-маркетинг: адресные книги подписчиков (мастер + по стримам), рассылки кампаний" "External"
+
+    vercelBlob = softwareSystem "Vercel Blob" "Приватное файловое хранилище резюме кандидатов. Доступ через прокси /api/resume с Bearer-токеном. Хранит файлы: PDF, DOC, DOCX, RTF, ODT (до 5 МБ)." "External"
 
     # ── Основная система ─────────────────────────────────────────────────────
 
@@ -44,7 +46,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
         # Client Components
         employerModal = component "EmployerRegistrationModal" "Форма подписки работодателя: имя, компания, email, телефон, способ связи, выбор стримов. После отправки — статус «На проверке»." "React Client Component" "UI"
 
-        candidateModal = component "CandidateRegistrationModal" "Форма регистрации кандидата: имя, email, телефон, ссылка на резюме, сопроводительное письмо." "React Client Component" "UI"
+        candidateModal = component "CandidateRegistrationModal" "Форма регистрации кандидата: имя, email, телефон, сопроводительное письмо. Резюме — загрузить файл (PDF/DOC/DOCX/RTF/ODT, до 5 МБ) или указать URL — альтернативные варианты. Загрузка файла происходит при сабмите формы через POST /api/upload." "React Client Component" "UI"
 
         profileView = component "ProfileView" "Полная карточка профиля: имя, роль, bio, контакты, теги стримов, дополнительные поля. Кнопка «назад»." "React Client Component" "UI"
 
@@ -56,21 +58,25 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         requestsPage = component "RequestsPage (/editor/requests)" "Управление запросами: два раздела — «Общие запросы» (без кандидата, 3 статуса) и «По кандидатам» (7 статусов). Выпадающий список для смены статуса." "Next.js Server Component" "Page"
 
-        streamsPage = component "StreamsPage (/editor/streams)" "Отображение стримов из Google Sheets: Stream / Тип / Описание. Только чтение. Пункт «Стримы» в EditorNav." "Next.js Server Component" "Page"
+        streamsPage = component "StreamsPage (/editor/streams)" "Редактор стримов: список Stream / Тип / Описание из Neon. Полный CRUD через inline-редактирование (StreamsTable), удаление и добавление новых строк. Пункт «Стримы» в EditorNav." "Next.js Server Component" "Page"
 
         contactRequestsSection = component "ContactRequestsSection" "Список запросов с цветными бейджами и выпадающим статусом. Разделён на «Общие запросы» и «По кандидатам»." "React Client Component" "UI"
 
         generalInquiryButton = component "GeneralInquiryButton" "Кнопка «Связаться с нами» в блоке «Не нашли подходящих». Пишет в Contact Requests без candidateId." "React Client Component" "UI"
 
         # Server Actions
-        serverActions = component "Server Actions" "registerEmployer() — пишет в Sheets со статусом «На проверке».\nregisterCandidate() — пишет в Sheets.\npublishMailingList() — создаёт кампанию в SendPulse.\nconfirmEmployer() — добавляет в SendPulse, затем статус «Подтверждён» в Sheets.\nrejectEmployer() — статус «Отклонён» в Sheets.\napproveCandidate() / rejectCandidate() — статусы кандидата в Sheets.\naddAllColumns() — миграция колонок (Sheets).\nsubmitContactRequest() — записывает запрос по кандидату в Neon.\nsubmitGeneralInquiry() — записывает общий запрос (candidateId='') в Neon.\nsetContactRequestStatus(id, status) — меняет статус запроса в Neon по id (UUID)." "Next.js Server Actions" "Logic"
+        serverActions = component "Server Actions" "registerEmployer() — пишет в Sheets со статусом «На проверке».\nregisterCandidate() — пишет в Sheets.\npublishMailingList() — создаёт кампанию в SendPulse.\nconfirmEmployer() — добавляет в SendPulse, затем статус «Подтверждён» в Sheets.\nrejectEmployer() — статус «Отклонён» в Sheets.\napproveCandidate() / rejectCandidate() — статусы кандидата в Sheets.\naddAllColumns() — миграция колонок (Sheets).\nsubmitContactRequest() — записывает запрос по кандидату в Neon.\nsubmitGeneralInquiry() — записывает общий запрос (candidateId='') в Neon.\nsetContactRequestStatus(id, status) — меняет статус запроса в Neon по id (UUID).\nupdateStream(id, data) / createStream(data) / deleteStream(id) — CRUD стримов в Neon (revalidatePath /editor/streams)." "Next.js Server Actions" "Logic"
 
         publishApi = component "Publish API (/api/publish/[listId])" "HTTP-роут для запуска рассылки через curl или внешние системы. Защищён EDITOR_SECRET." "Next.js Route Handler" "Logic"
 
-        # Integrations
-        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nЧтение: профили, подборки, стримы (getStreamsDetailed), работодатели.\nЗапись: регистрации работодателей и кандидатов; статусы работодателей и кандидатов.\nМиграция: ensureProfileColumns(), ensureEmployerColumns(), ensureCandidateColumns().\nАвтосоздание листов через ensureSheet().\ngetEmployerByToken() — поиск по токену.\nfilterCandidatesForEmployer() — фильтрация по предпочтениям кандидата.\nContact Requests перенесены в Neon → lib/db/contact-requests.ts." "TypeScript, Google Sheets API v4" "Integration"
+        uploadApi = component "Upload API (/api/upload)" "POST-роут загрузки резюме: принимает multipart/form-data, проверяет тип (PDF/DOC/DOCX/RTF/ODT) и размер (≤5 МБ), сохраняет в Vercel Blob (private, папка resumes/). Возвращает proxy URL вида APP_URL/api/resume?url=<encodedBlobUrl> для хранения в Google Sheets." "Next.js Route Handler" "Logic"
 
-        dbLib = component "DB Library (lib/db/)" "Drizzle ORM + @neondatabase/serverless (neon-http driver).\nschema.ts — схема таблицы contactRequests.\nindex.ts — клиент drizzle(neon(DATABASE_URL)).\ncontact-requests.ts — appendContactRequest(), getContactRequests(), updateContactRequestStatus(id).\nMigrations: scripts/migrate.mjs." "TypeScript, Drizzle ORM, Neon" "Integration"
+        resumeApi = component "Resume API (/api/resume)" "GET-роут прокси для приватных файлов Vercel Blob: получает ?url=, проверяет hostname (*.blob.vercel-storage.com), делает fetch с Authorization: Bearer BLOB_READ_WRITE_TOKEN и стримит ответ клиенту. В dev-режиме обходит корпоративный TLS-прокси (NODE_TLS_REJECT_UNAUTHORIZED=0). Защита от open redirect по hostname." "Next.js Route Handler" "Logic"
+
+        # Integrations
+        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nЧтение: профили, подборки, работодатели. Стримы перенесены в Neon.\nЗапись: регистрации работодателей и кандидатов (appendCandidateRow вызывает ensureCandidateColumns автоматически); статусы работодателей и кандидатов.\nМиграция: ensureProfileColumns(), ensureEmployerColumns(), ensureCandidateColumns().\nАвтосоздание листов через ensureSheet().\ngetEmployerByToken() — поиск по токену.\nfilterCandidatesForEmployer() — фильтрация по предпочтениям кандидата.\nContact Requests перенесены в Neon → lib/db/contact-requests.ts." "TypeScript, Google Sheets API v4" "Integration"
+
+        dbLib = component "DB Library (lib/db/)" "Drizzle ORM + @neondatabase/serverless (neon-http driver).\nschema.ts — схемы таблиц contactRequests и streams.\nindex.ts — клиент drizzle(neon(DATABASE_URL)).\ncontact-requests.ts — appendContactRequest(), getContactRequests(), updateContactRequestStatus(id).\nstreams.ts — getStreams(), getStreamsDetailed(), createStreamRecord(), updateStreamRecord(), deleteStreamRecord().\nMigrations: scripts/migrate.mjs." "TypeScript, Drizzle ORM, Neon" "Integration"
 
         sendPulseLib = component "SendPulse Library (lib/sendpulse.ts)" "OAuth 2.0 с кэшем токена (59 мин). Кэш адресных книг с TTL 60 с.\ngetOrCreateBook() — авто-создание книги.\ngetBookEmailCount() — проверка подписчиков до рассылки.\ncreateCampaign() / getCampaigns()." "TypeScript, SendPulse REST API" "Integration"
       }
@@ -83,9 +89,10 @@ workspace "TalentStreams" "Платформа подборки проверен�
     editor -> googleSheets "Заполняет листы: Candidates, Mailing lists, Streams"
     editor -> talentStreams "Подтверждает работодателей, запускает рассылки через /editor"
 
-    talentStreams -> googleSheets "Читает профили, подборки, стримы, работодателей; пишет заявки и статусы" "HTTPS, Sheets API v4"
-    talentStreams -> neon "INSERT/SELECT/UPDATE contactRequests" "HTTPS, Neon HTTP API"
+    talentStreams -> googleSheets "Читает профили, подборки, работодателей; пишет заявки и статусы. Стримы перенесены в Neon." "HTTPS, Sheets API v4"
+    talentStreams -> neon "INSERT/SELECT/UPDATE contactRequests и streams" "HTTPS, Neon HTTP API"
     talentStreams -> sendPulse "Добавляет подтверждённых работодателей; создаёт кампании" "HTTPS, REST API"
+    talentStreams -> vercelBlob "Загружает резюме (PUT) и читает их (GET с Bearer-токеном) через /api/upload и /api/resume" "HTTPS, Vercel Blob API"
 
     # ── Отношения: контейнерный уровень ──────────────────────────────────────
 
@@ -95,6 +102,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
     talentStreams.webApp -> googleSheets "Sheets API v4 / Service Account JWT" "HTTPS"
     talentStreams.webApp -> neon "Neon HTTP API / Drizzle ORM" "HTTPS"
     talentStreams.webApp -> sendPulse "OAuth 2.0 + REST API" "HTTPS"
+    talentStreams.webApp -> vercelBlob "PUT resumes (upload) / GET resumes (proxy с Bearer-токеном)" "HTTPS"
 
     # ── Отношения: компонентный уровень ──────────────────────────────────────
 
@@ -127,17 +135,22 @@ workspace "TalentStreams" "Платформа подборки проверен�
     editor -> talentStreams.webApp.releasesPage "Просматривает выпуски, запускает рассылку"
     editor -> talentStreams.webApp.employersPage "Подтверждает и отклоняет заявки работодателей"
     editor -> talentStreams.webApp.settingsPage "Управляет настройками и миграцией колонок"
-    editor -> talentStreams.webApp.streamsPage "Просматривает список стримов"
+    editor -> talentStreams.webApp.streamsPage "Управляет стримами: добавляет, редактирует, удаляет"
     editor -> talentStreams.webApp.publishApi "curl /api/publish/{listId}?token=…"
 
     talentStreams.webApp.sheetsLib -> googleSheets "fetchSheetValues(), values.update()" "HTTPS, Sheets API v4"
-    talentStreams.webApp.dbLib -> neon "INSERT / SELECT / UPDATE contactRequests" "HTTPS, Neon HTTP API"
+    talentStreams.webApp.dbLib -> neon "INSERT / SELECT / UPDATE contactRequests и streams" "HTTPS, Neon HTTP API"
     talentStreams.webApp.sendPulseLib -> sendPulse "POST /oauth/access_token, GET /addressbooks, POST /addressbooks/{id}/emails, POST /campaigns" "HTTPS"
+
+    talentStreams.webApp.candidateModal -> talentStreams.webApp.uploadApi "POST /api/upload (при сабмите, если выбран файл)"
+    talentStreams.webApp.uploadApi -> vercelBlob "put(filename, file, { access: 'private' })" "HTTPS, Vercel Blob API"
+    talentStreams.webApp.resumeApi -> vercelBlob "fetch(blobUrl, { Authorization: Bearer token })" "HTTPS, Vercel Blob API"
+    talentStreams.webApp.streamsPage -> talentStreams.webApp.serverActions "updateStream() / createStream() / deleteStream()"
 
     talentStreams.webApp.requestsPage -> talentStreams.webApp.dbLib "getContactRequests()"
     talentStreams.webApp.requestsPage -> talentStreams.webApp.sheetsLib "getProfiles()"
     talentStreams.webApp.requestsPage -> talentStreams.webApp.contactRequestsSection "Рендерит"
-    talentStreams.webApp.streamsPage -> talentStreams.webApp.sheetsLib "getStreamsDetailed()"
+    talentStreams.webApp.streamsPage -> talentStreams.webApp.dbLib "getStreamsDetailed()"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.generalInquiryButton "Рендерит (при наличии токена)"
     talentStreams.webApp.contactRequestsSection -> talentStreams.webApp.serverActions "setContactRequestStatus(id)"
     talentStreams.webApp.generalInquiryButton -> talentStreams.webApp.serverActions "submitGeneralInquiry()"

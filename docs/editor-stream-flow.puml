@@ -20,42 +20,88 @@ actor       "Редактор"              as editor
 actor       "Работодатель"          as employer
 actor       "Кандидат"              as candidate
 participant "TalentStreams\nWeb App" as app
-participant "Sheets · Streams"      as sh_streams  #d0e8ff
+participant "Neon · streams"        as neonStreams  #d4f0d4
 participant "Sheets · Candidates"   as sh_cands    #d0e8ff
 participant "Sheets · Mailing lists" as sh_mail    #d0e8ff
 participant "Sheets · Employers"    as sh_emp      #d0e8ff
-participant "Neon · contactRequests" as neonDb       #d4f0d4
+participant "Vercel Blob\n(private)" as blob       #fff3cd
+participant "Neon · contactRequests" as neonDb     #d4f0d4
 participant "SendPulse\n(мастер-книга)" as sp_master  #fce8cc
 participant "SendPulse\n(книга стрима)" as sp_stream  #fce8cc
 participant "SendPulse\nCampaigns"  as sp_camp     #fce8cc
 
-== 1. Редактор настраивает стримы (разово) ==
+== 1. Редактор управляет стримами ==
 
-editor -> sh_streams : Добавляет / редактирует названия стримов\n(колонка A листа «Streams»)
-note right of sh_streams
-  Stream
-  ──────
-  Finance
-  Tech
-  Operations
-  Marketing
+editor -> app : GET /editor/streams?secret=…
+app -> neonStreams : getStreamsDetailed()
+neonStreams --> app : [{ id, name, type, description }, …]
+app --> editor : Таблица стримов с inline-редактированием\n(компонент StreamsTable)
+
+alt Добавить стрим
+  editor -> app : createStream({ name, type, description })
+  app -> neonStreams : INSERT INTO streams
+  neonStreams --> app : { id, name, … }
+  app --> editor : Страница обновлена (revalidatePath)
+else Изменить стрим
+  editor -> app : updateStream(id, { name, type, description })
+  app -> neonStreams : UPDATE streams SET … WHERE id=…
+  neonStreams --> app : OK
+  app --> editor : Страница обновлена
+else Удалить стрим
+  editor -> app : deleteStream(id)
+  app -> neonStreams : DELETE FROM streams WHERE id=…
+  neonStreams --> app : OK
+  app --> editor : Страница обновлена
+end
+
+note right of neonStreams
+  Таблица streams (Neon / PostgreSQL):
+  ──────────────────────────────────
+  id | name        | type        | description
+  1  | Finance     | Industry    | …
+  2  | Tech        | Functional  | …
 end note
 
 == 2. Кандидат подаёт анкету ==
 
 candidate -> app : Открывает сайт, нажимает\n«Стать кандидатом»
-app --> candidate : Форма (Имя, Email, Телефон, Резюме, Сопроводительное письмо,\nчекбокс согласия на обработку персональных данных)
+app --> candidate : Форма (Имя, Email, Телефон, Сопроводительное письмо,\nРезюме: «Загрузить файл» или «Указать ссылку»,\nчекбокс согласия на обработку персональных данных)
 
-candidate -> app : Заполняет и отправляет форму
-app -> sh_cands : appendCandidateRow({ Name, Email, Phone, …,\n  Status: "На проверке" })
+candidate -> app : Заполняет форму и нажимает «Отправить»
+
+alt Кандидат выбрал файл резюме
+  app -> app : POST /api/upload (multipart: файл)
+  app -> blob : put("resumes/{timestamp}-{uuid}.pdf",\n  file, { access: "private" })
+  blob --> app : { url: "https://…private.blob.vercel-storage.com/…" }
+  app --> app : proxyUrl = APP_URL/api/resume?url=<encodedBlobUrl>
+  note right of blob
+    Формат: PDF, DOC, DOCX, RTF, ODT
+    Макс. размер: 5 МБ
+    Доступ: приватный (только через прокси)
+  end note
+else Кандидат указал URL резюме
+  note over app
+    URL используется напрямую — загрузка не происходит
+  end note
+end
+
+app -> sh_cands : appendCandidateRow({ Name, Email, Phone,\n  Resume URL: proxyUrl или введённый URL,\n  Cover Letter, Status: "На проверке" })
 sh_cands --> app : OK
 app --> candidate : «Заявка отправлена — мы рассмотрим и свяжемся»
 
 note over sh_cands
   Лист «Candidates»:
   ────────────────────────────────────────────────────────────────
-  Timestamp  | Name    | Email          | … | Status       | Active Since
-  2026-08-03 | Иван И. | ivan@mail.com  | … | На проверке  |
+  Timestamp  | Name    | Email          | … | Resume URL       | Status       | Active Since
+  2026-08-03 | Иван И. | ivan@mail.com  | … | /api/resume?url= | На проверке  |
+end note
+
+note over app, blob
+  При открытии ссылки на резюме из редактора или Google Sheets:
+  GET /api/resume?url=<encodedBlobUrl>
+  → проверка hostname (*.blob.vercel-storage.com)
+  → fetch(blobUrl, { Authorization: Bearer BLOB_READ_WRITE_TOKEN })
+  → стриминг файла клиенту с Content-Type
 end note
 
 == 2а. Редактор модерирует анкеты кандидатов ==
@@ -85,8 +131,8 @@ end note
 == 3. Работодатель подписывается (заявка) ==
 
 employer -> app : Открывает сайт, нажимает\n«Подписаться на рассылку»
-app -> sh_streams : getStreams()
-sh_streams --> app : ["Finance", "Tech", "Operations", "Marketing"]
+app -> neonStreams : getStreams()
+neonStreams --> app : ["Finance", "Tech", "Operations", "Marketing"]
 app --> employer : Форма с выбором стримов
 
 employer -> app : Заполняет форму\n{ имя, компания, email, телефон,\n  способ связи, Telegram, LinkedIn,\n  streams: ["Finance"] }

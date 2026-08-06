@@ -37,7 +37,7 @@
 | Реализовано: в `/editor` редактор подтверждает или отклоняет заявку. При подтверждении — добавление в SendPulse (мастер-книга + книги выбранных стримов).
 
 | Регистрация кандидата
-| Реализована: форма → Google Sheets (SendPulse не используется — кандидаты не являются подписчиками рассылки)
+| Реализована: форма → Google Sheets (SendPulse не используется). Резюме: загрузка файла (PDF, DOC, DOCX, RTF, ODT, до 5 МБ) в Vercel Blob через `POST /api/upload` или ввод ссылки вручную — альтернативы. Доступ к файлу через прокси-роут `GET /api/resume` с авторизацией по Bearer-токену. URL резюме в Sheets — ссылка на прокси (`APP_URL/api/resume?url=...`).
 
 | Google Sheets интеграция
 | Реализована: чтение профилей, подборок, стримов, работодателей; запись регистраций; миграция колонок (`ensureProfileColumns`)
@@ -54,8 +54,8 @@
 | Neon + Drizzle ORM
 | ✅ TASK-DB-1 + TASK-DB-2. PostgreSQL через Vercel Marketplace (Neon). Схема — `lib/db/schema.ts`, клиент — `lib/db/index.ts` (neon-http driver). Миграция — `scripts/migrate.mjs`. Обход TLS корпоративного прокси в локальной среде: `NODE_TLS_REJECT_UNAUTHORIZED=0` при `NODE_ENV !== "production"` в `lib/db/index.ts`.
 
-| Стримы — раздел редактора
-| Страница `/editor/streams` — отображение стримов из Google Sheets (Stream / Тип / Описание). Только чтение. Пункт «Стримы» добавлен в `EditorNav` (иконка Layers, между «Запросы» и «Настройки»).
+| Стримы — редактор (Neon)
+| ✅ TASK-DB-8. Стримы перенесены из Google Sheets в Neon. Миграция `0001_real_wendell_vaughn.sql` содержит схему + начальные данные (11 стримов: 6 Industry, 5 Functional). `lib/db/streams.ts` — полный CRUD. Страница `/editor/streams` — полноценный редактор: inline-редактирование (название, тип — выпадающий список Industry/Functional, описание), удаление строки, добавление нового стрима. Компонент `StreamsTable` (client). Копирование названия в буфер обмена. Цветные бейджи типов (синий / фиолетовый).
 |===
 
 == Выполненные задачи
@@ -295,19 +295,19 @@ NOTE: Реализация перенесена в Neon (TASK-DB-2 ✅). `lib/sh
 
 ---
 
-==== TASK-19: Загрузка файла резюме в форме кандидата
+==== ✅ TASK-19: Загрузка файла резюме в форме кандидата
 
-*По ТЗ (§16):* «Резюме — прикрепить файл или указать ссылку на LinkedIn». Сейчас только ссылка.
+*Выполнено:*
 
-*Хранилище для MVP — Vercel Blob:* лимиты Hobby (1 ГБ, 2 000 записей, 10 ГБ трафика) многократно покрывают MVP-масштаб. Простое API: `put(filename, file)` → публичный URL. Google Drive сложнее: нужно настраивать права доступа на каждый файл, URL неудобен для прямого показа.
+* `@vercel/blob` установлен; хранилище — private Vercel Blob store.
+* `app/api/upload/route.ts` — принимает `POST multipart/form-data`, валидирует тип (PDF, DOC, DOCX, RTF, ODT) и размер (≤ 5 МБ), загружает через `put(filename, file, { access: "private" })`. Имя файла: `resumes/{timestamp}-{uuid8}.{ext}`.
+* `app/api/resume/route.ts` — прокси-роут `GET ?url=<blobUrl>`: проверяет hostname (`*.blob.vercel-storage.com`), скачивает файл server-side с `Authorization: Bearer BLOB_READ_WRITE_TOKEN`, стримит клиенту с корректным `Content-Type`. `NODE_TLS_REJECT_UNAUTHORIZED=0` в не-production среде (корпоративный прокси).
+* В Sheets сохраняется прокси-URL (`APP_URL/api/resume?url=...`) — ссылка открывается и из редактора, и из Google Sheets.
+* `CandidateRegistrationModal` — переключатель «Загрузить файл / Указать ссылку»: файл выбирается без немедленной загрузки, загрузка происходит в момент сабмита формы (spinner в кнопке покрывает оба этапа). Длинное имя файла обрезается с `truncate`.
+* `CANDIDATE_EXTRA_COLUMNS` дополнен `"Email"` и `"Phone"`; `appendCandidateRow` автоматически вызывает `ensureCandidateColumns()` перед записью — колонки создаются при первой регистрации если отсутствуют.
+* `appendCandidateRow` обновлён: при маппинге заголовков листа применяется `mapHeader()` (алиас «Кандидат» → `name` и т.д.) — email и имя теперь корректно пишутся независимо от языка заголовков.
 
-*Что нужно сделать:*
-
-. Установить `@vercel/blob`.
-. В `CandidateRegistrationModal` — добавить `input type=file` рядом с полем ссылки на LinkedIn (альтернативный способ).
-. Server Action загружает файл через `put()`, сохраняет URL в Google Sheets (колонка `Resume URL`).
-
-*Затрагивает:* `components/candidate-registration-modal.tsx`, `app/actions.ts`.
+*Безопасность:* прокси-роут без аутентификации — защита через неугадываемость UUID в URL. TASK-SEC-1 (добавить проверку EDITOR_SECRET) — отложено в «Вне MVP».
 
 ---
 
@@ -352,16 +352,18 @@ NOTE: Реализация перенесена в Neon (TASK-DB-2 ✅). `lib/sh
 
 ---
 
-=== ✅ Стримы — отображение в редакторе (чтение из Sheets)
+=== ✅ Стримы — полный CRUD-редактор в Neon (TASK-DB-8)
 
 *Выполнено:*
 
-* `lib/sheets.ts` — добавлен тип `StreamRecord` и функция `getStreamsDetailed()`: читает колонки Stream / Type / Description из листа «Streams», возвращает `StreamRecord[]`.
-* `app/editor/streams/page.tsx` — новая страница с auth-проверкой, отображает таблицу стримов (Название / Тип / Описание). Пустые ячейки → «—».
-* `components/editor-nav.tsx` — добавлен пункт «Стримы» (иконка Layers, между «Запросы» и «Настройки»).
-* `getStreams()` (возвращает `string[]` для формы регистрации) — не изменена.
+* `lib/db/schema.ts` — добавлена таблица `streams` (id, name, type, description).
+* `lib/db/streams.ts` — `getStreams()`, `getStreamsDetailed()`, `createStreamRecord()`, `updateStreamRecord()`, `deleteStreamRecord()`.
+* `app/actions.ts` — `createStream()`, `updateStream()`, `deleteStream()` (Server Actions с `revalidatePath`).
+* `app/editor/streams/page.tsx` + `components/streams-table.tsx` — inline-редактирование, удаление (Trash2), добавление новой строки, dropdown типа (Industry / Functional), цветные бейджи.
+* `components/editor-nav.tsx` — пункт «Стримы» (иконка Layers).
+* `getStreams()` читает из Neon; лист «Streams» в Google Sheets более не используется.
 
-NOTE: Страница только читает из Sheets. Управление стримами (добавление, удаление, переименование через Global Config) — TASK-GC-1/2/3.
+NOTE: Задачи TASK-GC-1/2/3 (управление через Vercel Edge Config) закрыты как устаревшие — потребность закрыта через Neon.
 
 ---
 
@@ -400,6 +402,9 @@ NOTE: Страница только читает из Sheets. Управлени
 
 | Аналитика
 | Явно исключено из MVP в ТЗ
+
+| TASK-SEC-1: Аутентификация для `/api/resume`
+| Роут отдаёт файлы резюме без проверки прав — защита только через неугадываемость URL (UUID). Добавить проверку `EDITOR_SECRET` как query-параметр: `?secret=<EDITOR_SECRET>`. Ссылки в Sheets и редакторе обновить соответственно. Актуально когда появятся реальные данные или возрастёт требование к безопасности.
 |===
 
 == Приоритизация
@@ -412,7 +417,7 @@ NOTE: Страница только читает из Sheets. Управлени
 | TASK-06 | ⚪ После MVP | Низкая | Email и телефон уже обязательны → фактически два канала всегда есть
 | TASK-12 | 🟡 MVP | Средняя | Summary кандидата в теле email-рассылки
 | TASK-21 | ✅ | Низкая | Предупреждение о количестве кандидатов реализовано
-| TASK-19 | 🟡 MVP | Низкая | Загрузка файла резюме через Vercel Blob
+| TASK-19 | ✅ | Низкая | Загрузка файла резюме через Vercel Blob — выполнено
 | TASK-20 | ⚪ После MVP | — | Лишний шаг без реальных преимуществ на MVP-масштабе
 |===
 
@@ -420,7 +425,6 @@ NOTE: Страница только читает из Sheets. Управлени
 
 . *TASK-05* — правила публикации кандидатов.
 . *TASK-12* — Summary в теле письма.
-. *TASK-19* — загрузка файла резюме через Vercel Blob.
 
 == Переход на реляционную СУБД
 
@@ -572,7 +576,7 @@ contact_requests -- запросы на контакт
 | Employers | ✅ Форма | ⚠ Иногда вручную | → Sheets, отложить
 | Candidates | ✅ Регистрация | ✅ Профиль целиком | → Sheets, нужен редактор профилей в UI
 | Mailing Lists | ❌ | ✅ Полностью | → Sheets, нужен конструктор выпусков в UI
-| Streams | ❌ | ✅ | → Neon + UI в редакторе (отложить)
+| Streams | ❌ | ✅ | → *Neon + UI готов ✅* (TASK-DB-8)
 |===
 
 Первый шаг — только Contact Requests. Это единственная таблица, которую редактор никогда не трогает вручную. Все остальные остаются в Sheets до появления соответствующего UI в приложении.
@@ -630,9 +634,9 @@ export const contactRequests = pgTable("contactRequests", {
 
 ---
 
-==== TASK-DB-6 (отложено): Загрузка резюме через Vercel Blob
+==== ✅ TASK-DB-6: Загрузка резюме через Vercel Blob
 
-Реализовать TASK-19 поверх `@vercel/blob`. Зависит от TASK-DB-4 (candidates в Neon).
+Реализовано в рамках TASK-19. `@vercel/blob` подключён; файлы хранятся в private store; доступ через прокси-роут `/api/resume`. Полная интеграция с Neon (candidates → Neon) — часть TASK-DB-4, отложена до появления редактора профилей.
 
 ---
 
@@ -642,11 +646,13 @@ export const contactRequests = pgTable("contactRequests", {
 
 ---
 
-==== TASK-DB-8 (отложено): Streams → Neon
+==== ✅ TASK-DB-8: Streams → Neon
 
-Стримы сейчас читаются из Google Sheets (`getStreamsDetailed()` в `lib/sheets.ts`, страница `/editor/streams` отображает их). Основной подход — перенести в Neon вместе с UI управления в редакторе.
+*Выполнено.*
 
-*Схема (`lib/db/schema.ts`):*
+Стримы перенесены из Google Sheets в Neon. Миграция `lib/db/migrations/0001_real_wendell_vaughn.sql` создаёт таблицу и засевает 11 стримов.
+
+*Актуальная схема (`lib/db/schema.ts`):*
 [source,ts]
 ----
 export const streams = pgTable("streams", {
@@ -657,14 +663,11 @@ export const streams = pgTable("streams", {
 })
 ----
 
-*Что делаем:*
+`lib/db/streams.ts` — `getStreams()`, `getStreamsDetailed()`, `updateStreamRecord()`, `createStreamRecord()`, `deleteStreamRecord()`.
 
-. Добавить таблицу `streams` в схему, сгенерировать и применить миграцию.
-. Заменить `getStreams()` и `getStreamsDetailed()` в `lib/sheets.ts` на Drizzle-запросы из `lib/db/streams.ts`.
-. Расширить страницу `app/editor/streams/page.tsx`: добавить, удалить, переименовать стрим (Server Actions).
-. Перенести начальные данные из Sheets в Neon вручную или скриптом.
+`app/actions.ts` — `updateStream()`, `createStream()`, `deleteStream()` (Server Actions с `revalidatePath`).
 
-*Сложность:* низкая (схема + CRUD).
+`app/editor/streams/page.tsx` + `components/streams-table.tsx` — полноценный редактор с inline-правкой, удалением и добавлением строк.
 
 ---
 
@@ -672,7 +675,7 @@ NOTE: `lib/sendpulse.ts` миграции не требует. Схема Drizzl
 
 == Vercel Global Config — опциональная оптимизация производительности
 
-NOTE: Основной подход для стримов — Neon (TASK-DB-8). Global Config рассматривается опционально, если возникнут проблемы с производительностью: чтение из CDN-ноды за < 1 мс против ~50 мс запроса к Neon.
+NOTE: Стримы хранятся в Neon (TASK-DB-8). Global Config рассматривается как опциональная оптимизация: чтение из CDN-ноды за < 1 мс против ~50 мс запроса к Neon. UI управления стримами уже готов (`components/streams-table.tsx`) — GC-задачи касаются только смены бэкенда хранения.
 
 Vercel Global Config (Edge Config) — глобально реплицированное key-value хранилище, читается прямо на CDN-ноде без обращения к серверу. Лимиты: 1 МБ, 100 000 чтений/мес, 100 записей/мес, задержка записи до 10 секунд.
 
@@ -684,58 +687,46 @@ Vercel Global Config (Edge Config) — глобально реплицирова
   * `EDGE_CONFIG` — connection string (проставляется автоматически при подключении через Marketplace)
   * `VERCEL_API_TOKEN` — токен с правом на запись в Edge Config (создать в Vercel Account Settings → Tokens)
   * `EDGE_CONFIG_ID` — ID стора (вида `ecfg_...`, виден в дашборде)
-. Записать начальные данные вручную через Vercel Dashboard или API: `{ "streams": ["Finance", "Tech", ...] }`.
-. Убрать лист «Streams» из Google Sheets (или оставить как резервный).
+. Перенести начальные данные из Neon в Edge Config через Dashboard или API: `{ "streams": [{ "id": 1, "name": "Finance", "type": "Industry", "description": "…" }, …] }`.
 
 *Сложность:* низкая.
 
 ---
 
-=== TASK-GC-2 (опционально): Замена getStreams() на Edge Config
+=== TASK-GC-2 (опционально): Замена getStreams() / getStreamsDetailed() на Edge Config
 
-Заменить реализацию `getStreams()` — сигнатура и все вызовы остаются прежними.
+Заменить реализацию в `lib/db/streams.ts` — сигнатуры и все вызовы остаются прежними.
 
 [source,ts]
 ----
-// lib/streams.ts
 import { get } from "@vercel/edge-config"
 
 export async function getStreams(): Promise<string[]> {
-  try {
-    const streams = await get<string[]>("streams")
-    return streams ?? []
-  } catch {
-    return []
-  }
+  const streams = await get<StreamRecord[]>("streams")
+  return (streams ?? []).map((s) => s.name)
+}
+
+export async function getStreamsDetailed(): Promise<StreamRecord[]> {
+  return (await get<StreamRecord[]>("streams")) ?? []
 }
 ----
 
-Обновить импорты в `app/page.tsx` и `app/actions.ts` (где используется `getStreams`): заменить `from "@/lib/sheets"` на `from "@/lib/streams"`.
+Функции записи (`createStreamRecord`, `updateStreamRecord`, `deleteStreamRecord`) переключить на Edge Config API вместо Drizzle. Server Actions в `app/actions.ts` остаются без изменений.
 
 *Сложность:* низкая.
 
 ---
 
-=== TASK-GC-3 (опционально): UI управления стримами через Edge Config
+=== TASK-GC-3 (опционально): Адаптация Server Actions для записи в Edge Config
 
-NOTE: Страница `/editor/streams` уже существует (display-only, читает из Sheets — см. «Выполненные задачи → Стримы»). TASK-GC-3 добавляет к ней возможность изменения через Global Config.
+NOTE: UI управления стримами уже реализован в TASK-DB-8 (`components/streams-table.tsx`, Server Actions `createStream/updateStream/deleteStream`). TASK-GC-3 — только смена бэкенда записи с Drizzle/Neon на Edge Config API.
 
-Расширить существующую страницу `app/editor/streams/page.tsx`.
-
-*Функциональность:*
-
-* Список текущих стримов с кнопкой удаления у каждого.
-* Форма добавления нового стрима (одно текстовое поле + кнопка).
-* Переименование: клик по названию → inline-редактирование.
-
-*Server Actions* (`app/actions.ts`):
+Заменить реализацию Server Actions в `app/actions.ts`:
 
 [source,ts]
 ----
-// Все три action-а читают текущий массив из Global Config,
-// вносят изменение и пишут обновлённый массив обратно через Vercel API.
-
-async function updateStreamsInConfig(streams: string[]): Promise<void> {
+// Вспомогательная функция записи в Edge Config
+async function updateStreamsInConfig(streams: StreamRecord[]): Promise<void> {
   await fetch(`https://api.vercel.com/v1/edge-config/${process.env.EDGE_CONFIG_ID}/items`, {
     method: "PATCH",
     headers: {
@@ -745,16 +736,10 @@ async function updateStreamsInConfig(streams: string[]): Promise<void> {
     body: JSON.stringify({ items: [{ operation: "upsert", key: "streams", value: streams }] }),
   })
 }
-
-export async function addStream(name: string): Promise<void>     // append + updateStreamsInConfig
-export async function deleteStream(name: string): Promise<void>  // filter out + updateStreamsInConfig
-export async function renameStream(old: string, next: string): Promise<void> // map + updateStreamsInConfig
 ----
 
-Все три action-а вызывают `revalidatePath("/editor/streams")` и `revalidatePath("/")` (форма регистрации на главной обновит список стримов).
+Все три action-а (`createStream`, `updateStream`, `deleteStream`) читают текущий массив из Edge Config, вносят изменение и пишут обратно через `updateStreamsInConfig`. `revalidatePath` остаётся без изменений.
 
-Добавить пункт «Стримы» в `EditorNav` (между Настройками или как отдельный раздел).
-
-*Сложность:* средняя — новая страница + три action-а + inline-редактирование.
+*Сложность:* низкая — только замена слоя хранения, UI не меняется.
 
 NOTE: Задержка записи в Global Config — до 10 секунд до глобального распространения. Для управления стримами это несущественно.
