@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
-import { X, Check } from "lucide-react"
+import { X, Check, Paperclip, Loader2 } from "lucide-react"
 import { registerCandidate } from "@/app/actions"
 
 const inputCls =
@@ -36,9 +36,12 @@ export function CandidateRegistrationModal() {
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
+  const [resumeMode, setResumeMode] = useState<"file" | "url">("file")
+  const [resumeFile, setResumeFile] = useState<File | null>(null)
   const [resumeUrl, setResumeUrl] = useState("")
   const [coverLetter, setCoverLetter] = useState("")
   const [consent, setConsent] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const nameRef = useRef<HTMLInputElement>(null)
 
@@ -63,16 +66,33 @@ export function CandidateRegistrationModal() {
     setName("")
     setEmail("")
     setPhone("")
+    setResumeMode("file")
+    setResumeFile(null)
     setResumeUrl("")
     setCoverLetter("")
     setConsent(false)
   }
 
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null
+    setResumeFile(file)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setStatus("submitting")
+    setErrorMsg("")
     try {
-      await registerCandidate({ name, email, phone, resumeUrl, coverLetter })
+      let uploadedUrl = resumeUrl
+      if (resumeMode === "file" && resumeFile) {
+        const fd = new FormData()
+        fd.append("file", resumeFile)
+        const res = await fetch("/api/upload", { method: "POST", body: fd })
+        const json = await res.json() as { url?: string; error?: string }
+        if (!res.ok || !json.url) throw new Error(json.error ?? "Ошибка загрузки файла")
+        uploadedUrl = json.url
+      }
+      await registerCandidate({ name, email, phone, resumeUrl: uploadedUrl, coverLetter })
       setStatus("success")
     } catch (err) {
       setStatus("error")
@@ -163,14 +183,58 @@ export function CandidateRegistrationModal() {
                     />
                   </Field>
 
-                  <Field label="Ссылка на резюме">
-                    <input
-                      type="url"
-                      value={resumeUrl}
-                      onChange={(e) => setResumeUrl(e.target.value)}
-                      placeholder="https://..."
-                      className={inputCls}
-                    />
+                  <Field label="Резюме">
+                    <div className="space-y-2">
+                      <div className="flex rounded-lg border p-0.5 text-sm">
+                        <button
+                          type="button"
+                          onClick={() => { setResumeMode("file"); setResumeUrl("") }}
+                          className={`flex-1 rounded-md py-1.5 text-center transition-colors ${resumeMode === "file" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                        >
+                          Загрузить файл
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setResumeMode("url"); setResumeFile(null); if (fileInputRef.current) fileInputRef.current.value = "" }}
+                          className={`flex-1 rounded-md py-1.5 text-center transition-colors ${resumeMode === "url" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                        >
+                          Указать ссылку
+                        </button>
+                      </div>
+
+                      {resumeMode === "file" ? (
+                        <>
+                          <label className={`flex cursor-pointer items-center gap-2.5 rounded-lg border bg-background px-3 py-2 text-sm transition-colors hover:bg-muted ${status === "submitting" ? "pointer-events-none opacity-60" : ""}`}>
+                            {status === "submitting" && resumeFile ? (
+                              <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                            ) : (
+                              <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                            )}
+                            <span className={`min-w-0 truncate ${resumeFile ? "text-foreground" : "text-muted-foreground"}`}>
+                              {resumeFile ? resumeFile.name : "PDF, DOC, DOCX, RTF, ODT · до 5 МБ"}
+                            </span>
+                            {resumeFile && status !== "submitting" && (
+                              <Check className="ml-auto size-4 shrink-0 text-emerald-500" />
+                            )}
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              accept=".pdf,.doc,.docx,.rtf,.odt"
+                              onChange={handleFileChange}
+                              className="sr-only"
+                            />
+                          </label>
+                        </>
+                      ) : (
+                        <input
+                          type="url"
+                          value={resumeUrl}
+                          onChange={(e) => setResumeUrl(e.target.value)}
+                          placeholder="https://..."
+                          className={inputCls}
+                        />
+                      )}
+                    </div>
                   </Field>
 
                   <Field label="Сопроводительное письмо">

@@ -496,6 +496,8 @@ export async function appendCandidateRow(data: Record<string, string>): Promise<
   const { email, privateKey, sheetId } = getEnv()
   const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
 
+  await ensureCandidateColumns()
+
   const headerRes = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("A1:AZ1")}`,
     { headers: { Authorization: `Bearer ${token}` } },
@@ -503,7 +505,11 @@ export async function appendCandidateRow(data: Record<string, string>): Promise<
   const headerData = (await headerRes.json()) as { values?: string[][] }
   const headers = (headerData.values?.[0] ?? []).map((h) => h.trim())
   const dataLower = Object.fromEntries(Object.entries(data).map(([k, v]) => [k.toLowerCase(), v]))
-  const values = headers.map((h) => dataLower[h.toLowerCase()] ?? "")
+  const values = headers.map((h) => {
+    const raw = h.toLowerCase()
+    const canonical = mapHeader(h)
+    return dataLower[raw] ?? dataLower[canonical] ?? ""
+  })
 
   const url =
     `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("A1")}:append` +
@@ -591,7 +597,7 @@ export async function updateCandidateStatus(
 }
 
 // Registration and moderation columns added to the main profiles sheet
-const CANDIDATE_EXTRA_COLUMNS = ["id", "Status", "Active Since", "Timestamp", "Cover Letter", "Resume URL"]
+const CANDIDATE_EXTRA_COLUMNS = ["id", "Status", "Active Since", "Timestamp", "Email", "Phone", "Cover Letter", "Resume URL"]
 
 export async function ensureCandidateColumns(): Promise<{ added: string[] }> {
   const { email, privateKey, sheetId } = getEnv()
