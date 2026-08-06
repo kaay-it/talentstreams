@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord } from "@/lib/db/streams"
 import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
@@ -279,6 +279,16 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
     "cover letter": data.coverLetter,
     "status": "На проверке",
   })
+}
+
+export async function updateCandidate(
+  rowIndex: number,
+  data: { name: string; email: string; phone: string; resumeUrl: string; coverLetter: string },
+): Promise<void> {
+  if (!data.name.trim()) throw new Error("Укажите имя")
+  if (!data.email.trim()) throw new Error("Укажите email")
+  await updateCandidateFields(rowIndex, data)
+  revalidatePath("/editor/candidates")
 }
 
 export async function registerEmployer(data: EmployerData): Promise<void> {
