@@ -128,6 +128,28 @@ note over app, sh_cands
   о новой анкете не реализовано — отложено
 end note
 
+== 2б. Редактор редактирует данные кандидата ==
+
+editor -> app : Нажимает Pencil-кнопку в строке кандидата\n(доступна для всех статусов)
+app --> editor : CandidateEditModal — форма предзаполнена\n(имя, email, телефон, резюме, сопроводительное письмо)
+
+alt Кандидат загружает новый файл резюме
+  editor -> app : POST /api/upload (новый файл)
+  app -> blob : put("resumes/…", file, { access: "private" })
+  blob --> app : { url: blobUrl }
+  app --> editor : proxyUrl для поля resumeUrl
+end
+
+editor -> app : updateCandidate(rowIndex, { name, email, phone,\n  resumeUrl, coverLetter })
+app -> sh_cands : updateCandidateFields(rowIndex, data)\n(параллельные PUT по колонкам через Sheets API)
+sh_cands --> app : OK
+app --> editor : Страница обновлена (revalidatePath)
+
+note over app, sh_cands
+  Колонки определяются через mapHeader() — алиасы работают
+  с любым языком заголовков (name / Кандидат, email / Email, и т.д.)
+end note
+
 == 3. Работодатель подписывается (заявка) ==
 
 employer -> app : Открывает сайт, нажимает\n«Подписаться на рассылку»

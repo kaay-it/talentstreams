@@ -596,6 +596,46 @@ export async function updateCandidateStatus(
   }
 }
 
+/** Update specific editable fields of a candidate row by rowIndex. */
+export async function updateCandidateFields(
+  rowIndex: number,
+  data: Partial<{ name: string; email: string; phone: string; resumeUrl: string; coverLetter: string }>,
+): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const headerRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("A1:AZ1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  const headerData = (await headerRes.json()) as { values?: string[][] }
+  const headers = (headerData.values?.[0] ?? []).map((h) => h.trim())
+
+  // Build canonical-field → column-index map
+  const fieldToCol: Record<string, number> = {}
+  headers.forEach((h, i) => {
+    fieldToCol[mapHeader(h)] = i
+  })
+
+  const entries = Object.entries(data) as [string, string][]
+  await Promise.all(
+    entries.map(async ([field, value]) => {
+      const colIdx = fieldToCol[field]
+      if (colIdx === undefined) return
+      const range = encodeURIComponent(`${colLetter(colIdx + 1)}${rowIndex}`)
+      const res = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueInputOption=USER_ENTERED`,
+        {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ values: [[value ?? ""]] }),
+        },
+      )
+      if (!res.ok) throw new Error(`Failed to update field "${field}" (${res.status})`)
+    }),
+  )
+}
+
 // Registration and moderation columns added to the main profiles sheet
 const CANDIDATE_EXTRA_COLUMNS = ["id", "Status", "Active Since", "Timestamp", "Email", "Phone", "Cover Letter", "Resume URL"]
 

@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { ChevronDown, ChevronRight, CheckCircle2, XCircle, ExternalLink, Loader2 } from "lucide-react"
+import { ChevronDown, ChevronRight, CheckCircle2, XCircle, ExternalLink, Loader2, Pencil } from "lucide-react"
 import { approveCandidate, rejectCandidate } from "@/app/actions"
+import { CandidateEditModal } from "@/components/candidate-edit-modal"
 import type { Candidate } from "@/lib/sheets"
 
 type LocalStatus = "approved" | "rejected" | null
@@ -10,6 +11,7 @@ type LocalStatus = "approved" | "rejected" | null
 function CandidateRow({ candidate }: { candidate: Candidate }) {
   const [isPending, startTransition] = useTransition()
   const [localStatus, setLocalStatus] = useState<LocalStatus>(null)
+  const [editing, setEditing] = useState(false)
 
   function handleApprove() {
     startTransition(async () => {
@@ -28,6 +30,8 @@ function CandidateRow({ candidate }: { candidate: Candidate }) {
   const done = localStatus !== null
 
   return (
+    <>
+    {editing && <CandidateEditModal candidate={candidate} onClose={() => setEditing(false)} />}
     <div className={`border-b last:border-b-0 px-5 py-4 transition-opacity ${done ? "opacity-50" : ""}`}>
       <div className="flex items-start gap-4">
         <div className="flex-1 min-w-0">
@@ -61,34 +65,46 @@ function CandidateRow({ candidate }: { candidate: Candidate }) {
           )}
         </div>
 
-        {candidate.status === "На проверке" && !done && (
-          <div className="flex gap-2 shrink-0">
-            <button
-              onClick={handleApprove}
-              disabled={isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 px-3 py-1.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-600 hover:text-white disabled:opacity-50"
-            >
-              {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
-              Добавить
-            </button>
-            <button
-              onClick={handleReject}
-              disabled={isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-destructive px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-            >
-              {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <XCircle className="size-3.5" />}
-              Отклонить
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setEditing(true)}
+            disabled={isPending}
+            className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+            aria-label="Редактировать"
+          >
+            <Pencil className="size-3.5" />
+          </button>
 
-        {done && (
-          <span className={`shrink-0 text-xs font-medium ${localStatus === "approved" ? "text-emerald-600" : "text-destructive"}`}>
-            {localStatus === "approved" ? "Добавлен" : "Отклонён"}
-          </span>
-        )}
+          {candidate.status === "На проверке" && !done && (
+            <>
+              <button
+                onClick={handleApprove}
+                disabled={isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 px-3 py-1.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-600 hover:text-white disabled:opacity-50"
+              >
+                {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
+                Добавить
+              </button>
+              <button
+                onClick={handleReject}
+                disabled={isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-destructive px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+              >
+                {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <XCircle className="size-3.5" />}
+                Отклонить
+              </button>
+            </>
+          )}
+
+          {done && (
+            <span className={`text-xs font-medium ${localStatus === "approved" ? "text-emerald-600" : "text-destructive"}`}>
+              {localStatus === "approved" ? "Добавлен" : "Отклонён"}
+            </span>
+          )}
+        </div>
       </div>
     </div>
+    </>
   )
 }
 
