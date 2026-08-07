@@ -254,7 +254,7 @@ app -> sh_mail : getMailingList("f04a9b3e-…")
 sh_mail --> app : { stream, date, candidate_ids: [UUID, UUID] }
 app -> sh_cands : getProfiles() → фильтр по candidate_ids
 sh_cands --> app : профили кандидатов
-app -> app : filterCandidatesForEmployer(candidates, employer)\n(in-memory: исключает по excludedCompanies/excludedIndustries)
+app -> app : filterCandidatesForEmployer(candidates, employer)\n(in-memory: excludedCompanies, excludedIndustries,\nгео: countryPrimary/countryDesired ∩ employer.country+additionalCountries;\n«Любая» → без гео-фильтра; нет данных о стране → скрыть)
 app --> employer : Страница выпуска: анонимные карточки\n(должность, теги, страна, summary)\nБез имён и контактов. Кнопка «Хочу связаться».
 else ?secret=[EDITOR_SECRET] — доступ редактора (все кандидаты)
 editor -> app : GET /list/f04a9b3e-…?secret=…
