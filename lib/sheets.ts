@@ -803,12 +803,32 @@ export function filterCandidatesForEmployer(candidates: Profile[], employer: Emp
   const companyLower = employer.company.trim().toLowerCase()
   const industryLower = employer.streams.map((s) => s.trim().toLowerCase())
 
+  // "Любая" in additionalCountries means employer accepts all countries → skip geo filter
+  const anyCountry = employer.additionalCountries.some(
+    (c) => c.trim().toLowerCase() === "любая",
+  )
+  const employerCountries = anyCountry
+    ? null
+    : new Set(
+        [employer.country, ...employer.additionalCountries]
+          .map((c) => c.trim().toLowerCase())
+          .filter(Boolean),
+      )
+
   return candidates.filter((c) => {
     if (companyLower && c.excludedCompanies.some((ec) => ec.toLowerCase() === companyLower)) {
       return false
     }
     if (industryLower.length && c.excludedIndustries.some((ei) => industryLower.includes(ei.toLowerCase()))) {
       return false
+    }
+    if (employerCountries !== null) {
+      const primary = c.countryPrimary.trim().toLowerCase()
+      const desired = c.countryDesired.trim().toLowerCase()
+      if (!primary && !desired) return false
+      if (!(primary && employerCountries.has(primary)) && !(desired && employerCountries.has(desired))) {
+        return false
+      }
     }
     return true
   })
