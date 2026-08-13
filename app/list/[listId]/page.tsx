@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft, CalendarDays, MapPin } from "lucide-react"
 import { getMailingList, getEmployerByToken, filterCandidatesForEmployer, isSheetsConfigured, type MailingListEntry } from "@/lib/sheets"
+import { getStreamsDetailed } from "@/lib/db/streams"
 import { ContactButton } from "@/components/contact-button"
 import { GeneralInquiryButton } from "@/components/general-inquiry-button"
 
@@ -37,14 +38,14 @@ export default async function MailingListPage({
 
   if (!isSheetsConfigured()) notFound()
 
-  let mailingList = null
-  try {
-    mailingList = await getMailingList(listId)
-  } catch {
-    mailingList = null
-  }
+  const [streams, mailingList] = await Promise.all([
+    getStreamsDetailed(),
+    getMailingList(listId).catch(() => null),
+  ])
 
   if (!mailingList) notFound()
+
+  const streamTypes = new Map(streams.map((s) => [s.name.trim().toLowerCase(), s.type]))
 
   let entries: MailingListEntry[] = mailingList.entries
   const { date } = mailingList
@@ -99,7 +100,7 @@ export default async function MailingListPage({
 
         <div className="grid gap-4">
           {entries.map((entry) => (
-            <EntryCard key={entry.profile.id} entry={entry} listId={listId} employerToken={employerToken} />
+            <EntryCard key={entry.profile.id} entry={entry} listId={listId} employerToken={employerToken} streamTypes={streamTypes} />
           ))}
         </div>
 
@@ -117,10 +118,23 @@ export default async function MailingListPage({
   )
 }
 
-function EntryCard({ entry, listId, employerToken }: { entry: MailingListEntry; listId: string; employerToken?: string }) {
+function EntryCard({
+  entry,
+  listId,
+  employerToken,
+  streamTypes,
+}: {
+  entry: MailingListEntry
+  listId: string
+  employerToken?: string
+  streamTypes: Map<string, string>
+}) {
   const { profile } = entry
 
-  const tags = [profile.level, profile.industry, profile.func].filter(Boolean)
+  // Industry/Function tags are derived from the candidate's Stream membership
+  // (TASK-27) via each stream's type, rather than separate Profile fields.
+  const industryTags = profile.stream.filter((s) => streamTypes.get(s.trim().toLowerCase()) === "Industry")
+  const funcTags = profile.stream.filter((s) => streamTypes.get(s.trim().toLowerCase()) === "Functional")
 
   const country = [
     profile.countryPrimary,
@@ -133,8 +147,17 @@ function EntryCard({ entry, listId, employerToken }: { entry: MailingListEntry; 
     <article className="rounded-2xl border bg-card p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          {profile.title && (
-            <p className="font-semibold text-card-foreground">{profile.title}</p>
+          {(profile.title || profile.level) && (
+            <div className="flex flex-wrap items-center gap-2">
+              {profile.title && (
+                <p className="font-semibold text-card-foreground">{profile.title}</p>
+              )}
+              {profile.level && (
+                <span className="inline-flex items-center rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700 dark:bg-teal-900/20 dark:text-teal-400">
+                  {profile.level}
+                </span>
+              )}
+            </div>
           )}
           {country && (
             <p className="mt-1 inline-flex items-center gap-1 text-sm text-muted-foreground">
@@ -144,12 +167,20 @@ function EntryCard({ entry, listId, employerToken }: { entry: MailingListEntry; 
           )}
         </div>
 
-        {tags.length > 0 && (
+        {(industryTags.length > 0 || funcTags.length > 0) && (
           <div className="flex flex-wrap gap-1.5">
-            {tags.map((tag) => (
+            {industryTags.map((tag) => (
               <span
-                key={tag}
-                className="inline-flex items-center rounded-full bg-accent px-2.5 py-0.5 text-xs font-medium text-accent-foreground"
+                key={`industry-${tag}`}
+                className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+              >
+                {tag}
+              </span>
+            ))}
+            {funcTags.map((tag) => (
+              <span
+                key={`func-${tag}`}
+                className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
               >
                 {tag}
               </span>
