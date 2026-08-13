@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation"
 import { getStreamsDetailed } from "@/lib/db/streams"
+import { getProfiles, getCandidatesForStream, isSheetsConfigured } from "@/lib/sheets"
 import { StreamsTable } from "@/components/streams-table"
 
 export const dynamic = "force-dynamic"
@@ -13,7 +14,14 @@ export default async function StreamsPage({
   const editorSecret = process.env.EDITOR_SECRET
   if (editorSecret && secret !== editorSecret) notFound()
 
-  const streams = await getStreamsDetailed()
+  const [streams, candidates] = await Promise.all([
+    getStreamsDetailed(),
+    isSheetsConfigured() ? getProfiles() : Promise.resolve([]),
+  ])
+
+  const candidateCounts = Object.fromEntries(
+    streams.map((s) => [s.id, getCandidatesForStream(candidates, s).length]),
+  )
 
   return (
     <div className="px-6 py-8 max-w-4xl">
@@ -29,7 +37,7 @@ export default async function StreamsPage({
           Стримы не найдены в базе данных.
         </div>
       ) : (
-        <StreamsTable streams={streams} />
+        <StreamsTable streams={streams} candidateCounts={candidateCounts} />
       )}
     </div>
   )

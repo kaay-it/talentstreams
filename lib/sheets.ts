@@ -879,6 +879,28 @@ export function filterCandidatesForEmployer(candidates: Profile[], employer: Emp
   })
 }
 
+/**
+ * True if a candidate's distribution tag matches a stream. Industry streams
+ * compare against `Profile.industry`, Functional streams against `Profile.func`.
+ * A stream with an unrecognized/empty `type` falls back to matching either tag.
+ */
+export function candidateMatchesStream(candidate: Profile, stream: { name: string; type: string }): boolean {
+  const name = stream.name.trim().toLowerCase()
+  if (!name) return false
+
+  const industry = candidate.industry.trim().toLowerCase()
+  const func = candidate.func.trim().toLowerCase()
+
+  if (stream.type === "Industry") return industry === name
+  if (stream.type === "Functional") return func === name
+  return industry === name || func === name
+}
+
+/** Active candidates (TASK-27) whose industry/function tag matches the given stream. */
+export function getCandidatesForStream(candidates: Profile[], stream: { name: string; type: string }): Profile[] {
+  return candidates.filter((c) => candidateMatchesStream(c, stream))
+}
+
 /** Fetch all employers subscribed to a given stream from the Employers sheet. */
 export async function getEmployersByStream(stream: string): Promise<Employer[]> {
   const employers = await getEmployers()
