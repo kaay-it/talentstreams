@@ -56,7 +56,7 @@ NOTE: Документ разделён на две части: <<Выполне
 | Хранятся в PostgreSQL (Neon) через Drizzle ORM — таблица `contactRequests`. Два типа: по кандидату (`candidateId` заполнен, 7 статусов) и общий (`candidateId` пуст, 3 статуса). Функции в `lib/db/contact-requests.ts`. Исторические данные в Google Sheets остаются как архив.
 
 | Neon + Drizzle ORM
-| ✅ TASK-DB-1 + TASK-DB-2. PostgreSQL через Vercel Marketplace (Neon). Схема — `lib/db/schema.ts`, клиент — `lib/db/index.ts` (neon-http driver). Миграция — `scripts/migrate.mjs`. Обход TLS корпоративного прокси в локальной среде: `NODE_TLS_REJECT_UNAUTHORIZED=0` при `NODE_ENV !== "production"` в `lib/db/index.ts`.
+| ✅ TASK-DB-1 + TASK-DB-2. PostgreSQL через Vercel Marketplace (Neon). Схема — `lib/db/schema.ts`, клиент — `lib/db/index.ts` (neon-http driver). Миграция — `scripts/migrate.mjs`.
 
 | Стримы — редактор (Neon)
 | ✅ TASK-DB-8. Стримы перенесены из Google Sheets в Neon. Миграция `0001_real_wendell_vaughn.sql` содержит схему + начальные данные (11 стримов: 6 Industry, 5 Functional). `lib/db/streams.ts` — полный CRUD. Страница `/editor/streams` — полноценный редактор: inline-редактирование (название, тип — выпадающий список Industry/Functional, описание), удаление строки, добавление нового стрима. Компонент `StreamsTable` (client). Копирование названия в буфер обмена. Цветные бейджи типов (синий / фиолетовый).
@@ -253,7 +253,7 @@ NOTE: Реализация перенесена в Neon (TASK-DB-2 ✅). `lib/sh
 
 * `@vercel/blob` установлен; хранилище — private Vercel Blob store.
 * `app/api/upload/route.ts` — принимает `POST multipart/form-data`, валидирует тип (PDF, DOC, DOCX, RTF, ODT) и размер (≤ 5 МБ), загружает через `put(filename, file, { access: "private" })`. Имя файла: `resumes/{timestamp}-{uuid8}.{ext}`.
-* `app/api/resume/route.ts` — прокси-роут `GET ?url=<blobUrl>`: проверяет hostname (`*.blob.vercel-storage.com`), скачивает файл server-side с `Authorization: Bearer BLOB_READ_WRITE_TOKEN`, стримит клиенту с корректным `Content-Type`. `NODE_TLS_REJECT_UNAUTHORIZED=0` в не-production среде (корпоративный прокси).
+* `app/api/resume/route.ts` — прокси-роут `GET ?url=<blobUrl>`: проверяет hostname (`*.blob.vercel-storage.com`), скачивает файл server-side с `Authorization: Bearer BLOB_READ_WRITE_TOKEN`, стримит клиенту с корректным `Content-Type`.
 * В Sheets сохраняется прокси-URL (`APP_URL/api/resume?url=...`) — ссылка открывается и из редактора, и из Google Sheets.
 * `CandidateRegistrationModal` — переключатель «Загрузить файл / Указать ссылку»: файл выбирается без немедленной загрузки, загрузка происходит в момент сабмита формы (spinner в кнопке покрывает оба этапа). Длинное имя файла обрезается с `truncate`.
 * `CANDIDATE_EXTRA_COLUMNS` дополнен `"Email"` и `"Phone"`; `appendCandidateRow` автоматически вызывает `ensureCandidateColumns()` перед записью — колонки создаются при первой регистрации если отсутствуют.
@@ -292,7 +292,7 @@ NOTE: Реализация перенесена в Neon (TASK-DB-2 ✅). `lib/sh
 * Neon подключён через Vercel Marketplace; переменные `DATABASE_URL`, `DATABASE_URL_UNPOOLED` проставлены в Vercel и добавлены в `.env`.
 * Зависимости: `drizzle-orm`, `@neondatabase/serverless` (runtime); `drizzle-kit`, `dotenv`, `ws` (dev).
 * `lib/db/schema.ts` — схема таблицы `contactRequests` (10 колонок camelCase, без underscores).
-* `lib/db/index.ts` — клиент `neon()` + `drizzle()` (neon-http driver, HTTP вместо WebSocket). Установлен `NODE_TLS_REJECT_UNAUTHORIZED=0` при `NODE_ENV !== "production"` — обход TLS-перехвата корпоративного прокси в локальной среде.
+* `lib/db/index.ts` — клиент `neon()` + `drizzle()` (neon-http driver, HTTP вместо WebSocket).
 * `scripts/migrate.mjs` — скрипт миграции через `drizzle-orm/neon-http/migrator` (HTTP, не WebSocket). Загружает `.env.local` и `.env` через dotenv. Запуск: `npm run db:migrate`.
 * `drizzle.config.ts` — конфигурация drizzle-kit для генерации миграций (`db:generate`).
 * Миграция `lib/db/migrations/0000_high_wraith.sql` сгенерирована и применена к Neon.
