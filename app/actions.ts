@@ -81,10 +81,9 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
-function buildEmailHtml(stream: string, date: string, url: string, count: number): string {
+function buildEmailHtml(stream: string, date: string, url: string): string {
   const s = escapeHtml(stream)
   const d = escapeHtml(date)
-  const plural = candidatePlural(count)
   const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif"
 
   return `<!DOCTYPE html>
@@ -130,7 +129,7 @@ function buildEmailHtml(stream: string, date: string, url: string, count: number
           </p>
 
           <p style="margin:0 0 24px;font-size:13px;color:#94a3b8;font-family:${font}">
-            ${d}&nbsp;&nbsp;·&nbsp;&nbsp;${count} ${plural}
+            ${d}&nbsp;&nbsp;·&nbsp;&nbsp;новые кандидаты в этом выпуске
           </p>
 
           <hr style="border:none;border-top:1px solid #f1f5f9;margin:0 0 24px">
@@ -171,14 +170,6 @@ function buildEmailHtml(stream: string, date: string, url: string, count: number
 </table>
 </body>
 </html>`
-}
-
-function candidatePlural(n: number): string {
-  const mod10 = n % 10
-  const mod100 = n % 100
-  if (mod10 === 1 && mod100 !== 11) return "проверенный кандидат"
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "проверенных кандидата"
-  return "проверенных кандидатов"
 }
 
 async function createCampaign(
@@ -238,7 +229,7 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   const listUrl = `${appUrl}/list/${listId}?e={{employer_token}}`
   const subject = `Talent Stream: ${list.stream} — выпуск ${list.date}`
   const campaignName = `${list.stream} — ${list.date}`
-  const html = buildEmailHtml(list.stream, list.date, listUrl, list.entries.length)
+  const html = buildEmailHtml(list.stream, list.date, listUrl)
 
   const campaign = await createCampaign(bookId, subject, html, campaignName)
   return { listId, stream: list.stream, campaignId: campaign.id }

@@ -38,3 +38,4 @@ next-env.d.ts
 # structurizr
 docs/.structurizr/
 docs/workspace.json
+.env*
