@@ -69,31 +69,76 @@ function isValidPrivateKey(key: string): boolean {
   return key.includes("-----BEGIN") && key.includes("PRIVATE KEY-----")
 }
 
+/**
+ * Parse JSON that may contain raw control characters (unescaped newlines/tabs)
+ * inside string values — e.g. a `private_key` field pasted with real line
+ * breaks instead of "\n" escapes. This happens in the wild when the service
+ * account JSON round-trips through `vercel env pull` or a copy-paste.
+ */
+function safeJsonParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    let sanitized = ""
+    let inString = false
+    let escaped = false
+    for (const ch of raw) {
+      if (inString) {
+        if (escaped) {
+          sanitized += ch
+          escaped = false
+        } else if (ch === "\\") {
+          sanitized += ch
+          escaped = true
+        } else if (ch === '"') {
+          sanitized += ch
+          inString = false
+        } else if (ch === "\n") {
+          sanitized += "\\n"
+        } else if (ch === "\r") {
+          sanitized += "\\r"
+        } else if (ch === "\t") {
+          sanitized += "\\t"
+        } else {
+          sanitized += ch
+        }
+      } else {
+        if (ch === '"') inString = true
+        sanitized += ch
+      }
+    }
+    return JSON.parse(sanitized)
+  }
+}
+
 /** Resolve the service-account email + private key from GOOGLE_SERVICE_ACCOUNT_JSON. */
 function resolveCredentials(): { email: string; privateKey: string } | null {
   const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
   if (!json?.trim()) return null
 
+  let parsed: { client_email?: string; private_key?: string }
   try {
-    const parsed = JSON.parse(json.trim())
-    const email = parsed.client_email as string | undefined
-    const rawKey = parsed.private_key as string | undefined
-    if (email && rawKey) {
-      return { email, privateKey: normalizePrivateKey(rawKey) }
-    }
-  } catch {
-    // invalid JSON
+    parsed = safeJsonParse(json.trim()) as { client_email?: string; private_key?: string }
+  } catch (e) {
+    throw new Error(`GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON: ${(e as Error).message}`)
   }
-  return null
+
+  if (!parsed.client_email || !parsed.private_key) {
+    throw new Error(
+      'GOOGLE_SERVICE_ACCOUNT_JSON is valid JSON but missing "client_email" or "private_key".',
+    )
+  }
+  return { email: parsed.client_email, privateKey: normalizePrivateKey(parsed.private_key) }
 }
 
 function getEnv() {
   const sheetId = process.env.GOOGLE_SHEET_ID
+  if (!sheetId) {
+    throw new Error("GOOGLE_SHEET_ID is not set.")
+  }
   const creds = resolveCredentials()
-  if (!creds || !sheetId) {
-    throw new Error(
-      "Missing Google Sheets configuration. Provide GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON.",
-    )
+  if (!creds) {
+    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is not set.")
   }
 
   if (!isValidPrivateKey(creds.privateKey)) {
@@ -873,9 +918,15 @@ export async function updateEmployerStatus(rowIndex: number, status: EmployerSta
 export function isSheetsConfigured(): boolean {
   const sheetId = process.env.GOOGLE_SHEET_ID
   if (!sheetId) return false
-  const creds = resolveCredentials()
-  if (!creds) return false
-  return isValidPrivateKey(creds.privateKey)
+  try {
+    const creds = resolveCredentials()
+    if (!creds) return false
+    return isValidPrivateKey(creds.privateKey)
+  } catch {
+    // Present but invalid (bad JSON / missing fields) — treat as not configured
+    // rather than crashing pages that only need a boolean.
+    return false
+  }
 }
 
 // ── Profile column migration ──────────────────────────────────────────────────
