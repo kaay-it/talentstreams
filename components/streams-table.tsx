@@ -14,7 +14,13 @@ const TYPE_STYLE: Record<string, string> = {
 
 const EMPTY_FORM = { name: "", type: "Industry", description: "" }
 
-export function StreamsTable({ streams }: { streams: StreamRecord[] }) {
+export function StreamsTable({
+  streams,
+  candidateCounts = {},
+}: {
+  streams: StreamRecord[]
+  candidateCounts?: Record<number, number>
+}) {
   const [editingId, setEditingId]   = useState<number | null>(null)
   const [editData, setEditData]     = useState<typeof EMPTY_FORM | null>(null)
   const [showAdd, setShowAdd]       = useState(false)
@@ -70,6 +76,7 @@ export function StreamsTable({ streams }: { streams: StreamRecord[] }) {
               <th className="px-4 py-3 text-left font-medium text-muted-foreground w-8">ID</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Название</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground w-36">Тип</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground w-28" title="Активные кандидаты, чей тег совпадает с названием стрима (TASK-27)">Кандидаты</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Описание</th>
               <th className="px-4 py-3 w-20" />
             </tr>
@@ -104,6 +111,9 @@ export function StreamsTable({ streams }: { streams: StreamRecord[] }) {
                         >
                           {STREAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
+                      </td>
+                      <td className="px-4 py-3.5 text-muted-foreground">
+                        {candidateCounts[stream.id] ?? 0}
                       </td>
                       <td className="px-4 py-2">
                         <input
@@ -143,6 +153,15 @@ export function StreamsTable({ streams }: { streams: StreamRecord[] }) {
                             {stream.type}
                           </span>
                         ) : <span className="text-muted-foreground/40">—</span>}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {candidateCounts[stream.id] ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                            {candidateCounts[stream.id]}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/40">0</span>
+                        )}
                       </td>
                       <td className="px-4 py-3.5 text-muted-foreground">
                         {stream.description || <span className="text-muted-foreground/40">—</span>}
@@ -187,6 +206,7 @@ export function StreamsTable({ streams }: { streams: StreamRecord[] }) {
                     {STREAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </td>
+                <td className="px-4 py-3.5 text-muted-foreground/40">—</td>
                 <td className="px-4 py-2">
                   <input
                     placeholder="Описание"
