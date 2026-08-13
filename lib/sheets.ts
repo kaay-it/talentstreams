@@ -880,24 +880,19 @@ export function filterCandidatesForEmployer(candidates: Profile[], employer: Emp
 }
 
 /**
- * True if a candidate's distribution tag matches a stream. Industry streams
- * compare against `Profile.industry`, Functional streams against `Profile.func`.
- * A stream with an unrecognized/empty `type` falls back to matching either tag.
+ * True if a candidate is tagged into the given stream via the `Stream`
+ * multi-select column (`Profile.stream`) — what editors actually populate
+ * today. `Profile.industry`/`Profile.func` (TASK-04) are reserved for future
+ * finer-grained tagging and aren't used for stream membership.
  */
-export function candidateMatchesStream(candidate: Profile, stream: { name: string; type: string }): boolean {
+export function candidateMatchesStream(candidate: Profile, stream: { name: string }): boolean {
   const name = stream.name.trim().toLowerCase()
   if (!name) return false
-
-  const industry = candidate.industry.trim().toLowerCase()
-  const func = candidate.func.trim().toLowerCase()
-
-  if (stream.type === "Industry") return industry === name
-  if (stream.type === "Functional") return func === name
-  return industry === name || func === name
+  return candidate.stream.some((s) => s.trim().toLowerCase() === name)
 }
 
-/** Active candidates (TASK-27) whose industry/function tag matches the given stream. */
-export function getCandidatesForStream(candidates: Profile[], stream: { name: string; type: string }): Profile[] {
+/** Active candidates (TASK-27) tagged into the given stream. */
+export function getCandidatesForStream(candidates: Profile[], stream: { name: string }): Profile[] {
   return candidates.filter((c) => candidateMatchesStream(c, stream))
 }
 
