@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft, CalendarDays, MapPin } from "lucide-react"
 import { getMailingList, getEmployerByToken, filterCandidatesForEmployer, isSheetsConfigured, type MailingListEntry } from "@/lib/sheets"
+import { getStreamsDetailed } from "@/lib/db/streams"
 import { ContactButton } from "@/components/contact-button"
 import { GeneralInquiryButton } from "@/components/general-inquiry-button"
 
@@ -37,14 +38,14 @@ export default async function MailingListPage({
 
   if (!isSheetsConfigured()) notFound()
 
-  let mailingList = null
-  try {
-    mailingList = await getMailingList(listId)
-  } catch {
-    mailingList = null
-  }
+  const [streams, mailingList] = await Promise.all([
+    getStreamsDetailed(),
+    getMailingList(listId).catch(() => null),
+  ])
 
   if (!mailingList) notFound()
+
+  const streamTypes = new Map(streams.map((s) => [s.name.trim().toLowerCase(), s.type]))
 
   let entries: MailingListEntry[] = mailingList.entries
   const { date } = mailingList
@@ -99,7 +100,7 @@ export default async function MailingListPage({
 
         <div className="grid gap-4">
           {entries.map((entry) => (
-            <EntryCard key={entry.profile.id} entry={entry} listId={listId} employerToken={employerToken} />
+            <EntryCard key={entry.profile.id} entry={entry} listId={listId} employerToken={employerToken} streamTypes={streamTypes} />
           ))}
         </div>
 
@@ -117,10 +118,24 @@ export default async function MailingListPage({
   )
 }
 
-function EntryCard({ entry, listId, employerToken }: { entry: MailingListEntry; listId: string; employerToken?: string }) {
+function EntryCard({
+  entry,
+  listId,
+  employerToken,
+  streamTypes,
+}: {
+  entry: MailingListEntry
+  listId: string
+  employerToken?: string
+  streamTypes: Map<string, string>
+}) {
   const { profile } = entry
 
-  const tags = [profile.level, profile.industry, profile.func].filter(Boolean)
+  // Industry/Function tags are derived from the candidate's Stream membership
+  // (TASK-27) via each stream's type, rather than separate Profile fields.
+  const industryTags = profile.stream.filter((s) => streamTypes.get(s.trim().toLowerCase()) === "Industry")
+  const funcTags = profile.stream.filter((s) => streamTypes.get(s.trim().toLowerCase()) === "Functional")
+  const tags = [profile.level, ...industryTags, ...funcTags].filter(Boolean)
 
   const country = [
     profile.countryPrimary,
