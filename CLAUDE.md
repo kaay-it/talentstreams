@@ -96,13 +96,11 @@ docs/
 - В Sheets хранится прокси-URL: `APP_URL/api/resume?url=<encodedBlobUrl>`
 - Прокси: `GET /api/resume` — читает blob server-side с `Authorization: Bearer BLOB_READ_WRITE_TOKEN`
 - Защита от open redirect: проверка hostname `*.blob.vercel-storage.com`
-- В dev: `NODE_TLS_REJECT_UNAUTHORIZED=0` (корпоративный TLS-прокси)
 
 ### Neon — два типа данных
 - `contactRequests` — запросы работодателей на контакт с кандидатами
 - `streams` — стримы (Industry/Functional), полный CRUD через `/editor/streams`
 - Миграции: `scripts/migrate.mjs`
-- В dev: `NODE_TLS_REJECT_UNAUTHORIZED=0` в `lib/db/index.ts`
 
 ### Server Actions
 Все мутации — в `app/actions.ts`. После мутации, меняющей UI редактора, вызывать `revalidatePath(...)`.

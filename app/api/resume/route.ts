@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
 
-if (process.env.NODE_ENV !== "production") {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
-}
-
 const BLOB_HOST = "blob.vercel-storage.com"
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
