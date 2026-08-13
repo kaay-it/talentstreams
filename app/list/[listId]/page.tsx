@@ -153,7 +153,7 @@ function EntryCard({
                 <p className="font-semibold text-card-foreground">{profile.title}</p>
               )}
               {profile.level && (
-                <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
                   {profile.level}
                 </span>
               )}
