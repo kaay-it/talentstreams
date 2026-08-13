@@ -135,7 +135,6 @@ function EntryCard({
   // (TASK-27) via each stream's type, rather than separate Profile fields.
   const industryTags = profile.stream.filter((s) => streamTypes.get(s.trim().toLowerCase()) === "Industry")
   const funcTags = profile.stream.filter((s) => streamTypes.get(s.trim().toLowerCase()) === "Functional")
-  const tags = [profile.level, ...industryTags, ...funcTags].filter(Boolean)
 
   const country = [
     profile.countryPrimary,
@@ -148,8 +147,17 @@ function EntryCard({
     <article className="rounded-2xl border bg-card p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          {profile.title && (
-            <p className="font-semibold text-card-foreground">{profile.title}</p>
+          {(profile.title || profile.level) && (
+            <div className="flex flex-wrap items-center gap-2">
+              {profile.title && (
+                <p className="font-semibold text-card-foreground">{profile.title}</p>
+              )}
+              {profile.level && (
+                <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                  {profile.level}
+                </span>
+              )}
+            </div>
           )}
           {country && (
             <p className="mt-1 inline-flex items-center gap-1 text-sm text-muted-foreground">
@@ -159,12 +167,20 @@ function EntryCard({
           )}
         </div>
 
-        {tags.length > 0 && (
+        {(industryTags.length > 0 || funcTags.length > 0) && (
           <div className="flex flex-wrap gap-1.5">
-            {tags.map((tag) => (
+            {industryTags.map((tag) => (
               <span
-                key={tag}
-                className="inline-flex items-center rounded-full bg-accent px-2.5 py-0.5 text-xs font-medium text-accent-foreground"
+                key={`industry-${tag}`}
+                className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+              >
+                {tag}
+              </span>
+            ))}
+            {funcTags.map((tag) => (
+              <span
+                key={`func-${tag}`}
+                className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
               >
                 {tag}
               </span>
