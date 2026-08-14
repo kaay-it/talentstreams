@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation"
 import { Info } from "lucide-react"
 import { getEmployers } from "@/lib/sheets"
+import { getStreams } from "@/lib/db/streams"
 import { EmployerSection } from "@/components/employer-section"
 
 export const dynamic = "force-dynamic"
@@ -17,7 +18,7 @@ export default async function EmployersPage({
     notFound()
   }
 
-  const employers = await getEmployers()
+  const [employers, streams] = await Promise.all([getEmployers(), getStreams()])
 
   return (
     <div className="px-6 py-8 max-w-3xl">
@@ -37,7 +38,7 @@ export default async function EmployersPage({
         </p>
       </div>
 
-      <EmployerSection employers={employers} />
+      <EmployerSection employers={employers} streams={streams} />
     </div>
   )
 }

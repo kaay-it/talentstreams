@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord } from "@/lib/db/streams"
 import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
@@ -274,11 +274,33 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
 
 export async function updateCandidate(
   rowIndex: number,
-  data: { name: string; email: string; phone: string; resumeUrl: string; coverLetter: string },
+  data: {
+    name: string
+    email: string
+    phone: string
+    resumeUrl: string
+    coverLetter: string
+    stream: string[]
+    level: string
+    countryPrimary: string
+    countryDesired: string
+    activeSince: string
+  },
 ): Promise<void> {
   if (!data.name.trim()) throw new Error("Укажите имя")
   if (!data.email.trim()) throw new Error("Укажите email")
-  await updateCandidateFields(rowIndex, data)
+  await updateCandidateFields(rowIndex, {
+    name: data.name,
+    email: data.email,
+    phone: data.phone,
+    resumeUrl: data.resumeUrl,
+    coverLetter: data.coverLetter,
+    stream: data.stream.join(", "),
+    level: data.level,
+    countryPrimary: data.countryPrimary,
+    countryDesired: data.countryDesired,
+    activeSince: data.activeSince,
+  })
   revalidatePath("/editor/candidates")
 }
 
@@ -321,6 +343,47 @@ export async function registerEmployer(data: EmployerData): Promise<void> {
     "Country": data.country,
     "Additional Countries": data.additionalCountries.join(", "),
   })
+}
+
+export async function updateEmployer(
+  rowIndex: number,
+  data: {
+    name: string
+    company: string
+    email: string
+    phone: string
+    primaryContact: EmployerData["primaryContact"]
+    telegram: string
+    linkedin: string
+    streams: string[]
+    country: string
+    additionalCountries: string[]
+  },
+): Promise<void> {
+  if (!data.name.trim()) throw new Error("Укажите имя")
+  if (!data.email.trim()) throw new Error("Укажите email")
+  if (!data.phone.trim()) throw new Error("Укажите телефон")
+  if (!data.streams.length) throw new Error("Выберите хотя бы один стрим")
+  if (data.primaryContact === "telegram" && !data.telegram.trim()) {
+    throw new Error("Укажите Telegram-имя")
+  }
+  if (data.primaryContact === "linkedin" && !data.linkedin.trim()) {
+    throw new Error("Укажите LinkedIn-профиль")
+  }
+
+  await updateEmployerFields(rowIndex, {
+    name: data.name,
+    company: data.company,
+    email: data.email,
+    phone: data.phone,
+    primaryContact: data.primaryContact,
+    telegram: data.telegram,
+    linkedin: data.linkedin,
+    streams: data.streams.join(", "),
+    country: data.country,
+    additionalCountries: data.additionalCountries.join(", "),
+  })
+  revalidatePath("/editor/employers")
 }
 
 export async function confirmEmployer(rowIndex: number, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "telegram" | "linkedin" | "primaryContact" | "streams">): Promise<void> {
