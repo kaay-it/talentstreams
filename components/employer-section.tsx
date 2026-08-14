@@ -1,8 +1,9 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, Building2 } from "lucide-react"
+import { CheckCircle2, XCircle, Building2, Pencil } from "lucide-react"
 import { confirmEmployer, rejectEmployer } from "@/app/actions"
+import { EmployerEditModal } from "@/components/employer-edit-modal"
 import type { Employer, EmployerStatus } from "@/lib/sheets"
 
 const SELECT_CLASS =
@@ -88,7 +89,7 @@ export function EmployerSection({ employers, streams }: { employers: Employer[];
         ) : (
           <div className="divide-y">
             {filtered.map((e) => (
-              <EmployerRow key={e.rowIndex} employer={e} />
+              <EmployerRow key={e.rowIndex} employer={e} streams={streams} />
             ))}
           </div>
         )}
@@ -97,10 +98,11 @@ export function EmployerSection({ employers, streams }: { employers: Employer[];
   )
 }
 
-function EmployerRow({ employer }: { employer: Employer }) {
+function EmployerRow({ employer, streams }: { employer: Employer; streams: string[] }) {
   const [isPending, startTransition] = useTransition()
   const [localStatus, setLocalStatus] = useState<"confirmed" | "rejected" | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
 
   const handleConfirm = () => {
     setError(null)
@@ -128,6 +130,9 @@ function EmployerRow({ employer }: { employer: Employer }) {
 
   return (
     <div className="flex flex-col gap-1 px-5 py-3">
+      {editing && (
+        <EmployerEditModal employer={employer} streams={streams} onClose={() => setEditing(false)} />
+      )}
       <div className="flex items-center gap-4">
         <Building2 className="size-4 shrink-0 text-muted-foreground" />
         <div className="flex-1 min-w-0">
@@ -147,6 +152,15 @@ function EmployerRow({ employer }: { employer: Employer }) {
             {employer.additionalCountries.length ? ` (+ ${employer.additionalCountries.join(", ")})` : ""}
           </p>
         </div>
+
+        <button
+          onClick={() => setEditing(true)}
+          disabled={isPending}
+          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+          aria-label="Редактировать"
+        >
+          <Pencil className="size-3.5" />
+        </button>
 
         {employer.status === "На проверке" && !localStatus && (
           <div className="flex shrink-0 gap-2">

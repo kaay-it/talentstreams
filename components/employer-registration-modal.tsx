@@ -5,23 +5,23 @@ import { createPortal } from "react-dom"
 import { X, Check, AlertCircle } from "lucide-react"
 import { registerEmployer, type EmployerData } from "@/app/actions"
 
-const CONTACT_OPTIONS = [
+export const CONTACT_OPTIONS = [
   { value: "email", label: "Email" },
   { value: "telegram", label: "Telegram" },
   { value: "whatsapp", label: "WhatsApp" },
   { value: "linkedin", label: "LinkedIn" },
 ] as const
 
-const MAX_STREAMS = 2
+export const MAX_STREAMS = 2
 
-const PRIMARY_COUNTRIES = [
+export const PRIMARY_COUNTRIES = [
   "Узбекистан",
   "Казахстан",
   "Кыргызстан",
   "Таджикистан",
 ]
 
-const ADDITIONAL_COUNTRIES = [
+export const ADDITIONAL_COUNTRIES = [
   "Узбекистан",
   "Казахстан",
   "Кыргызстан",
@@ -36,7 +36,7 @@ const ADDITIONAL_COUNTRIES = [
   "Украина",
 ]
 
-const ANY_COUNTRY = "Любая"
+export const ANY_COUNTRY = "Любая"
 
 type ContactMethod = EmployerData["primaryContact"]
 

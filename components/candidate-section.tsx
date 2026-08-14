@@ -16,7 +16,7 @@ const STATUS_OPTIONS: { value: CandidateStatus | ""; label: string }[] = [
   { value: "Отклонён", label: "Отклонённые" },
 ]
 
-function CandidateRow({ candidate }: { candidate: Candidate }) {
+function CandidateRow({ candidate, streams }: { candidate: Candidate; streams: string[] }) {
   const [isPending, startTransition] = useTransition()
   const [localStatus, setLocalStatus] = useState<"approved" | "rejected" | null>(null)
   const [editing, setEditing] = useState(false)
@@ -39,7 +39,7 @@ function CandidateRow({ candidate }: { candidate: Candidate }) {
 
   return (
     <>
-      {editing && <CandidateEditModal candidate={candidate} onClose={() => setEditing(false)} />}
+      {editing && <CandidateEditModal candidate={candidate} streams={streams} onClose={() => setEditing(false)} />}
       <div className={`border-b last:border-b-0 px-5 py-4 transition-opacity ${done ? "opacity-50" : ""}`}>
         <div className="flex items-start gap-4">
           <div className="flex-1 min-w-0">
@@ -203,7 +203,7 @@ export function CandidateSection({ candidates, streams }: { candidates: Candidat
         ) : filtered.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">Кандидаты не найдены по заданным фильтрам.</p>
         ) : (
-          filtered.map((c) => <CandidateRow key={c.rowIndex} candidate={c} />)
+          filtered.map((c) => <CandidateRow key={c.rowIndex} candidate={c} streams={streams} />)
         )}
       </div>
     </div>

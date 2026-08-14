@@ -507,6 +507,8 @@ export type Candidate = {
   activeSince: string
   stream: string[]
   level: string
+  countryPrimary: string
+  countryDesired: string
 }
 
 /** Append an employer row, mapping field names to actual column positions in the sheet. */
@@ -593,6 +595,8 @@ export async function getCandidates(): Promise<Candidate[]> {
         activeSince: r.activeSince || "",
         stream: parseMultiValue(r.stream || ""),
         level: r.level || "",
+        countryPrimary: r.countryPrimary || "",
+        countryDesired: r.countryDesired || "",
       }
     }).filter((c) => c.name || c.email)
   } catch {
@@ -648,7 +652,18 @@ export async function updateCandidateStatus(
 /** Update specific editable fields of a candidate row by rowIndex. */
 export async function updateCandidateFields(
   rowIndex: number,
-  data: Partial<{ name: string; email: string; phone: string; resumeUrl: string; coverLetter: string }>,
+  data: Partial<{
+    name: string
+    email: string
+    phone: string
+    resumeUrl: string
+    coverLetter: string
+    stream: string
+    level: string
+    countryPrimary: string
+    countryDesired: string
+    activeSince: string
+  }>,
 ): Promise<void> {
   const { email, privateKey, sheetId } = getEnv()
   const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
@@ -932,6 +947,59 @@ export async function updateEmployerStatus(rowIndex: number, status: EmployerSta
     },
   )
   if (!res.ok) throw new Error(`Failed to update employer status (${res.status}): ${await res.text()}`)
+}
+
+// Employer headers aren't in HEADER_ALIASES (that table is candidate/profile-focused) — map
+// the camelCase Employer field names to their exact lowercase column headers here instead.
+const EMPLOYER_FIELD_HEADER_ALIASES: Record<string, string> = {
+  primaryContact: "primary contact",
+  additionalCountries: "additional countries",
+}
+
+/** Update specific editable fields of an employer row by rowIndex. */
+export async function updateEmployerFields(
+  rowIndex: number,
+  data: Partial<{
+    name: string
+    company: string
+    email: string
+    phone: string
+    primaryContact: string
+    telegram: string
+    linkedin: string
+    streams: string
+    country: string
+    additionalCountries: string
+  }>,
+): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const headerRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Employers'!A1:Z1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  const headerData = (await headerRes.json()) as { values?: string[][] }
+  const headers = (headerData.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
+
+  const entries = Object.entries(data) as [string, string][]
+  await Promise.all(
+    entries.map(async ([field, value]) => {
+      const headerKey = EMPLOYER_FIELD_HEADER_ALIASES[field] ?? field
+      const colIdx = headers.indexOf(headerKey)
+      if (colIdx < 0) return
+      const range = encodeURIComponent(`'Employers'!${colLetter(colIdx + 1)}${rowIndex}`)
+      const res = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueInputOption=USER_ENTERED`,
+        {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ values: [[value ?? ""]] }),
+        },
+      )
+      if (!res.ok) throw new Error(`Failed to update field "${field}" (${res.status})`)
+    }),
+  )
 }
 
 
