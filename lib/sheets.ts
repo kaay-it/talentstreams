@@ -505,6 +505,8 @@ export type Candidate = {
   coverLetter: string
   status: CandidateStatus
   activeSince: string
+  stream: string[]
+  level: string
 }
 
 /** Append an employer row, mapping field names to actual column positions in the sheet. */
@@ -589,6 +591,8 @@ export async function getCandidates(): Promise<Candidate[]> {
         // Legacy rows without a Status column default to Активный
         status: ((r.status || "").trim() || "Активный") as CandidateStatus,
         activeSince: r.activeSince || "",
+        stream: parseMultiValue(r.stream || ""),
+        level: r.level || "",
       }
     }).filter((c) => c.name || c.email)
   } catch {
