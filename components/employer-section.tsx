@@ -23,7 +23,7 @@ const STATUS_BADGE: Record<EmployerStatus, string> = {
 
 export function EmployerSection({ employers, streams }: { employers: Employer[]; streams: string[] }) {
   const [search, setSearch] = useState("")
-  const [status, setStatus] = useState<EmployerStatus | "">("На проверке")
+  const [status, setStatus] = useState<EmployerStatus | "">("")
   const [country, setCountry] = useState("")
   const [stream, setStream] = useState("")
 

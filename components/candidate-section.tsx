@@ -142,7 +142,7 @@ function CandidateRow({ candidate }: { candidate: Candidate }) {
 
 export function CandidateSection({ candidates, streams }: { candidates: Candidate[]; streams: string[] }) {
   const [search, setSearch] = useState("")
-  const [status, setStatus] = useState<CandidateStatus | "">("На проверке")
+  const [status, setStatus] = useState<CandidateStatus | "">("")
   const [stream, setStream] = useState("")
   const [level, setLevel] = useState("")
 
