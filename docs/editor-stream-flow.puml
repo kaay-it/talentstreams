@@ -62,6 +62,15 @@ note right of neonStreams
   2  | Tech        | Functional  | …
 end note
 
+note over app, sh_cands
+  TASK-27: рядом с каждым стримом — счётчик подходящих
+  активных кандидатов. candidateMatchesStream(candidate, stream):
+  кандидат попадает в стрим, если его Stream (multi-select
+  колонка кандидата) содержит имя стрима — без учёта регистра.
+  getCandidatesForStream(candidates, stream) фильтрует уже
+  загруженный getProfiles(), без отдельного запроса на стрим.
+end note
+
 == 2. Кандидат подаёт анкету ==
 
 candidate -> app : Открывает сайт, нажимает\n«Стать кандидатом»
@@ -108,8 +117,10 @@ end note
 
 editor -> app : GET /editor/candidates?secret=…
 app -> sh_cands : getCandidates()
-sh_cands --> app : список кандидатов
-app --> editor : Раздел «Кандидаты»:\nгруппа «На проверке» открыта (badge с количеством),\nгруппы «Активные» и «Отклонённые» свёрнуты
+sh_cands --> app : список кандидатов (с stream/level/countryPrimary/countryDesired)
+app -> neonStreams : getStreams() — опции фильтра "Стрим"
+neonStreams --> app : ["Finance", "Tech", …]
+app --> editor : Раздел «Кандидаты» (TASK-30): панель фильтров сверху\n(поиск, статус — по умолчанию «Все статусы», стрим, уровень),\nплоский список вместо коллапсируемых секций
 
 alt Редактор одобряет кандидата
   editor -> app : approveCandidate(rowIndex)
@@ -131,7 +142,7 @@ end note
 == 2б. Редактор редактирует данные кандидата ==
 
 editor -> app : Нажимает Pencil-кнопку в строке кандидата\n(доступна для всех статусов)
-app --> editor : CandidateEditModal — форма предзаполнена\n(имя, email, телефон, резюме, сопроводительное письмо)
+app --> editor : CandidateEditModal — форма предзаполнена\n(имя, email, телефон, резюме, сопроводительное письмо,\nуровень, стримы, страна текущая/желаемая, дата активности)
 
 alt Кандидат загружает новый файл резюме
   editor -> app : POST /api/upload (новый файл)
@@ -140,7 +151,7 @@ alt Кандидат загружает новый файл резюме
   app --> editor : proxyUrl для поля resumeUrl
 end
 
-editor -> app : updateCandidate(rowIndex, { name, email, phone,\n  resumeUrl, coverLetter })
+editor -> app : updateCandidate(rowIndex, { name, email, phone,\n  resumeUrl, coverLetter, stream, level,\n  countryPrimary, countryDesired, activeSince })
 app -> sh_cands : updateCandidateFields(rowIndex, data)\n(параллельные PUT по колонкам через Sheets API)
 sh_cands --> app : OK
 app --> editor : Страница обновлена (revalidatePath)
@@ -148,6 +159,26 @@ app --> editor : Страница обновлена (revalidatePath)
 note over app, sh_cands
   Колонки определяются через mapHeader() — алиасы работают
   с любым языком заголовков (name / Кандидат, email / Email, и т.д.)
+  activeSince хранится как ru-RU дата ("21.07.2026", как пишет
+  approveCandidate()) — <input type="date"> требует ISO,
+  конвертация происходит на границе CandidateEditModal.
+end note
+
+== 2в. Редактор редактирует данные работодателя ==
+
+editor -> app : Нажимает Pencil-кнопку в строке работодателя\n(доступна для всех статусов)
+app --> editor : EmployerEditModal — форма как EmployerRegistrationModal,\nпредзаполнена (имя, компания, email, телефон, способ связи,\nTelegram/LinkedIn, стримы, страна, доп. страны), без чекбокса согласия
+
+editor -> app : updateEmployer(rowIndex, { name, company, email, phone,\n  primaryContact, telegram, linkedin, streams,\n  country, additionalCountries })
+app -> sh_emp : updateEmployerFields(rowIndex, data)\n(параллельные PUT по колонкам 'Employers'!…)
+sh_emp --> app : OK
+app --> editor : Страница обновлена (revalidatePath)
+
+note over app, sh_emp
+  Не переотправляет данные в SendPulse — синхронизация
+  происходит только один раз, при confirmEmployer(). Если
+  подтверждённому работодателю поменять email/стримы через
+  эту форму, контакт в SendPulse останется со старыми данными.
 end note
 
 == 3. Работодатель подписывается (заявка) ==
@@ -173,10 +204,12 @@ end note
 
 == 3а. Редактор подтверждает работодателя ==
 
-editor -> app : GET /editor?secret=… → секция «Работодатели»
+editor -> app : GET /editor/employers?secret=…
 app -> sh_emp : getEmployers()
-sh_emp --> app : список с Status=«На проверке»
-app --> editor : Группа «На проверке» (раскрыта)
+sh_emp --> app : список работодателей
+app -> neonStreams : getStreams() — опции фильтра "Стрим"
+neonStreams --> app : ["Finance", "Tech", …]
+app --> editor : Раздел «Работодатели» (TASK-30): панель фильтров сверху\n(поиск, статус — по умолчанию «Все статусы», страна, стрим),\nплоский список вместо коллапсируемых секций
 
 editor -> app : confirmEmployer(rowIndex, employerData)
 app -> sp_master : POST /addressbooks/MASTER/emails\n{ email, variables: { Имя, phone, employer_token: UUID, … } }
@@ -255,7 +288,9 @@ sh_mail --> app : { stream, date, candidate_ids: [UUID, UUID] }
 app -> sh_cands : getProfiles() → фильтр по candidate_ids
 sh_cands --> app : профили кандидатов
 app -> app : filterCandidatesForEmployer(candidates, employer)\n(in-memory: excludedCompanies, excludedIndustries,\nгео: countryPrimary/countryDesired ∩ employer.country+additionalCountries;\n«Любая» → без гео-фильтра; нет данных о стране → скрыть)
-app --> employer : Страница выпуска: анонимные карточки\n(должность, теги, страна, summary)\nБез имён и контактов. Кнопка «Хочу связаться».
+app -> neonStreams : getStreamsDetailed() — типы стримов для тегов (TASK-27)
+neonStreams --> app : [{ name, type }, …]
+app --> employer : Страница выпуска: анонимные карточки\n(должность, уровень — teal-бейдж рядом с должностью, страна, summary,\nindustry-теги — синие, functional — фиолетовые: выводятся из\nProfile.stream кандидата по type стрима, а не из полей industry/func)\nБез имён и контактов. Кнопка «Хочу связаться».
 else ?secret=[EDITOR_SECRET] — доступ редактора (все кандидаты)
 editor -> app : GET /list/f04a9b3e-…?secret=…
 app -> sh_mail : getMailingList("f04a9b3e-…")

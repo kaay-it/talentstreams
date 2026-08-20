@@ -39,11 +39,11 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         releasesPage = component "ReleasesPage (/editor)" "Список выпусков: стрим, дата, кандидаты, история кампаний, кнопка рассылки, проверка пустой адресной книги, ссылка на подборку с секретом." "Next.js Server Component" "Page"
 
-        employersPage = component "EmployersPage (/editor/employers)" "Управление работодателями: три коллапсируемые группы (На проверке / Отклонён / Подтверждён). Кнопки «Подтвердить» и «Отклонить»." "Next.js Server Component" "Page"
+        employersPage = component "EmployersPage (/editor/employers)" "Управление работодателями: панель фильтров (поиск, статус — по умолчанию все, страна, стрим), плоский список вместо секций (TASK-30). Кнопки «Подтвердить» и «Отклонить»; Pencil открывает EmployerEditModal (TASK-31)." "Next.js Server Component" "Page"
 
         settingsPage = component "SettingsPage (/editor/settings)" "Настройки: миграция колонок Google Sheets через AddColumnsButton." "Next.js Server Component" "Page"
 
-        candidatesPage = component "CandidatesPage (/editor/candidates)" "Список кандидатов, сгруппированных по статусу (На проверке / Активные / Отклонённые). Рендерит CandidateSection." "Next.js Server Component" "Page"
+        candidatesPage = component "CandidatesPage (/editor/candidates)" "Список кандидатов: панель фильтров (поиск, статус — по умолчанию все, стрим, уровень), плоский список вместо секций (TASK-30). Рендерит CandidateSection." "Next.js Server Component" "Page"
 
         # Client Components
         employerModal = component "EmployerRegistrationModal" "Форма подписки работодателя: имя, компания, email, телефон, способ связи, выбор стримов. После отправки — статус «На проверке»." "React Client Component" "UI"
@@ -54,11 +54,13 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         contactButton = component "ContactButton" "Кнопка «Хочу связаться» на карточке подборки. Вызывает `submitContactRequest`, записывает запрос в лист «Contact Requests». Без токена — неактивна." "React Client Component" "UI"
 
-        employerSection = component "EmployerSection" "Секция редактора: три коллапсируемые группы работодателей (На проверке / Отклонён / Подтверждён). Кнопки «Подтвердить» и «Отклонить»." "React Client Component" "UI"
+        employerSection = component "EmployerSection" "Секция редактора (TASK-30): панель фильтров (поиск, статус, страна, стрим) вместо коллапсируемых групп; useMemo-фильтрация, комбинируются одновременно. Кнопки «Подтвердить» и «Отклонить»; Pencil на каждой строке открывает EmployerEditModal (TASK-31)." "React Client Component" "UI"
 
-        candidateSection = component "CandidateSection" "Секция редактора: три коллапсируемые группы кандидатов (На проверке / Активные / Отклонённые). Кнопки «Добавить» / «Отклонить» для статуса «На проверке». Кнопка-карандаш (Pencil) на каждой строке открывает CandidateEditModal." "React Client Component" "UI"
+        candidateSection = component "CandidateSection" "Секция редактора (TASK-30): панель фильтров (поиск, статус, стрим, уровень) вместо коллапсируемых групп; useMemo-фильтрация. Кнопки «Добавить» / «Отклонить» для статуса «На проверке». Кнопка-карандаш (Pencil) на каждой строке открывает CandidateEditModal." "React Client Component" "UI"
 
-        candidateEditModal = component "CandidateEditModal" "Модальная форма редактирования кандидата: предзаполнена текущими данными (имя, email, телефон, резюме файл/URL, сопроводительное письмо). При выборе файла — загрузка в Vercel Blob через /api/upload на сабмит. После сохранения — экран подтверждения." "React Client Component" "UI"
+        candidateEditModal = component "CandidateEditModal" "Модальная форма редактирования кандидата: контакты (имя, email, телефон), резюме файл/URL, сопроводительное письмо, уровень, стримы (multi-select), страна текущая/желаемая, дата активности (date-picker с конвертацией ISO↔ru-RU на границе компонента). При выборе файла резюме — загрузка в Vercel Blob через /api/upload на сабмит. После сохранения — экран подтверждения." "React Client Component" "UI"
+
+        employerEditModal = component "EmployerEditModal" "Модальная форма редактирования работодателя (TASK-31): те же поля, что в EmployerRegistrationModal (имя, компания, email, телефон, способ связи, Telegram/LinkedIn, стримы, страна, доп. страны), без чекбокса согласия. Не переотправляет данные в SendPulse — только Sheets." "React Client Component" "UI"
 
         publishButton = component "PublishButton" "Кнопка запуска рассылки. Отключена если адресная книга пуста. Показывает статус кампании." "React Client Component" "UI"
 
@@ -71,7 +73,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
         generalInquiryButton = component "GeneralInquiryButton" "Кнопка «Связаться с нами» в блоке «Не нашли подходящих». Пишет в Contact Requests без candidateId." "React Client Component" "UI"
 
         # Server Actions
-        serverActions = component "Server Actions" "registerEmployer() — пишет в Sheets со статусом «На проверке».\nregisterCandidate() — пишет в Sheets.\npublishMailingList() — создаёт кампанию в SendPulse.\nconfirmEmployer() — добавляет в SendPulse, затем статус «Подтверждён» в Sheets.\nrejectEmployer() — статус «Отклонён» в Sheets.\napproveCandidate() / rejectCandidate() — статусы кандидата в Sheets.\naddAllColumns() — миграция колонок (Sheets).\nsubmitContactRequest() — записывает запрос по кандидату в Neon.\nsubmitGeneralInquiry() — записывает общий запрос (candidateId='') в Neon.\nsetContactRequestStatus(id, status) — меняет статус запроса в Neon по id (UUID).\nupdateStream(id, data) / createStream(data) / deleteStream(id) — CRUD стримов в Neon (revalidatePath /editor/streams).\nupdateCandidate(rowIndex, data) — обновляет поля кандидата в Sheets через updateCandidateFields() (revalidatePath /editor/candidates)." "Next.js Server Actions" "Logic"
+        serverActions = component "Server Actions" "registerEmployer() — пишет в Sheets со статусом «На проверке».\nregisterCandidate() — пишет в Sheets.\npublishMailingList() — создаёт кампанию в SendPulse, тело письма без точного счётчика кандидатов (TASK-26).\nconfirmEmployer() — добавляет в SendPulse, затем статус «Подтверждён» в Sheets.\nrejectEmployer() — статус «Отклонён» в Sheets.\napproveCandidate() / rejectCandidate() — статусы кандидата в Sheets.\naddAllColumns() — миграция колонок (Sheets).\nsubmitContactRequest() — записывает запрос по кандидату в Neon.\nsubmitGeneralInquiry() — записывает общий запрос (candidateId='') в Neon.\nsetContactRequestStatus(id, status) — меняет статус запроса в Neon по id (UUID).\nupdateStream(id, data) / createStream(data) / deleteStream(id) — CRUD стримов в Neon (revalidatePath /editor/streams).\nupdateCandidate(rowIndex, data) — обновляет поля кандидата (включая stream/level/countryPrimary/countryDesired/activeSince) в Sheets через updateCandidateFields() (revalidatePath /editor/candidates).\nupdateEmployer(rowIndex, data) — обновляет поля работодателя в Sheets через updateEmployerFields(), не трогает SendPulse (revalidatePath /editor/employers)." "Next.js Server Actions" "Logic"
 
         publishApi = component "Publish API (/api/publish/[listId])" "HTTP-роут для запуска рассылки через curl или внешние системы. Защищён EDITOR_SECRET." "Next.js Route Handler" "Logic"
 
@@ -80,7 +82,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
         resumeApi = component "Resume API (/api/resume)" "GET-роут прокси для приватных файлов Vercel Blob: получает ?url=, проверяет hostname (*.blob.vercel-storage.com), делает fetch с Authorization: Bearer BLOB_READ_WRITE_TOKEN и стримит ответ клиенту. Защита от open redirect по hostname." "Next.js Route Handler" "Logic"
 
         # Integrations
-        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nЧтение: профили, подборки, работодатели. Стримы перенесены в Neon.\nЗапись: регистрации работодателей и кандидатов (appendCandidateRow вызывает ensureCandidateColumns автоматически); статусы работодателей и кандидатов; поля кандидата (updateCandidateFields).\nМиграция: ensureProfileColumns(), ensureEmployerColumns(), ensureCandidateColumns().\nАвтосоздание листов через ensureSheet().\ngetEmployerByToken() — поиск по токену.\nfilterCandidatesForEmployer() — фильтрация кандидатов: excludedCompanies, excludedIndustries, гео (countryPrimary/countryDesired vs employer.country/additionalCountries); «Любая» снимает гео-ограничение (TASK-24 ✅).\nContact Requests перенесены в Neon → lib/db/contact-requests.ts." "TypeScript, Google Sheets API v4" "Integration"
+        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nАутентификация: safeJsonParse() устойчив к сырым переносам строк в private_key GOOGLE_SERVICE_ACCOUNT_JSON (артефакт vercel env pull); ошибки конфигурации — конкретные (что не задано/невалидно), не общая фраза.\nЧтение: профили, подборки, работодатели. Стримы перенесены в Neon.\nЗапись: регистрации работодателей и кандидатов (appendCandidateRow вызывает ensureCandidateColumns автоматически); статусы работодателей и кандидатов; поля кандидата (updateCandidateFields, включая stream/level/countryPrimary/countryDesired/activeSince); поля работодателя (updateEmployerFields, TASK-31).\nМиграция: ensureProfileColumns(), ensureEmployerColumns(), ensureCandidateColumns().\nАвтосоздание листов через ensureSheet().\ngetEmployerByToken() — поиск по токену.\nfilterCandidatesForEmployer() — фильтрация кандидатов: excludedCompanies, excludedIndustries, гео (countryPrimary/countryDesired vs employer.country/additionalCountries); «Любая» снимает гео-ограничение (TASK-24 ✅).\ncandidateMatchesStream() / getCandidatesForStream() — сопоставление кандидата стриму по колонке Stream (multi-select), без учёта регистра (TASK-27 ✅).\nContact Requests перенесены в Neon → lib/db/contact-requests.ts." "TypeScript, Google Sheets API v4" "Integration"
 
         dbLib = component "DB Library (lib/db/)" "Drizzle ORM + @neondatabase/serverless (neon-http driver).\nschema.ts — схемы таблиц contactRequests и streams.\nindex.ts — клиент drizzle(neon(DATABASE_URL)).\ncontact-requests.ts — appendContactRequest(), getContactRequests(), updateContactRequestStatus(id).\nstreams.ts — getStreams(), getStreamsDetailed(), createStreamRecord(), updateStreamRecord(), deleteStreamRecord().\nMigrations: scripts/migrate.mjs." "TypeScript, Drizzle ORM, Neon" "Integration"
 
@@ -120,24 +122,29 @@ workspace "TalentStreams" "Платформа подборки проверен�
     talentStreams.webApp.employersPage -> talentStreams.webApp.employerSection "Рендерит"
     talentStreams.webApp.editorLayout -> talentStreams.webApp.editorNav "Рендерит"
     talentStreams.webApp.candidatesPage -> talentStreams.webApp.sheetsLib "getCandidates()"
+    talentStreams.webApp.candidatesPage -> talentStreams.webApp.dbLib "getStreams() — опции фильтра"
     talentStreams.webApp.candidatesPage -> talentStreams.webApp.candidateSection "Рендерит"
     talentStreams.webApp.candidateSection -> talentStreams.webApp.serverActions "approveCandidate() / rejectCandidate()"
     talentStreams.webApp.candidateSection -> talentStreams.webApp.candidateEditModal "Открывает при клике на Pencil"
     talentStreams.webApp.candidateEditModal -> talentStreams.webApp.uploadApi "POST /api/upload (при выборе файла)"
     talentStreams.webApp.candidateEditModal -> talentStreams.webApp.serverActions "updateCandidate(rowIndex, data)"
-    editor -> talentStreams.webApp.candidatesPage "Модерирует и редактирует данные кандидатов"
+    editor -> talentStreams.webApp.candidatesPage "Модерирует, фильтрует и редактирует данные кандидатов"
 
     talentStreams.webApp.homePage -> talentStreams.webApp.sheetsLib "getStreams()"
     talentStreams.webApp.profilePage -> talentStreams.webApp.sheetsLib "getProfile(id)"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
+    talentStreams.webApp.mailingListPage -> talentStreams.webApp.dbLib "getStreamsDetailed() — типы стримов для тегов на карточке (TASK-27)"
     talentStreams.webApp.releasesPage -> talentStreams.webApp.sheetsLib "getMailingLists()"
     talentStreams.webApp.releasesPage -> talentStreams.webApp.sendPulseLib "getBookEmailCount() — проверка пустой книги"
     talentStreams.webApp.employersPage -> talentStreams.webApp.sheetsLib "getEmployers()"
+    talentStreams.webApp.employersPage -> talentStreams.webApp.dbLib "getStreams() — опции фильтра"
 
     talentStreams.webApp.employerModal -> talentStreams.webApp.serverActions "registerEmployer(EmployerData)"
     talentStreams.webApp.candidateModal -> talentStreams.webApp.serverActions "registerCandidate(CandidateData)"
     talentStreams.webApp.publishButton -> talentStreams.webApp.serverActions "publishMailingList(listId)"
     talentStreams.webApp.employerSection -> talentStreams.webApp.serverActions "confirmEmployer() / rejectEmployer()"
+    talentStreams.webApp.employerSection -> talentStreams.webApp.employerEditModal "Открывает при клике на Pencil"
+    talentStreams.webApp.employerEditModal -> talentStreams.webApp.serverActions "updateEmployer(rowIndex, data)"
 
     talentStreams.webApp.publishApi -> talentStreams.webApp.serverActions "publishMailingList(listId)"
 
@@ -164,6 +171,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
     talentStreams.webApp.requestsPage -> talentStreams.webApp.sheetsLib "getProfiles()"
     talentStreams.webApp.requestsPage -> talentStreams.webApp.contactRequestsSection "Рендерит"
     talentStreams.webApp.streamsPage -> talentStreams.webApp.dbLib "getStreamsDetailed()"
+    talentStreams.webApp.streamsPage -> talentStreams.webApp.sheetsLib "getProfiles() — подсчёт подходящих кандидатов на стрим (TASK-27)"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.generalInquiryButton "Рендерит (при наличии токена)"
     talentStreams.webApp.contactRequestsSection -> talentStreams.webApp.serverActions "setContactRequestStatus(id)"
     talentStreams.webApp.generalInquiryButton -> talentStreams.webApp.serverActions "submitGeneralInquiry()"
