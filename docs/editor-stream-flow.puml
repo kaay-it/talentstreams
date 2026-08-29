@@ -142,7 +142,7 @@ end note
 == 2б. Редактор редактирует данные кандидата ==
 
 editor -> app : Нажимает Pencil-кнопку в строке кандидата\n(доступна для всех статусов)
-app --> editor : CandidateEditModal — форма предзаполнена\n(имя, email, телефон, резюме, сопроводительное письмо,\nуровень, стримы, страна текущая/желаемая, дата активности)
+app --> editor : CandidateEditModal — форма предзаполнена\n(имя, роль, email, телефон, резюме, сопроводительное письмо,\nsummary, уровень, стримы, страна текущая/желаемая, дата активности)
 
 alt Кандидат загружает новый файл резюме
   editor -> app : POST /api/upload (новый файл)
@@ -151,7 +151,7 @@ alt Кандидат загружает новый файл резюме
   app --> editor : proxyUrl для поля resumeUrl
 end
 
-editor -> app : updateCandidate(rowIndex, { name, email, phone,\n  resumeUrl, coverLetter, stream, level,\n  countryPrimary, countryDesired, activeSince })
+editor -> app : updateCandidate(rowIndex, { name, title, email, phone,\n  resumeUrl, coverLetter, summary, stream, level,\n  countryPrimary, countryDesired, activeSince })
 app -> sh_cands : updateCandidateFields(rowIndex, data)\n(параллельные PUT по колонкам через Sheets API)
 sh_cands --> app : OK
 app --> editor : Страница обновлена (revalidatePath)
@@ -227,7 +227,7 @@ end note
 
 == 4. Редактор готовит выпуск ==
 
-editor -> sh_cands : Обогащает профили одобренных кандидатов\n(заполняет title, bio, stream, level, industry, summary, …)
+editor -> sh_cands : Обогащает профили одобренных кандидатов\n(title, summary, stream, level, страны — через CandidateEditModal на сайте;\nbio и остальное, не вошедшее в форму, — напрямую в Sheets)
 note right of sh_cands
   Главный лист «Candidates Database» — единый источник правды.
   Регистрационная форма и рассылки используют один и тот же лист.

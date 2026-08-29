@@ -49,6 +49,7 @@ export function CandidateEditModal({
   const [errorMsg, setErrorMsg] = useState("")
 
   const [name, setName] = useState(candidate.name)
+  const [title, setTitle] = useState(candidate.title)
   const [email, setEmail] = useState(candidate.email)
   const [phone, setPhone] = useState(candidate.phone)
   const [resumeMode, setResumeMode] = useState<"file" | "url">(
@@ -62,6 +63,7 @@ export function CandidateEditModal({
   const [countryPrimary, setCountryPrimary] = useState(candidate.countryPrimary)
   const [countryDesired, setCountryDesired] = useState(candidate.countryDesired)
   const [activeSince, setActiveSince] = useState(toISODate(candidate.activeSince))
+  const [summary, setSummary] = useState(candidate.summary)
 
   function toggleStream(s: string) {
     setSelectedStreams((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
@@ -110,6 +112,8 @@ export function CandidateEditModal({
         countryPrimary,
         countryDesired,
         activeSince: toRuDate(activeSince),
+        title,
+        summary,
       })
       setStatus("success")
     } catch (err) {
@@ -165,6 +169,16 @@ export function CandidateEditModal({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Иван Иванов"
+                  className={inputCls}
+                />
+              </Field>
+
+              <Field label="Роль">
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Product Manager"
                   className={inputCls}
                 />
               </Field>
@@ -254,6 +268,16 @@ export function CandidateEditModal({
                   </select>
                 </Field>
               </div>
+
+              <Field label="Summary">
+                <textarea
+                  value={summary}
+                  onChange={(e) => setSummary(e.target.value)}
+                  placeholder="Анонимное описание кандидата — это единственное, что увидит работодатель на карточке подборки, кроме роли, уровня и страны."
+                  rows={4}
+                  className={`${inputCls} resize-none`}
+                />
+              </Field>
 
               <Field label="Резюме">
                 <div className="space-y-2">
