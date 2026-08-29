@@ -245,14 +245,19 @@ NOTE: Реализация перенесена в Neon (TASK-DB-2 ✅). `lib/sh
 * `components/candidate-edit-modal.tsx` — модальная форма редактирования: предзаполнена данными кандидата. Переключатель «Загрузить файл / Указать ссылку» — при выборе файла загрузка в Vercel Blob происходит в момент сабмита (через `/api/upload`). Escape закрывает. После сохранения — экран подтверждения.
 * `components/candidate-section.tsx` — кнопка-карандаш (Pencil) на каждой строке кандидата (доступна для всех статусов). При клике открывается `CandidateEditModal`. Кнопки «Добавить» / «Отклонить» остались только для статуса «На проверке».
 
-*Редактируемые поля (после расширения — см. ниже):* имя, email, телефон, резюме (файл/URL), сопроводительное письмо, уровень, стримы (multi-select), страна текущая/желаемая, дата активности.
+*Редактируемые поля (после двух расширений — см. ниже):* имя, роль, email, телефон, резюме (файл/URL), уровень, стримы (multi-select), страна текущая/желаемая, summary, сопроводительное письмо, дата активности.
 
-**Расширение формы (уровень, стримы, страны, дата активности):**
+**Расширение 1 (уровень, стримы, страны, дата активности):**
 
 * `lib/sheets.ts` — `Candidate` дополнен `stream: string[]`, `level: string`, `countryPrimary: string`, `countryDesired: string` (данные уже читались через `rowToRecord()`/`HEADER_ALIASES` для `Profile`, просто не попадали в возвращаемый объект `Candidate`); `updateCandidateFields()` принимает эти поля плюс `activeSince` — та же generic mapHeader-логика, менять не пришлось.
 * `components/candidate-edit-modal.tsx` — уровень (текст), стримы (те же toggle-кнопки, что в форме работодателя, канонический список из `getStreams()`), страна текущая/желаемая (`<select>` из `ADDITIONAL_COUNTRIES`, вынесен из `employer-registration-modal.tsx`), активен с (`<input type="date">`).
 * `activeSince` хранится в ru-RU формате (`21.07.2026`, как пишет `approveCandidate()`) — `<input type="date">` требует ISO; конвертация `toISODate()`/`toRuDate()` на границе компонента, формат хранения не меняется.
 * Модалка расширена до `max-w-lg` под двухколоночные поля.
+
+**Расширение 2 (роль и summary):** до этого «Роль» (title) и «Summary» — единственные два содержательных поля, которые видит работодатель на карточке подборки — правились только напрямую в Google Sheets, никакой формы для них не было.
+
+* `lib/sheets.ts` — `Candidate` дополнен `title: string`, `summary: string`. Оба поля уже резолвились через `HEADER_ALIASES` для `Profile` (`роль` → `title`, `саммари`/`summary` → `summary`) — расширение чисто типовое, runtime-логика `updateCandidateFields()`/`rowToRecord()` не менялась.
+* `components/candidate-edit-modal.tsx` — «Роль» (текстовое поле сразу после «Имя»), «Summary» (textarea перед блоком «Резюме»).
 
 ---
 
@@ -693,7 +698,7 @@ NOTE: Полный анализ, стоимость и схема данных �
 
 ==== TASK-DB-4 (отложено): Candidates → Neon
 
-Основной блокер снят частично: `CandidateEditModal` (TASK-23 ✅, расширена) теперь редактирует не только контакты, но и `level`, `stream`, `countryPrimary`/`countryDesired`, `activeSince`. Не редактируются через UI: `title`, `bio`, `website`, `location`, `industry`, `func`, `summary`, `excludedCompanies`/`excludedIndustries` — эти поля редактор по-прежнему заполняет напрямую в Sheets при обогащении профиля. Миграция хранения в Neon сама по себе ещё не сделана.
+Основной блокер снят почти полностью: `CandidateEditModal` (TASK-23 ✅, расширена дважды) теперь редактирует контакты, `title`, `summary`, `level`, `stream`, `countryPrimary`/`countryDesired`, `activeSince` — включая оба поля, которые видит работодатель на карточке подборки. Не редактируются через UI: `bio`, `website`, `location`, `industry`, `func`, `excludedCompanies`/`excludedIndustries` — эти поля (в основном неиспользуемые системой или редко нужные) редактор по-прежнему заполняет напрямую в Sheets. Миграция хранения в Neon сама по себе ещё не сделана.
 
 ---
 

@@ -509,6 +509,8 @@ export type Candidate = {
   level: string
   countryPrimary: string
   countryDesired: string
+  title: string
+  summary: string
 }
 
 /** Append an employer row, mapping field names to actual column positions in the sheet. */
@@ -597,6 +599,8 @@ export async function getCandidates(): Promise<Candidate[]> {
         level: r.level || "",
         countryPrimary: r.countryPrimary || "",
         countryDesired: r.countryDesired || "",
+        title: r.title || "",
+        summary: r.summary || "",
       }
     }).filter((c) => c.name || c.email)
   } catch {
@@ -663,6 +667,8 @@ export async function updateCandidateFields(
     countryPrimary: string
     countryDesired: string
     activeSince: string
+    title: string
+    summary: string
   }>,
 ): Promise<void> {
   const { email, privateKey, sheetId } = getEnv()

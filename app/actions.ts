@@ -285,6 +285,8 @@ export async function updateCandidate(
     countryPrimary: string
     countryDesired: string
     activeSince: string
+    title: string
+    summary: string
   },
 ): Promise<void> {
   if (!data.name.trim()) throw new Error("Укажите имя")
@@ -300,6 +302,8 @@ export async function updateCandidate(
     countryPrimary: data.countryPrimary,
     countryDesired: data.countryDesired,
     activeSince: data.activeSince,
+    title: data.title,
+    summary: data.summary,
   })
   revalidatePath("/editor/candidates")
 }
