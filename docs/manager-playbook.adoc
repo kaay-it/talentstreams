@@ -17,7 +17,7 @@
 | Что | Ссылка
 
 | Публичный сайт (форма регистрации, подборки)
-| https://talentstreams.vercel.app
+| https://www.talentlabstreams.com
 
 | Таблица «Candidates Database» — кандидаты
 | https://docs.google.com/spreadsheets/d/1Jez_Ql5jWRmOt02sU4ige9wFI6yAjhVDyDUc0-lCJPM/edit#gid=0
@@ -29,7 +29,7 @@
 | https://docs.google.com/spreadsheets/d/1Jez_Ql5jWRmOt02sU4ige9wFI6yAjhVDyDUc0-lCJPM/edit#gid=1270025474
 
 | Админка (редактор) — одобрение, фильтры, рассылка
-| https://talentstreams.vercel.app/editor?secret=ВАШ_СЕКРЕТ
+| https://www.talentlabstreams.com/editor?secret=ВАШ_СЕКРЕТ
 |===
 
 IMPORTANT: ❗ `ВАШ_СЕКРЕТ` в ссылке админки — это пароль доступа, свой у компании. Без него редактор не откроется (будет просто «страница не найдена»). Уточните его у *Алексея Калинина* один раз и сохраните ссылку целиком в закладки — дальше при переходах между разделами редактора он сам подставляется во все ссылки.
