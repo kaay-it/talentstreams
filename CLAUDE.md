@@ -78,6 +78,7 @@ components/
 
 docs/
   backlog.adoc                      # ГЛАВНЫЙ ДОКУМЕНТ: все задачи и статусы
+  manager-playbook.adoc             # Инструкция для нетехнического менеджера: кандидаты/работодатели/рассылка
   workspace.dsl                     # C4-архитектура (Structurizr)
   editor-stream-flow.puml           # Sequence-диаграмма жизненного цикла
 ```
