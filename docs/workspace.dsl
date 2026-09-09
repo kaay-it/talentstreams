@@ -149,7 +149,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
     talentStreams.webApp.publishApi -> talentStreams.webApp.serverActions "publishMailingList(listId)"
 
     talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendEmployerRow(), appendCandidateRow(), getMailingList(), updateEmployerStatus()"
-    talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "addToSendPulse() / createCampaign()"
+    talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "syncEmployerToSendPulse() / createCampaign()"
     talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "appendContactRequest() / updateContactRequestStatus(id)"
 
     editor -> talentStreams.webApp.releasesPage "Просматривает выпуски, запускает рассылку"
@@ -208,7 +208,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     dynamic talentStreams.webApp "EmployerApproval" "Сценарий подтверждения работодателя редактором" {
       talentStreams.webApp.employerSection -> talentStreams.webApp.serverActions "confirmEmployer(rowIndex, employerData)"
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "addToSendPulse(name, email, phone, { Streams, … })"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "syncEmployerToSendPulse(employer)"
       talentStreams.webApp.sendPulseLib -> sendPulse "POST /addressbooks/MASTER/emails"
       talentStreams.webApp.sendPulseLib -> sendPulse "POST /addressbooks/STREAM_BOOK/emails"
       talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "updateEmployerStatus(rowIndex, 'Подтверждён')"
