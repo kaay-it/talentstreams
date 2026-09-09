@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, AlertCircle, XCircle, Trash2 } from "lucide-react"
-import { updateEmployer, rejectEmployer, deleteEmployer, type EmployerData } from "@/app/actions"
+import { X, Check, AlertCircle } from "lucide-react"
+import { updateEmployer, type EmployerData } from "@/app/actions"
 import {
   CONTACT_OPTIONS,
   MAX_STREAMS,
@@ -51,7 +51,6 @@ export function EmployerEditModal({
   onClose: () => void
 }) {
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
-  const [action, setAction] = useState<"save" | "reject" | "delete">("save")
   const [errorMsg, setErrorMsg] = useState("")
 
   const [name, setName] = useState(employer.name)
@@ -102,7 +101,6 @@ export function EmployerEditModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setAction("save")
     setStatus("submitting")
     setErrorMsg("")
     try {
@@ -122,37 +120,6 @@ export function EmployerEditModal({
     } catch (err) {
       setStatus("error")
       setErrorMsg(err instanceof Error ? err.message : "Не удалось сохранить изменения")
-    }
-  }
-
-  async function handleReject() {
-    setAction("reject")
-    setStatus("submitting")
-    setErrorMsg("")
-    try {
-      await rejectEmployer(employer.rowIndex)
-      setStatus("success")
-    } catch (err) {
-      setStatus("error")
-      setErrorMsg(err instanceof Error ? err.message : "Не удалось отключить работодателя")
-    }
-  }
-
-  async function handleDelete() {
-    const confirmed = window.confirm(
-      `Удалить работодателя «${employer.name}»? Действие необратимо — строка пропадёт из таблицы` +
-        (employer.status === "Подтверждён" ? ", а сам работодатель будет отписан от рассылки в SendPulse." : "."),
-    )
-    if (!confirmed) return
-    setAction("delete")
-    setStatus("submitting")
-    setErrorMsg("")
-    try {
-      await deleteEmployer(employer.rowIndex)
-      setStatus("success")
-    } catch (err) {
-      setStatus("error")
-      setErrorMsg(err instanceof Error ? err.message : "Не удалось удалить работодателя")
     }
   }
 
@@ -197,18 +164,8 @@ export function EmployerEditModal({
               <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <Check className="size-6" />
               </span>
-              <h3 className="mt-4 text-lg font-semibold text-card-foreground">
-                {action === "save" ? "Сохранено" : action === "reject" ? "Отключён" : "Удалён"}
-              </h3>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {action === "save"
-                  ? "Данные работодателя обновлены."
-                  : action === "reject"
-                  ? "Статус изменён на «Отклонён», работодатель отписан от рассылки в SendPulse."
-                  : employer.status === "Подтверждён"
-                  ? "Строка удалена из таблицы, работодатель отписан от рассылки в SendPulse."
-                  : "Строка удалена из таблицы."}
-              </p>
+              <h3 className="mt-4 text-lg font-semibold text-card-foreground">Сохранено</h3>
+              <p className="mt-2 text-sm text-muted-foreground">Данные работодателя обновлены.</p>
               <button
                 onClick={onClose}
                 className="mt-6 rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
@@ -423,31 +380,8 @@ export function EmployerEditModal({
                 disabled={status === "submitting" || !canSubmit}
                 className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {status === "submitting" && action === "save" ? "Сохранение…" : "Сохранить"}
+                {status === "submitting" ? "Сохранение…" : "Сохранить"}
               </button>
-
-              <div className="flex gap-2 border-t pt-4">
-                {employer.status === "Подтверждён" && (
-                  <button
-                    type="button"
-                    onClick={handleReject}
-                    disabled={status === "submitting"}
-                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <XCircle className="size-3.5" />
-                    {status === "submitting" && action === "reject" ? "Отключаем…" : "Отключить (отписать от рассылки)"}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  disabled={status === "submitting"}
-                  className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Trash2 className="size-3.5" />
-                  {status === "submitting" && action === "delete" ? "Удаляем…" : "Удалить работодателя"}
-                </button>
-              </div>
             </form>
           )}
         </div>

@@ -1,8 +1,8 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, Building2, Pencil } from "lucide-react"
-import { confirmEmployer, rejectEmployer } from "@/app/actions"
+import { CheckCircle2, XCircle, Ban, Trash2, Building2, Pencil } from "lucide-react"
+import { confirmEmployer, rejectEmployer, deleteEmployer } from "@/app/actions"
 import { EmployerEditModal } from "@/components/employer-edit-modal"
 import type { Employer, EmployerStatus } from "@/lib/sheets"
 
@@ -100,7 +100,8 @@ export function EmployerSection({ employers, streams }: { employers: Employer[];
 
 function EmployerRow({ employer, streams }: { employer: Employer; streams: string[] }) {
   const [isPending, startTransition] = useTransition()
-  const [localStatus, setLocalStatus] = useState<"confirmed" | "rejected" | null>(null)
+  const [localStatus, setLocalStatus] = useState<"confirmed" | "rejected" | "disabled" | "deleted" | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
 
@@ -116,14 +117,28 @@ function EmployerRow({ employer, streams }: { employer: Employer; streams: strin
     })
   }
 
-  const handleReject = () => {
+  const handleReject = (result: "rejected" | "disabled") => {
     setError(null)
     startTransition(async () => {
       try {
         await rejectEmployer(employer.rowIndex)
-        setLocalStatus("rejected")
+        setLocalStatus(result)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Неизвестная ошибка")
+      }
+    })
+  }
+
+  const handleDelete = () => {
+    setError(null)
+    startTransition(async () => {
+      try {
+        await deleteEmployer(employer.rowIndex)
+        setLocalStatus("deleted")
+        setConfirmingDelete(false)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Неизвестная ошибка")
+        setConfirmingDelete(false)
       }
     })
   }
@@ -153,41 +168,96 @@ function EmployerRow({ employer, streams }: { employer: Employer; streams: strin
           </p>
         </div>
 
-        <button
-          onClick={() => setEditing(true)}
-          disabled={isPending}
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-          aria-label="Редактировать"
-        >
-          <Pencil className="size-3.5" />
-        </button>
+        {!confirmingDelete && (
+          <button
+            onClick={() => setEditing(true)}
+            disabled={isPending}
+            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+            aria-label="Редактировать"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+        )}
 
-        {employer.status === "На проверке" && !localStatus && (
-          <div className="flex shrink-0 gap-2">
+        {confirmingDelete ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-xs font-medium text-destructive">Вы уверены, что хотите удалить работодателя?</span>
             <button
-              onClick={handleConfirm}
+              onClick={handleDelete}
               disabled={isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
             >
-              <CheckCircle2 className="size-3.5" />
-              Подтвердить
+              <Trash2 className="size-3.5" />
+              Да, удалить
             </button>
             <button
-              onClick={handleReject}
+              onClick={() => setConfirmingDelete(false)}
               disabled={isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
             >
-              <XCircle className="size-3.5" />
-              Отклонить
+              Отмена
             </button>
           </div>
-        )}
+        ) : (
+          <>
+            {employer.status === "На проверке" && !localStatus && (
+              <div className="flex shrink-0 gap-2">
+                <button
+                  onClick={handleConfirm}
+                  disabled={isPending}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  <CheckCircle2 className="size-3.5" />
+                  Подтвердить
+                </button>
+                <button
+                  onClick={() => handleReject("rejected")}
+                  disabled={isPending}
+                  className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                >
+                  <XCircle className="size-3.5" />
+                  Отклонить
+                </button>
+              </div>
+            )}
 
-        {localStatus === "confirmed" && (
-          <span className="shrink-0 text-xs text-emerald-600">Подтверждён ✓</span>
-        )}
-        {localStatus === "rejected" && (
-          <span className="shrink-0 text-xs text-muted-foreground">Отклонён</span>
+            {employer.status === "Подтверждён" && !localStatus && (
+              <div className="flex shrink-0 gap-2">
+                <button
+                  onClick={() => handleReject("disabled")}
+                  disabled={isPending}
+                  className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/10 disabled:opacity-50"
+                >
+                  <Ban className="size-3.5" />
+                  Отключить
+                </button>
+              </div>
+            )}
+
+            {localStatus === "confirmed" && (
+              <span className="shrink-0 text-xs text-emerald-600">Подтверждён ✓</span>
+            )}
+            {localStatus === "rejected" && (
+              <span className="shrink-0 text-xs text-muted-foreground">Отклонён</span>
+            )}
+            {localStatus === "disabled" && (
+              <span className="shrink-0 text-xs text-muted-foreground">Отключён — отписан от рассылки</span>
+            )}
+            {localStatus === "deleted" && (
+              <span className="shrink-0 text-xs text-muted-foreground">Удалён</span>
+            )}
+
+            {!localStatus && (
+              <button
+                onClick={() => setConfirmingDelete(true)}
+                disabled={isPending}
+                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+                aria-label="Удалить"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            )}
+          </>
         )}
       </div>
 
