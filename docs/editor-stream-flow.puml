@@ -229,6 +229,47 @@ note over app, sp_stream
   приветственного письма работодателю
 end note
 
+== 3б. Редактор отклоняет / отключает / удаляет работодателя ==
+
+note over editor, app
+  Кнопки прямо в строке EmployerRow, тем же паттерном, что «Подтвердить»/«Отклонить»:
+  «Отклонить» — для status == "На проверке"; «Отключить» — для status == "Подтверждён";
+  корзина (удалить) видна всегда, но не удаляет сразу — переключает строку в отдельный
+  шаг подтверждения («Вы уверены, что хотите удалить работодателя?» + Да/Отмена),
+  без браузерного window.confirm().
+end note
+
+editor -> app : «Отклонить» (На проверке) или «Отключить» (Подтверждён)\n— оба вызывают один и тот же rejectEmployer(rowIndex)
+app -> sh_emp : getEmployers() → find(rowIndex)
+sh_emp --> app : existing
+alt existing.status == "Подтверждён"
+  app -> sp_master : removeEmployerFromSendPulse(existing)\nDELETE /addressbooks/{id}/emails — из мастер-книги\nи всех книг текущих стримов, без исключений
+  sp_master --> app : OK
+end
+app -> sh_emp : updateEmployerStatus(rowIndex, "Отклонён")
+sh_emp --> app : OK
+app --> editor : Статус «Отклонён»\n(если был подтверждён — ещё и отписан от SendPulse)
+
+editor -> app : Корзина в строке → «Да, удалить»\n(после отдельного подтверждения в UI)
+app -> app : deleteEmployer(rowIndex)
+app -> sh_emp : getEmployers() → find(rowIndex)
+sh_emp --> app : existing
+alt existing.status == "Подтверждён"
+  app -> sp_master : removeEmployerFromSendPulse(existing)
+  sp_master --> app : OK
+end
+app -> sh_emp : deleteEmployerRow(rowIndex)\nbatchUpdate deleteDimension(ROWS, rowIndex-1..rowIndex)\n(физическое удаление строки, не просто очистка)
+sh_emp --> app : OK
+app --> editor : Строка удалена из таблицы
+
+editor -> app : «Подтвердить» у отклонённого (status == "Отклонён")\n— та же кнопка/экшен, что и первое подтверждение заявки
+app -> app : confirmEmployer(rowIndex, employerData)
+app -> sp_master : syncEmployerToSendPulse(employerData)\nPOST /addressbooks/MASTER/emails + /addressbooks/{стрим}/emails\n(безусловно — не важно, каким был статус до этого)
+sp_master --> app : { "result": true }
+app -> sh_emp : updateEmployerStatus(rowIndex, "Подтверждён")
+sh_emp --> app : OK
+app --> editor : Работодатель снова «Подтверждён», возвращён в рассылку
+
 == 4. Редактор готовит выпуск ==
 
 editor -> sh_cands : Обогащает профили одобренных кандидатов\n(title, summary, stream, level, страны — через CandidateEditModal на сайте;\nbio и остальное, не вошедшее в форму, — напрямую в Sheets)

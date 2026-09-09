@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, deleteEmployerRow, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord } from "@/lib/db/streams"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId } from "@/lib/sendpulse"
@@ -93,6 +93,22 @@ async function syncEmployerToSendPulse(
   const bookNames = [...new Set([masterBookName, ...employer.streams])]
   const bookIds = await Promise.all(bookNames.map((n) => getOrCreateBook(n, token)))
   await Promise.all(bookIds.map((id) => addToAddressBook(employer.email, id, variables, token)))
+}
+
+/** Fully unsubscribes an employer from SendPulse — master book and every stream book they were in. */
+async function removeEmployerFromSendPulse(employer: { email: string; streams: string[] }): Promise<void> {
+  console.log("[SendPulse] removeEmployerFromSendPulse", { email: employer.email })
+  const token = await getToken()
+  if (!token) { console.warn("[SendPulse] failed to get access token"); return }
+
+  const masterBookName = process.env.SENDPULSE_MASTER_BOOK_NAME || "Default"
+  const bookNames = [...new Set([masterBookName, ...employer.streams])]
+  await Promise.all(
+    bookNames.map(async (name) => {
+      const id = await getBookId(name, token)
+      if (id) await removeFromAddressBook(employer.email, id, token)
+    }),
+  )
 }
 
 export async function addProfileColumns(): Promise<{ added: string[] }> {
@@ -465,8 +481,25 @@ export async function confirmEmployer(rowIndex: number, employer: Pick<Employer,
 }
 
 export async function rejectEmployer(rowIndex: number): Promise<void> {
+  const employers = await getEmployers()
+  const existing = employers.find((e) => e.rowIndex === rowIndex)
+  if (existing?.status === "Подтверждён") {
+    await removeEmployerFromSendPulse(existing)
+  }
   await updateEmployerStatus(rowIndex, "Отклонён")
   revalidatePath("/editor")
+  revalidatePath("/editor/employers")
+}
+
+export async function deleteEmployer(rowIndex: number): Promise<void> {
+  const employers = await getEmployers()
+  const existing = employers.find((e) => e.rowIndex === rowIndex)
+  if (existing?.status === "Подтверждён") {
+    await removeEmployerFromSendPulse(existing)
+  }
+  await deleteEmployerRow(rowIndex)
+  revalidatePath("/editor")
+  revalidatePath("/editor/employers")
 }
 
 export async function setContactRequestStatus(id: string, status: ContactRequestStatus): Promise<void> {
