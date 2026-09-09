@@ -170,16 +170,20 @@ editor -> app : Нажимает Pencil-кнопку в строке работ�
 app --> editor : EmployerEditModal — форма как EmployerRegistrationModal,\nпредзаполнена (имя, компания, email, телефон, способ связи,\nTelegram/LinkedIn, стримы, страна, доп. страны), без чекбокса согласия
 
 editor -> app : updateEmployer(rowIndex, { name, company, email, phone,\n  primaryContact, telegram, linkedin, streams,\n  country, additionalCountries })
+app -> sh_emp : getEmployers() → find(rowIndex)\n(старые email/стримы/token/status до записи)
+sh_emp --> app : existing
 app -> sh_emp : updateEmployerFields(rowIndex, data)\n(параллельные PUT по колонкам 'Employers'!…)
 sh_emp --> app : OK
-app --> editor : Страница обновлена (revalidatePath)
 
-note over app, sh_emp
-  Не переотправляет данные в SendPulse — синхронизация
-  происходит только один раз, при confirmEmployer(). Если
-  подтверждённому работодателю поменять email/стримы через
-  эту форму, контакт в SendPulse останется со старыми данными.
-end note
+alt existing.status == "Подтверждён"
+  app -> sp_master : syncEmployerToSendPulse(data, { email: existing.email,\n  streams: existing.streams })\nDELETE /addressbooks/{id}/emails — устаревшее членство\n(старый email из всех книг, если email изменился;\nиначе только из книг снятых стримов)
+  sp_master --> app : OK
+  app -> sp_master : POST /addressbooks/MASTER/emails\n{ email, variables: { Имя, phone, employer_token, … } }
+  sp_master --> app : { "result": true }
+  app -> sp_stream : POST /addressbooks/{текущий стрим}/emails\n{ email, variables }
+  sp_stream --> app : { "result": true }
+end
+app --> editor : Страница обновлена (revalidatePath)
 
 == 3. Работодатель подписывается (заявка) ==
 

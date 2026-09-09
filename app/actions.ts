@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord } from "@/lib/db/streams"
-import { spPost, spGet, getToken, getOrCreateBook } from "@/lib/sendpulse"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId } from "@/lib/sendpulse"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
 
@@ -24,27 +24,75 @@ async function addToAddressBook(
   console.log(`[SendPulse] bookId=${bookId} status=${status}`, text)
 }
 
-async function addToSendPulse(
-  name: string,
+async function removeFromAddressBook(
   email: string,
-  phone: string,
-  extra?: Record<string, string>,
+  bookId: number,
+  token: string,
 ): Promise<void> {
-  console.log("[SendPulse] addToSendPulse", { email })
+  const payload = JSON.stringify({ emails: [email] })
+  console.log(`[SendPulse] removeFromBook bookId=${bookId}:`, payload)
+  const { status, text } = await spDelete(
+    `${SENDPULSE_API}/addressbooks/${bookId}/emails`,
+    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    payload,
+  )
+  console.log(`[SendPulse] remove bookId=${bookId} status=${status}`, text)
+}
+
+/**
+ * Adds/updates an employer's SendPulse subscription (master book + one book per stream).
+ * Pass `previous` when re-syncing an already-confirmed employer after an edit — it removes
+ * stale book membership (streams the employer is no longer part of, or the old email address
+ * entirely if it changed) before (re-)adding the current data.
+ */
+async function syncEmployerToSendPulse(
+  employer: {
+    name: string
+    email: string
+    phone: string
+    telegram?: string
+    linkedin?: string
+    primaryContact: string
+    streams: string[]
+    token?: string
+  },
+  previous?: { email: string; streams: string[] },
+): Promise<void> {
+  console.log("[SendPulse] syncEmployerToSendPulse", { email: employer.email })
   const token = await getToken()
   if (!token) { console.warn("[SendPulse] failed to get access token"); return }
 
-  const variables: Record<string, string> = { "Имя": name, phone, ...extra }
   const masterBookName = process.env.SENDPULSE_MASTER_BOOK_NAME || "Default"
-  const streams = extra?.Streams
-    ? extra.Streams.split(",").map((s) => s.trim()).filter(Boolean)
-    : []
 
-  const bookNames = [masterBookName, ...streams]
-  const uniqueNames = [...new Set(bookNames)]
+  if (previous) {
+    const emailChanged = previous.email.trim().toLowerCase() !== employer.email.trim().toLowerCase()
+    const staleStreams = emailChanged
+      ? previous.streams
+      : previous.streams.filter(
+          (s) => !employer.streams.some((ns) => ns.trim().toLowerCase() === s.trim().toLowerCase()),
+        )
+    const staleBookNames = [...new Set(emailChanged ? [masterBookName, ...staleStreams] : staleStreams)]
+    await Promise.all(
+      staleBookNames.map(async (name) => {
+        const id = await getBookId(name, token)
+        if (id) await removeFromAddressBook(previous.email, id, token)
+      }),
+    )
+  }
 
-  const bookIds = await Promise.all(uniqueNames.map((n) => getOrCreateBook(n, token)))
-  await Promise.all(bookIds.map((id) => addToAddressBook(email, id, variables, token)))
+  const variables: Record<string, string> = {
+    "Имя": employer.name,
+    phone: employer.phone,
+    ...(employer.telegram && { Telegram: employer.telegram }),
+    ...(employer.linkedin && { LinkedIn: employer.linkedin }),
+    "Primary Contact": employer.primaryContact,
+    Streams: employer.streams.join(", "),
+    ...(employer.token && { employer_token: employer.token }),
+  }
+
+  const bookNames = [...new Set([masterBookName, ...employer.streams])]
+  const bookIds = await Promise.all(bookNames.map((n) => getOrCreateBook(n, token)))
+  await Promise.all(bookIds.map((id) => addToAddressBook(employer.email, id, variables, token)))
 }
 
 export async function addProfileColumns(): Promise<{ added: string[] }> {
@@ -375,6 +423,9 @@ export async function updateEmployer(
     throw new Error("Укажите LinkedIn-профиль")
   }
 
+  const employers = await getEmployers()
+  const existing = employers.find((e) => e.rowIndex === rowIndex)
+
   await updateEmployerFields(rowIndex, {
     name: data.name,
     company: data.company,
@@ -387,17 +438,28 @@ export async function updateEmployer(
     country: data.country,
     additionalCountries: data.additionalCountries.join(", "),
   })
+
+  if (existing?.status === "Подтверждён") {
+    await syncEmployerToSendPulse(
+      {
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        telegram: data.telegram,
+        linkedin: data.linkedin,
+        primaryContact: data.primaryContact,
+        streams: data.streams,
+        token: existing.token,
+      },
+      { email: existing.email, streams: existing.streams },
+    )
+  }
+
   revalidatePath("/editor/employers")
 }
 
 export async function confirmEmployer(rowIndex: number, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "telegram" | "linkedin" | "primaryContact" | "streams">): Promise<void> {
-  await addToSendPulse(employer.name, employer.email, employer.phone, {
-    ...(employer.telegram && { Telegram: employer.telegram }),
-    ...(employer.linkedin && { LinkedIn: employer.linkedin }),
-    "Primary Contact": employer.primaryContact,
-    Streams: employer.streams.join(", "),
-    ...(employer.token && { employer_token: employer.token }),
-  })
+  await syncEmployerToSendPulse(employer)
   await updateEmployerStatus(rowIndex, "Подтверждён")
   revalidatePath("/editor")
 }

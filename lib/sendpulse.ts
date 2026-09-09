@@ -38,6 +38,9 @@ export const spPost = (url: string, headers: Record<string, string>, body: strin
 export const spGet = (url: string, headers: Record<string, string>) =>
   spRequest("GET", url, headers)
 
+export const spDelete = (url: string, headers: Record<string, string>, body: string) =>
+  spRequest("DELETE", url, headers, body)
+
 // ── Token cache ───────────────────────────────────────────────────────────────
 
 let _tokenCache: { value: string; expiresAt: number } | null = null
@@ -123,6 +126,12 @@ export async function getOrCreateBook(name: string, token: string): Promise<numb
 export async function getBookEmailCount(name: string, token: string): Promise<number> {
   await loadBookCache(token)
   return _bookCache?.get(name)?.emailCount ?? 0
+}
+
+/** Look up an address book's id without creating it. Returns null if it doesn't exist. */
+export async function getBookId(name: string, token: string): Promise<number | null> {
+  await loadBookCache(token)
+  return _bookCache?.get(name)?.id ?? null
 }
 
 // ── Campaigns ─────────────────────────────────────────────────────────────────

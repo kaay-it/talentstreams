@@ -150,7 +150,7 @@ docs/
 
 === Новая SendPulse-переменная контакта
 
-Добавьте ключ в объект `variables` внутри `addToSendPulse` (`app/actions.ts`).
+Добавьте ключ в объект `variables` внутри `syncEmployerToSendPulse` (`app/actions.ts`).
 В шаблоне письма используйте `{{имя_переменной}}`.
 
 == Документация
