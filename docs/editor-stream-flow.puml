@@ -185,6 +185,26 @@ alt existing.status == "Подтверждён"
 end
 app --> editor : Страница обновлена (revalidatePath)
 
+editor -> app : (в футере формы) «Отключить»\n— видна только если employer.status == "Подтверждён"
+app -> app : rejectEmployer(rowIndex)
+alt existing.status == "Подтверждён"
+  app -> sp_master : removeEmployerFromSendPulse(existing)\nDELETE /addressbooks/{id}/emails — из мастер-книги\nи всех книг текущих стримов, без исключений
+  sp_master --> app : OK
+end
+app -> sh_emp : updateEmployerStatus(rowIndex, "Отклонён")
+sh_emp --> app : OK
+app --> editor : Статус «Отклонён», отписан от SendPulse
+
+editor -> app : (в футере формы) «Удалить работодателя»\nwindow.confirm() перед вызовом
+app -> app : deleteEmployer(rowIndex)
+alt existing.status == "Подтверждён"
+  app -> sp_master : removeEmployerFromSendPulse(existing)
+  sp_master --> app : OK
+end
+app -> sh_emp : deleteEmployerRow(rowIndex)\nbatchUpdate deleteDimension(ROWS, rowIndex-1..rowIndex)\n(физическое удаление строки, не просто очистка)
+sh_emp --> app : OK
+app --> editor : Строка удалена из таблицы
+
 == 3. Работодатель подписывается (заявка) ==
 
 employer -> app : Открывает сайт, нажимает\n«Подписаться на рассылку»

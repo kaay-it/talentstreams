@@ -955,6 +955,44 @@ export async function updateEmployerStatus(rowIndex: number, status: EmployerSta
   if (!res.ok) throw new Error(`Failed to update employer status (${res.status}): ${await res.text()}`)
 }
 
+/** Permanently delete an employer's row from the Employers sheet. */
+export async function deleteEmployerRow(rowIndex: number): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const metaRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!metaRes.ok) throw new Error(`Failed to load sheet metadata (${metaRes.status}): ${await metaRes.text()}`)
+  const meta = (await metaRes.json()) as { sheets: { properties: { sheetId: number; title: string } }[] }
+  const sheet = meta.sheets.find((s) => s.properties.title === "Employers")
+  if (!sheet) throw new Error("Sheet 'Employers' not found")
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId: sheet.properties.sheetId,
+                dimension: "ROWS",
+                startIndex: rowIndex - 1,
+                endIndex: rowIndex,
+              },
+            },
+          },
+        ],
+      }),
+    },
+  )
+  if (!res.ok) throw new Error(`Failed to delete employer row (${res.status}): ${await res.text()}`)
+}
+
 // Employer headers aren't in HEADER_ALIASES (that table is candidate/profile-focused) — map
 // the camelCase Employer field names to their exact lowercase column headers here instead.
 const EMPLOYER_FIELD_HEADER_ALIASES: Record<string, string> = {

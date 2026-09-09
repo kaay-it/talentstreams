@@ -60,7 +60,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         candidateEditModal = component "CandidateEditModal" "Модальная форма редактирования кандидата: контакты (имя, email, телефон), роль (title), summary — оба ранее правились только в Sheets, резюме файл/URL, сопроводительное письмо, уровень, стримы (multi-select), страна текущая/желаемая, дата активности (date-picker с конвертацией ISO↔ru-RU на границе компонента). При выборе файла резюме — загрузка в Vercel Blob через /api/upload на сабмит. После сохранения — экран подтверждения." "React Client Component" "UI"
 
-        employerEditModal = component "EmployerEditModal" "Модальная форма редактирования работодателя (TASK-31): те же поля, что в EmployerRegistrationModal (имя, компания, email, телефон, способ связи, Telegram/LinkedIn, стримы, страна, доп. страны), без чекбокса согласия. Не переотправляет данные в SendPulse — только Sheets." "React Client Component" "UI"
+        employerEditModal = component "EmployerEditModal" "Модальная форма редактирования работодателя (TASK-31): те же поля, что в EmployerRegistrationModal (имя, компания, email, телефон, способ связи, Telegram/LinkedIn, стримы, страна, доп. страны), без чекбокса согласия. Правки переотправляются в SendPulse, если работодатель уже подтверждён (syncEmployerToSendPulse). В футере — «Отключить» (виден только для подтверждённых, отписывает от SendPulse и меняет статус на «Отклонён») и «Удалить работодателя» (window.confirm, отписывает от SendPulse и физически удаляет строку)." "React Client Component" "UI"
 
         publishButton = component "PublishButton" "Кнопка запуска рассылки. Отключена если адресная книга пуста. Показывает статус кампании." "React Client Component" "UI"
 
@@ -144,7 +144,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
     talentStreams.webApp.publishButton -> talentStreams.webApp.serverActions "publishMailingList(listId)"
     talentStreams.webApp.employerSection -> talentStreams.webApp.serverActions "confirmEmployer() / rejectEmployer()"
     talentStreams.webApp.employerSection -> talentStreams.webApp.employerEditModal "Открывает при клике на Pencil"
-    talentStreams.webApp.employerEditModal -> talentStreams.webApp.serverActions "updateEmployer(rowIndex, data)"
+    talentStreams.webApp.employerEditModal -> talentStreams.webApp.serverActions "updateEmployer(rowIndex, data) / rejectEmployer(rowIndex) / deleteEmployer(rowIndex)"
 
     talentStreams.webApp.publishApi -> talentStreams.webApp.serverActions "publishMailingList(listId)"
 
