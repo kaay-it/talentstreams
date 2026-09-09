@@ -234,6 +234,19 @@ function EmployerRow({ employer, streams }: { employer: Employer; streams: strin
               </div>
             )}
 
+            {employer.status === "Отклонён" && !localStatus && (
+              <div className="flex shrink-0 gap-2">
+                <button
+                  onClick={handleConfirm}
+                  disabled={isPending}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  <CheckCircle2 className="size-3.5" />
+                  Подтвердить
+                </button>
+              </div>
+            )}
+
             {localStatus === "confirmed" && (
               <span className="shrink-0 text-xs text-emerald-600">Подтверждён ✓</span>
             )}

@@ -262,6 +262,14 @@ app -> sh_emp : deleteEmployerRow(rowIndex)\nbatchUpdate deleteDimension(ROWS, r
 sh_emp --> app : OK
 app --> editor : Строка удалена из таблицы
 
+editor -> app : «Подтвердить» у отклонённого (status == "Отклонён")\n— та же кнопка/экшен, что и первое подтверждение заявки
+app -> app : confirmEmployer(rowIndex, employerData)
+app -> sp_master : syncEmployerToSendPulse(employerData)\nPOST /addressbooks/MASTER/emails + /addressbooks/{стрим}/emails\n(безусловно — не важно, каким был статус до этого)
+sp_master --> app : { "result": true }
+app -> sh_emp : updateEmployerStatus(rowIndex, "Подтверждён")
+sh_emp --> app : OK
+app --> editor : Работодатель снова «Подтверждён», возвращён в рассылку
+
 == 4. Редактор готовит выпуск ==
 
 editor -> sh_cands : Обогащает профили одобренных кандидатов\n(title, summary, stream, level, страны — через CandidateEditModal на сайте;\nbio и остальное, не вошедшее в форму, — напрямую в Sheets)
