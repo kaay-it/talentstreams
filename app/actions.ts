@@ -1,13 +1,14 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, deleteEmployerRow, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
+import { del } from "@vercel/blob"
+import { appendEmployerRow, appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, deleteEmployerRow, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
-import { addResumeVersion, getResumeVersions, type ResumeVersion } from "@/lib/db/resumes"
+import { addResumeVersion, getResumeVersions, deleteResumeVersions, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord } from "@/lib/db/streams"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId } from "@/lib/sendpulse"
-import { isOwnFileUrl } from "@/lib/blob"
+import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
 
@@ -350,6 +351,63 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
   }
 }
 
+/** Editor-only "quick add" — unlike registerCandidate(), writes the full field set in one go
+ * (title/level/stream/countries/summary included). Status is still "На проверке": whoever adds
+ * the candidate (e.g. a secretary) isn't necessarily who should approve them (a recruiter). */
+export type NewCandidateData = {
+  name: string
+  title: string
+  email: string
+  phone: string
+  level: string
+  activeSince: string
+  stream: string[]
+  countryPrimary: string
+  countryDesired: string
+  summary: string
+  resumeUrl: string
+  resumeFilename?: string
+  coverLetter: string
+}
+
+export async function createCandidate(data: NewCandidateData): Promise<void> {
+  if (!data.name.trim()) throw new Error("Укажите имя")
+  if (!data.email.trim()) throw new Error("Укажите email")
+
+  const id = crypto.randomUUID()
+  const { rowIndex } = await appendCandidateRow({
+    "id": id,
+    "timestamp": new Date().toISOString(),
+    "name": data.name,
+    "email": data.email,
+    "phone": data.phone,
+    "resume url": data.resumeUrl,
+    "cover letter": data.coverLetter,
+    "status": "На проверке",
+  })
+
+  await updateCandidateFields(rowIndex, {
+    title: data.title,
+    level: data.level,
+    activeSince: data.activeSince,
+    stream: data.stream.join(", "),
+    countryPrimary: data.countryPrimary,
+    countryDesired: data.countryDesired,
+    summary: data.summary,
+  })
+
+  if (data.resumeUrl) {
+    await addResumeVersion({
+      candidateId: id,
+      kind: isOwnFileUrl(data.resumeUrl) ? "file" : "link",
+      filename: data.resumeFilename,
+      url: data.resumeUrl,
+    })
+  }
+
+  revalidatePath("/editor/candidates")
+}
+
 export async function updateCandidate(
   rowIndex: number,
   data: {
@@ -402,6 +460,31 @@ export async function updateCandidate(
 /** Resume version history for a candidate (editor only — keyed by the Sheets `id` column). */
 export async function getCandidateResumeHistory(candidateId: string): Promise<ResumeVersion[]> {
   return getResumeVersions(candidateId)
+}
+
+/**
+ * Permanently deletes a candidate: their resume files from Vercel Blob, their resume
+ * history in Neon, and finally the row itself in Sheets. Blob deletion is best-effort —
+ * a failed delete (blob already gone, transient error) is logged, not fatal, so the row
+ * still gets removed.
+ */
+export async function deleteCandidate(rowIndex: number, candidateId: string): Promise<void> {
+  if (candidateId) {
+    const versions = await getResumeVersions(candidateId)
+    await Promise.all(
+      versions
+        .map((v) => resolveBlobUrl(v.url))
+        .filter((url): url is string => Boolean(url))
+        .map((url) =>
+          del(url, { token: process.env.BLOB_READ_WRITE_TOKEN }).catch((err) => {
+            console.warn("[deleteCandidate] failed to delete blob:", url, err)
+          }),
+        ),
+    )
+    await deleteResumeVersions(candidateId)
+  }
+  await deleteCandidateRow(rowIndex)
+  revalidatePath("/editor/candidates")
 }
 
 export async function registerEmployer(data: EmployerData): Promise<void> {

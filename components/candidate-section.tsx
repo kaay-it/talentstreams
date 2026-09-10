@@ -1,9 +1,10 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, FileText, Link as LinkIcon, Loader2, Pencil } from "lucide-react"
-import { approveCandidate, rejectCandidate, type ResumeVersion } from "@/app/actions"
+import { CheckCircle2, XCircle, Ban, Trash2, FileText, Link as LinkIcon, Loader2, Pencil, Plus } from "lucide-react"
+import { approveCandidate, rejectCandidate, deleteCandidate, type ResumeVersion } from "@/app/actions"
 import { CandidateEditModal } from "@/components/candidate-edit-modal"
+import { CandidateCreateModal } from "@/components/candidate-create-modal"
 import type { Candidate, CandidateStatus } from "@/lib/sheets"
 
 const SELECT_CLASS =
@@ -57,7 +58,8 @@ function CandidateRow({
   links: ResumeVersion[]
 }) {
   const [isPending, startTransition] = useTransition()
-  const [localStatus, setLocalStatus] = useState<"approved" | "rejected" | null>(null)
+  const [localStatus, setLocalStatus] = useState<"approved" | "rejected" | "disabled" | "deleted" | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [editing, setEditing] = useState(false)
 
   function handleApprove() {
@@ -67,10 +69,22 @@ function CandidateRow({
     })
   }
 
-  function handleReject() {
+  function handleReject(result: "rejected" | "disabled") {
     startTransition(async () => {
-      setLocalStatus("rejected")
+      setLocalStatus(result)
       await rejectCandidate(candidate.rowIndex)
+    })
+  }
+
+  function handleDelete() {
+    startTransition(async () => {
+      try {
+        await deleteCandidate(candidate.rowIndex, candidate.id)
+        setLocalStatus("deleted")
+        setConfirmingDelete(false)
+      } catch {
+        setConfirmingDelete(false)
+      }
     })
   }
 
@@ -131,47 +145,106 @@ function CandidateRow({
         </td>
 
         <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+          {candidate.timestamp ? new Date(candidate.timestamp).toLocaleDateString("ru-RU") : "—"}
+        </td>
+
+        <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
           {candidate.activeSince || "—"}
         </td>
 
         <td className="px-4 py-3">
-          <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-            <button
-              onClick={() => setEditing(true)}
-              disabled={isPending}
-              className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-              aria-label="Редактировать"
-            >
-              <Pencil className="size-3.5" />
-            </button>
+          {confirmingDelete ? (
+            <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+              <span className="text-xs font-medium text-destructive">Удалить кандидата?</span>
+              <button
+                onClick={handleDelete}
+                disabled={isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+              >
+                <Trash2 className="size-3.5" />
+                Да, удалить
+              </button>
+              <button
+                onClick={() => setConfirmingDelete(false)}
+                disabled={isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              >
+                Отмена
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+              {!done && (
+                <button
+                  onClick={() => setEditing(true)}
+                  disabled={isPending}
+                  className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                  aria-label="Редактировать"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+              )}
 
-            {candidate.status === "На проверке" && !done && (
-              <>
+              {candidate.status === "На проверке" && !done && (
+                <>
+                  <button
+                    onClick={handleApprove}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 px-3 py-1.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-600 hover:text-white disabled:opacity-50"
+                  >
+                    {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
+                    Добавить
+                  </button>
+                  <button
+                    onClick={() => handleReject("rejected")}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-destructive px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                  >
+                    {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <XCircle className="size-3.5" />}
+                    Отклонить
+                  </button>
+                </>
+              )}
+
+              {candidate.status === "Активный" && !done && (
+                <button
+                  onClick={() => handleReject("disabled")}
+                  disabled={isPending}
+                  className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/10 disabled:opacity-50"
+                >
+                  {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Ban className="size-3.5" />}
+                  Отключить
+                </button>
+              )}
+
+              {candidate.status === "Отклонён" && !done && (
                 <button
                   onClick={handleApprove}
                   disabled={isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 px-3 py-1.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-600 hover:text-white disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
                 >
                   {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
-                  Добавить
+                  Подтвердить
                 </button>
-                <button
-                  onClick={handleReject}
-                  disabled={isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-destructive px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                >
-                  {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <XCircle className="size-3.5" />}
-                  Отклонить
-                </button>
-              </>
-            )}
+              )}
 
-            {done && (
-              <span className={`text-xs font-medium ${localStatus === "approved" ? "text-emerald-600" : "text-destructive"}`}>
-                {localStatus === "approved" ? "Добавлен" : "Отклонён"}
-              </span>
-            )}
-          </div>
+              {localStatus === "approved" && <span className="text-xs font-medium text-emerald-600">Добавлен</span>}
+              {localStatus === "rejected" && <span className="text-xs font-medium text-destructive">Отклонён</span>}
+              {localStatus === "disabled" && <span className="text-xs font-medium text-muted-foreground">Отключён</span>}
+              {localStatus === "deleted" && <span className="text-xs font-medium text-muted-foreground">Удалён</span>}
+
+              {!done && (
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  disabled={isPending}
+                  className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+                  aria-label="Удалить"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              )}
+            </div>
+          )}
         </td>
       </tr>
     </>
@@ -191,6 +264,7 @@ export function CandidateSection({
   const [status, setStatus] = useState<CandidateStatus | "">("")
   const [stream, setStream] = useState("")
   const [level, setLevel] = useState("")
+  const [creating, setCreating] = useState(false)
 
   const levels = useMemo(
     () => Array.from(new Set(candidates.map((c) => c.level).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
@@ -238,10 +312,19 @@ export function CandidateSection({
             <option key={l} value={l}>{l}</option>
           ))}
         </select>
-        <span className="ml-auto text-xs text-muted-foreground shrink-0">
+        <span className="text-xs text-muted-foreground shrink-0">
           {filtered.length} {candidatePlural(filtered.length)}
         </span>
+        <button
+          onClick={() => setCreating(true)}
+          className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          <Plus className="size-3.5" />
+          Добавить кандидата
+        </button>
       </div>
+
+      {creating && <CandidateCreateModal streams={streams} onClose={() => setCreating(false)} />}
 
       <div className="rounded-xl border bg-card overflow-hidden">
         {candidates.length === 0 ? (
@@ -250,15 +333,16 @@ export function CandidateSection({
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">Кандидаты не найдены по заданным фильтрам.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table className="w-full min-w-[1050px] text-left text-sm">
               <thead>
                 <tr className="border-b bg-muted/30 text-xs font-medium text-muted-foreground">
-                  <th className="px-4 py-2.5 font-medium">Кандидат</th>
-                  <th className="px-4 py-2.5 font-medium">Контакты</th>
-                  <th className="px-4 py-2.5 font-medium">Файлы</th>
-                  <th className="px-4 py-2.5 font-medium">Ссылки</th>
-                  <th className="px-4 py-2.5 font-medium">Активен с</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Действия</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Кандидат</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Контакты</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Файлы</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Ссылки</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Дата регистрации</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Активен с</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium text-right">Действия</th>
                 </tr>
               </thead>
               <tbody>

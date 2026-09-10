@@ -54,6 +54,12 @@ export async function getResumeVersions(candidateId: string): Promise<ResumeVers
   }))
 }
 
+/** Deletes every resume version row for a candidate (used when the candidate itself is deleted). */
+export async function deleteResumeVersions(candidateId: string): Promise<void> {
+  if (!candidateId) return
+  await db.delete(candidateResumes).where(eq(candidateResumes.candidateId, candidateId))
+}
+
 /**
  * Resume versions for many candidates at once, grouped by candidateId (each group newest
  * first) — one query instead of one-per-candidate, for list pages showing several candidates.

@@ -205,6 +205,48 @@ note over app, sh_cands
   конвертация происходит на границе CandidateEditModal.
 end note
 
+== 2г. Редактор отключает / удаляет / добавляет кандидата (TASK-33) ==
+
+note over editor, app
+  Кандидаты не участвуют в SendPulse — в отличие от работодателя (3б),
+  здесь нет отдельного шага отписки. rejectCandidate()/approveCandidate()
+  переиспользуются как есть — те же функции, что и для первой модерации.
+end note
+
+editor -> app : «Отключить» (status == "Активный")\nили «Подтвердить» у отклонённого (status == "Отклонён")
+app -> app : rejectCandidate(rowIndex) / approveCandidate(rowIndex)
+app -> sh_cands : updateCandidateStatus(rowIndex, "Отклонён" | "Активный", [today])
+sh_cands --> app : OK
+app --> editor : Статус обновлён в строке
+
+editor -> app : Корзина в строке → отдельный шаг подтверждения\n(«Удалить кандидата?» + «Да, удалить»/«Отмена»)
+app -> app : deleteCandidate(rowIndex, candidate.id)
+app -> neonResumes : getResumeVersions(candidateId)
+neonResumes --> app : все версии резюме кандидата
+loop для каждой версии с kind == "file"
+  app -> app : resolveBlobUrl(url) — настоящий blob.vercel-storage.com URL\n(напрямую или размотанный из /api/resume?url= прокси)
+  app -> blob : del(blobUrl)\n(best-effort — ошибка одного файла не блокирует остальное)
+  blob --> app : OK / ошибка (логируется, не бросается)
+end
+app -> neonResumes : deleteResumeVersions(candidateId)
+neonResumes --> app : OK
+app -> sh_cands : deleteCandidateRow(rowIndex)\nbatchUpdate deleteDimension (первый лист таблицы, не по названию)
+sh_cands --> app : OK
+app --> editor : Строка удалена из таблицы
+
+editor -> app : «+ Добавить кандидата» в панели фильтров\nCandidateCreateModal — та же форма, что CandidateEditModal,\nно без истории резюме, «Активен с» = сегодня
+editor -> app : createCandidate({ name, title, email, phone, level,\n  activeSince, stream, countryPrimary, countryDesired,\n  summary, resumeUrl, resumeFilename?, coverLetter })
+app -> app : id = crypto.randomUUID()
+app -> sh_cands : appendCandidateRow({ id, timestamp, name, email, phone,\n  "resume url", "cover letter", status: "На проверке" })\n— только проверенный безопасный набор ключей
+sh_cands --> app : { rowIndex } (распарсен из updates.updatedRange)
+app -> sh_cands : updateCandidateFields(rowIndex, { title, level, activeSince,\n  stream, countryPrimary, countryDesired, summary })\n— те же ключи, что и в CandidateEditModal, mapHeader() резолвит\n  колонки независимо от языка заголовков
+sh_cands --> app : OK
+alt резюме передано
+  app -> neonResumes : addResumeVersion({ candidateId: id, kind, filename?, url })
+  neonResumes --> app : OK
+end
+app --> editor : Кандидат в статусе «На проверке» — как и при\nпубличной регистрации, требует подтверждения (заносить\nи проверять может быть разный человек: секретарь / рекрутёр)
+
 == 2в. Редактор редактирует данные работодателя ==
 
 editor -> app : Нажимает Pencil-кнопку в строке работодателя\n(доступна для всех статусов)
