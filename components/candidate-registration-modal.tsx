@@ -84,6 +84,7 @@ export function CandidateRegistrationModal() {
     setErrorMsg("")
     try {
       let uploadedUrl = resumeUrl
+      let uploadedFilename: string | undefined
       if (resumeMode === "file" && resumeFile) {
         const fd = new FormData()
         fd.append("file", resumeFile)
@@ -91,8 +92,16 @@ export function CandidateRegistrationModal() {
         const json = await res.json() as { url?: string; error?: string }
         if (!res.ok || !json.url) throw new Error(json.error ?? "Ошибка загрузки файла")
         uploadedUrl = json.url
+        uploadedFilename = resumeFile.name
       }
-      await registerCandidate({ name, email, phone, resumeUrl: uploadedUrl, coverLetter })
+      await registerCandidate({
+        name,
+        email,
+        phone,
+        resumeUrl: uploadedUrl,
+        resumeFilename: uploadedFilename,
+        coverLetter,
+      })
       setStatus("success")
     } catch (err) {
       setStatus("error")

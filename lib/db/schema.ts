@@ -7,6 +7,15 @@ export const streams = pgTable("streams", {
   description: text("description").notNull().default(""),
 })
 
+export const candidateResumes = pgTable("candidateResumes", {
+  id:          text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  candidateId: text("candidateId").notNull(),
+  kind:        text("kind").notNull(), // "file" | "link"
+  filename:    text("filename").notNull().default(""),
+  url:         text("url").notNull(),
+  createdAt:   timestamp("createdAt").defaultNow().notNull(),
+})
+
 export const contactRequests = pgTable("contactRequests", {
   id:            text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   timestamp:     timestamp("timestamp").defaultNow().notNull(),

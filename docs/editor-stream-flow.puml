@@ -26,6 +26,7 @@ participant "Sheets · Mailing lists" as sh_mail    #d0e8ff
 participant "Sheets · Employers"    as sh_emp      #d0e8ff
 participant "Vercel Blob\n(private)" as blob       #fff3cd
 participant "Neon · contactRequests" as neonDb     #d4f0d4
+participant "Neon · candidateResumes" as neonResumes #d4f0d4
 participant "SendPulse\n(мастер-книга)" as sp_master  #fce8cc
 participant "SendPulse\n(книга стрима)" as sp_stream  #fce8cc
 participant "SendPulse\nCampaigns"  as sp_camp     #fce8cc
@@ -94,8 +95,21 @@ else Кандидат указал URL резюме
   end note
 end
 
-app -> sh_cands : appendCandidateRow({ Name, Email, Phone,\n  Resume URL: proxyUrl или введённый URL,\n  Cover Letter, Status: "На проверке" })
+app -> app : id = crypto.randomUUID()\n(генерируется здесь же, синхронно — без внешнего скрипта)
+app -> sh_cands : appendCandidateRow({ id, Name, Email, Phone,\n  Resume URL: proxyUrl или введённый URL,\n  Cover Letter, Status: "На проверке" })
 sh_cands --> app : OK
+
+alt резюме передано (файл или ссылка)
+  app -> app : kind = isOwnFileUrl(url) ? "file" : "link"\n(hostname/паттерн самого URL — не переключатель формы)
+  app -> neonResumes : addResumeVersion({ candidateId: id,\n  kind, filename?, url: proxyUrl/ссылка })
+  neonResumes --> app : OK
+  note right of neonResumes
+    TASK-32: первая версия резюме сразу попадает в историю,
+    т.к. id известен синхронно (не как у работодателя,
+    где ID иногда проставляется вручную скриптом в таблице)
+  end note
+end
+
 app --> candidate : «Заявка отправлена — мы рассмотрим и свяжемся»
 
 note over sh_cands
@@ -144,16 +158,32 @@ end note
 editor -> app : Нажимает Pencil-кнопку в строке кандидата\n(доступна для всех статусов)
 app --> editor : CandidateEditModal — форма предзаполнена\n(имя, роль, email, телефон, резюме, сопроводительное письмо,\nsummary, уровень, стримы, страна текущая/желаемая, дата активности)
 
+app -> neonResumes : getCandidateResumeHistory(candidate.id)\n(при открытии модалки, если id не пустой)
+neonResumes --> app : версии резюме, новые сверху
+app --> editor : Под полем «Резюме» — две подгруппы:\n«Файлы (N)» и «Ссылки (N)», по kind версии
+
 alt Кандидат загружает новый файл резюме
   editor -> app : POST /api/upload (новый файл)
   app -> blob : put("resumes/…", file, { access: "private" })
   blob --> app : { url: blobUrl }
-  app --> editor : proxyUrl для поля resumeUrl
+  app --> editor : proxyUrl для поля resumeUrl\n(старый файл НЕ удаляется — остаётся в Blob)
 end
 
-editor -> app : updateCandidate(rowIndex, { name, title, email, phone,\n  resumeUrl, coverLetter, summary, stream, level,\n  countryPrimary, countryDesired, activeSince })
+editor -> app : updateCandidate(rowIndex, { candidateId: candidate.id,\n  name, title, email, phone, resumeUrl,\n  resumeVersionChanged (только если resumeUrl реально отличается\n  от исходного), resumeFilename?, coverLetter, summary,\n  stream, level, countryPrimary, countryDesired, activeSince })
 app -> sh_cands : updateCandidateFields(rowIndex, data)\n(параллельные PUT по колонкам через Sheets API)
 sh_cands --> app : OK
+
+alt resumeVersionChanged передан
+  app -> app : kind = isOwnFileUrl(resumeUrl) ? "file" : "link"
+  app -> neonResumes : addResumeVersion({ candidateId, kind, filename?, url: resumeUrl })
+  neonResumes --> app : OK
+  note right of neonResumes
+    TASK-32: старый файл в Vercel Blob никогда не удаляется —
+    остаётся доступен из списка «История резюме» этого кандидата.
+    Правки прочих полей без изменения резюме новую версию не создают.
+  end note
+end
+
 app --> editor : Страница обновлена (revalidatePath)
 
 note over app, sh_cands
