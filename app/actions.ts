@@ -351,8 +351,9 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
   }
 }
 
-/** Editor-only "quick add" — unlike registerCandidate(), writes the full field set in one
- * go and sets status "Активный" immediately (no separate approval step). */
+/** Editor-only "quick add" — unlike registerCandidate(), writes the full field set in one go
+ * (title/level/stream/countries/summary included). Status is still "На проверке": whoever adds
+ * the candidate (e.g. a secretary) isn't necessarily who should approve them (a recruiter). */
 export type NewCandidateData = {
   name: string
   title: string
@@ -382,7 +383,7 @@ export async function createCandidate(data: NewCandidateData): Promise<void> {
     "phone": data.phone,
     "resume url": data.resumeUrl,
     "cover letter": data.coverLetter,
-    "status": "Активный",
+    "status": "На проверке",
   })
 
   await updateCandidateFields(rowIndex, {

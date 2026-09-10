@@ -168,7 +168,7 @@ export function CandidateCreateModal({
               </span>
               <h3 className="mt-4 text-lg font-semibold text-card-foreground">Добавлен</h3>
               <p className="mt-2 text-sm text-muted-foreground">
-                Кандидат сразу в статусе «Активный» — виден в подборках и рассылках.
+                Кандидат в статусе «На проверке» — появится в подборках и рассылках после подтверждения.
               </p>
               <button
                 onClick={onClose}
