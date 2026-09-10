@@ -3,10 +3,11 @@
 import { revalidatePath } from "next/cache"
 import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, deleteEmployerRow, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
-import { addResumeVersion, getResumeVersions, type ResumeVersion, type ResumeVersionKind } from "@/lib/db/resumes"
+import { addResumeVersion, getResumeVersions, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord } from "@/lib/db/streams"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId } from "@/lib/sendpulse"
+import { isOwnFileUrl } from "@/lib/blob"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
 
@@ -319,7 +320,6 @@ export type CandidateData = {
   email: string
   phone: string
   resumeUrl: string
-  resumeKind?: ResumeVersionKind
   resumeFilename?: string
   coverLetter: string
 }
@@ -340,10 +340,10 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
     "status": "На проверке",
   })
 
-  if (data.resumeUrl && data.resumeKind) {
+  if (data.resumeUrl) {
     await addResumeVersion({
       candidateId: id,
-      kind: data.resumeKind,
+      kind: isOwnFileUrl(data.resumeUrl) ? "file" : "link",
       filename: data.resumeFilename,
       url: data.resumeUrl,
     })
@@ -358,7 +358,8 @@ export async function updateCandidate(
     email: string
     phone: string
     resumeUrl: string
-    resumeChanged?: { kind: ResumeVersionKind; filename?: string }
+    resumeVersionChanged?: boolean
+    resumeFilename?: string
     coverLetter: string
     stream: string[]
     level: string
@@ -386,11 +387,11 @@ export async function updateCandidate(
     summary: data.summary,
   })
 
-  if (data.resumeChanged && data.resumeUrl) {
+  if (data.resumeVersionChanged && data.resumeUrl) {
     await addResumeVersion({
       candidateId: data.candidateId,
-      kind: data.resumeChanged.kind,
-      filename: data.resumeChanged.filename,
+      kind: isOwnFileUrl(data.resumeUrl) ? "file" : "link",
+      filename: data.resumeFilename,
       url: data.resumeUrl,
     })
   }

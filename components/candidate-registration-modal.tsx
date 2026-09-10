@@ -99,7 +99,6 @@ export function CandidateRegistrationModal() {
         email,
         phone,
         resumeUrl: uploadedUrl,
-        resumeKind: uploadedUrl ? (resumeMode === "file" ? "file" : "link") : undefined,
         resumeFilename: uploadedFilename,
         coverLetter,
       })

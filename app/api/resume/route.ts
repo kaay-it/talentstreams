@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-
-const BLOB_HOST = "blob.vercel-storage.com"
+import { BLOB_HOST } from "@/lib/blob"
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = req.nextUrl.searchParams.get("url")
