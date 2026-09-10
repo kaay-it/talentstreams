@@ -544,7 +544,7 @@ export async function appendEmployerRow(data: Record<string, string>): Promise<v
 }
 
 /** Append a candidate row to the main profiles sheet (case-insensitive header matching). */
-export async function appendCandidateRow(data: Record<string, string>): Promise<void> {
+export async function appendCandidateRow(data: Record<string, string>): Promise<{ rowIndex: number }> {
   const { email, privateKey, sheetId } = getEnv()
   const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
 
@@ -572,6 +572,48 @@ export async function appendCandidateRow(data: Record<string, string>): Promise<
     body: JSON.stringify({ values: [values] }),
   })
   if (!res.ok) throw new Error(`Sheets append failed (${res.status}): ${await res.text()}`)
+
+  const result = (await res.json()) as { updates?: { updatedRange?: string } }
+  const match = (result.updates?.updatedRange ?? "").match(/![A-Z]+(\d+)/)
+  return { rowIndex: match ? parseInt(match[1], 10) : 0 }
+}
+
+/** Permanently delete a candidate's row from the main candidates sheet (its first tab). */
+export async function deleteCandidateRow(rowIndex: number): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const metaRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!metaRes.ok) throw new Error(`Failed to load sheet metadata (${metaRes.status}): ${await metaRes.text()}`)
+  const meta = (await metaRes.json()) as { sheets: { properties: { sheetId: number; title: string } }[] }
+  const firstSheet = meta.sheets[0]
+  if (!firstSheet) throw new Error("No sheets found in spreadsheet")
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId: firstSheet.properties.sheetId,
+                dimension: "ROWS",
+                startIndex: rowIndex - 1,
+                endIndex: rowIndex,
+              },
+            },
+          },
+        ],
+      }),
+    },
+  )
+  if (!res.ok) throw new Error(`Failed to delete candidate row (${res.status}): ${await res.text()}`)
 }
 
 /** Returns all candidates from the main sheet for editor moderation (all statuses). */

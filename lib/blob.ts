@@ -1,31 +1,37 @@
 export const BLOB_HOST = "blob.vercel-storage.com"
 
-/**
- * True if `url` points at our own Vercel Blob storage — either a direct blob URL,
- * or our `/api/resume?url=` proxy wrapping one. Anything else (an external link the
- * candidate typed in) is not "ours".
- */
-export function isOwnFileUrl(url: string): boolean {
-  let parsed: URL
+function tryParseUrl(url: string): URL | null {
   try {
-    parsed = new URL(url)
+    return new URL(url)
   } catch {
-    return false
+    return null
   }
+}
 
-  if (parsed.hostname.endsWith(BLOB_HOST)) return true
+/**
+ * The actual Vercel Blob URL behind `url` — itself if already a direct blob URL, or
+ * unwrapped from our `/api/resume?url=` proxy. Returns null if `url` isn't ours at all
+ * (an external link the candidate typed in).
+ */
+export function resolveBlobUrl(url: string): string | null {
+  const parsed = tryParseUrl(url)
+  if (!parsed) return null
+
+  if (parsed.hostname.endsWith(BLOB_HOST)) return url
 
   if (parsed.pathname === "/api/resume") {
     const inner = parsed.searchParams.get("url")
-    if (!inner) return false
-    try {
-      return new URL(inner).hostname.endsWith(BLOB_HOST)
-    } catch {
-      return false
-    }
+    if (!inner) return null
+    const innerParsed = tryParseUrl(inner)
+    if (innerParsed && innerParsed.hostname.endsWith(BLOB_HOST)) return inner
   }
 
-  return false
+  return null
+}
+
+/** True if `url` points at our own Vercel Blob storage (directly or via the resume proxy). */
+export function isOwnFileUrl(url: string): boolean {
+  return resolveBlobUrl(url) !== null
 }
 
 /**
@@ -35,18 +41,8 @@ export function isOwnFileUrl(url: string): boolean {
  * more honest fallback than a blank field when the real filename wasn't passed through.
  */
 export function blobFilenameFromUrl(url: string): string {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return ""
-  }
-
-  const inner = parsed.pathname === "/api/resume" ? parsed.searchParams.get("url") : null
-  try {
-    const target = new URL(inner ?? url)
-    return decodeURIComponent(target.pathname.split("/").pop() ?? "")
-  } catch {
-    return ""
-  }
+  const target = resolveBlobUrl(url) ?? url
+  const parsed = tryParseUrl(target)
+  if (!parsed) return ""
+  return decodeURIComponent(parsed.pathname.split("/").pop() ?? "")
 }
