@@ -1,5 +1,5 @@
 import "server-only"
-import { desc, eq } from "drizzle-orm"
+import { desc, eq, inArray } from "drizzle-orm"
 import { db } from "./index"
 import { candidateResumes } from "./schema"
 import { blobFilenameFromUrl } from "../blob"
@@ -52,4 +52,35 @@ export async function getResumeVersions(candidateId: string): Promise<ResumeVers
     url: r.url,
     createdAt: r.createdAt.toISOString(),
   }))
+}
+
+/**
+ * Resume versions for many candidates at once, grouped by candidateId (each group newest
+ * first) — one query instead of one-per-candidate, for list pages showing several candidates.
+ */
+export async function getResumeVersionsForCandidates(
+  candidateIds: string[],
+): Promise<Record<string, ResumeVersion[]>> {
+  const ids = [...new Set(candidateIds.filter(Boolean))]
+  if (!ids.length) return {}
+
+  const rows = await db
+    .select()
+    .from(candidateResumes)
+    .where(inArray(candidateResumes.candidateId, ids))
+    .orderBy(desc(candidateResumes.createdAt))
+
+  const grouped: Record<string, ResumeVersion[]> = {}
+  for (const r of rows) {
+    const version: ResumeVersion = {
+      id: r.id,
+      candidateId: r.candidateId,
+      kind: r.kind as ResumeVersionKind,
+      filename: r.filename,
+      url: r.url,
+      createdAt: r.createdAt.toISOString(),
+    }
+    ;(grouped[r.candidateId] ??= []).push(version)
+  }
+  return grouped
 }

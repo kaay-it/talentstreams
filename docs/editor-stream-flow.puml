@@ -162,11 +162,22 @@ app -> neonResumes : getCandidateResumeHistory(candidate.id)\n(при откры
 neonResumes --> app : версии резюме, новые сверху
 app --> editor : Под полем «Резюме» — две подгруппы:\n«Файлы (N)» и «Ссылки (N)», по kind версии
 
-alt Кандидат загружает новый файл резюме
+note over editor, app
+  Текущее resumeUrl показывается как read-only чип («Текущее резюме» + «Открыть»),
+  сам сабмит его не трогает. Две независимые кнопки «+ Добавить файл» /
+  «+ Добавить ссылку» (resumeAction) — переключение между ними больше не затирает
+  уже сохранённое значение, в отличие от прежнего toggle-переключателя.
+end note
+
+alt Редактор нажимает «+ Добавить файл» и выбирает новый файл
   editor -> app : POST /api/upload (новый файл)
   app -> blob : put("resumes/…", file, { access: "private" })
   blob --> app : { url: blobUrl }
   app --> editor : proxyUrl для поля resumeUrl\n(старый файл НЕ удаляется — остаётся в Blob)
+else Редактор нажимает «+ Добавить ссылку» и вводит URL
+  editor -> app : resumeUrl = введённая ссылка
+else Редактор ничего не трогает («Отмена» или не открывал ни одну кнопку)
+  editor -> app : resumeUrl = candidate.resumeUrl (без изменений)
 end
 
 editor -> app : updateCandidate(rowIndex, { candidateId: candidate.id,\n  name, title, email, phone, resumeUrl,\n  resumeVersionChanged (только если resumeUrl реально отличается\n  от исходного), resumeFilename?, coverLetter, summary,\n  stream, level, countryPrimary, countryDesired, activeSince })

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation"
 import { getCandidates } from "@/lib/sheets"
 import { getStreams } from "@/lib/db/streams"
+import { getResumeVersionsForCandidates } from "@/lib/db/resumes"
 import { CandidateSection } from "@/components/candidate-section"
 
 export const dynamic = "force-dynamic"
@@ -18,10 +19,11 @@ export default async function CandidatesPage({
   }
 
   const [candidates, streams] = await Promise.all([getCandidates(), getStreams()])
+  const resumeHistory = await getResumeVersionsForCandidates(candidates.map((c) => c.id))
   const pendingCount = candidates.filter((c) => c.status === "На проверке").length
 
   return (
-    <div className="px-6 py-8 max-w-3xl">
+    <div className="px-6 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Кандидаты</h1>
         <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">
@@ -29,7 +31,7 @@ export default async function CandidatesPage({
         </span>
       </div>
 
-      <CandidateSection candidates={candidates} streams={streams} />
+      <CandidateSection candidates={candidates} streams={streams} resumeHistory={resumeHistory} />
     </div>
   )
 }

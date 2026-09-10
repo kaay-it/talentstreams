@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon } from "lucide-react"
+import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Plus } from "lucide-react"
 import { updateCandidate, getCandidateResumeHistory, type ResumeVersion } from "@/app/actions"
 import { ADDITIONAL_COUNTRIES } from "@/components/employer-registration-modal"
 import type { Candidate } from "@/lib/sheets"
@@ -54,9 +54,19 @@ function ResumeVersionList({ items }: { items: ResumeVersion[] }) {
   )
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  full,
+  children,
+}: {
+  label: string
+  required?: boolean
+  full?: boolean
+  children: React.ReactNode
+}) {
   return (
-    <div className="space-y-1.5">
+    <div className={`space-y-1.5 ${full ? "col-span-2" : ""}`}>
       <label className="block text-sm font-medium text-card-foreground">
         {label}
         {required && <span className="ml-1 text-primary">*</span>}
@@ -82,11 +92,12 @@ export function CandidateEditModal({
   const [title, setTitle] = useState(candidate.title)
   const [email, setEmail] = useState(candidate.email)
   const [phone, setPhone] = useState(candidate.phone)
-  const [resumeMode, setResumeMode] = useState<"file" | "url">(
-    candidate.resumeUrl ? "url" : "file",
-  )
+
+  // "none" = keep candidate.resumeUrl as-is; "file"/"link" = adding a new version to replace it.
+  const [resumeAction, setResumeAction] = useState<"none" | "file" | "link">("none")
   const [resumeFile, setResumeFile] = useState<File | null>(null)
-  const [resumeUrl, setResumeUrl] = useState(candidate.resumeUrl)
+  const [newResumeUrl, setNewResumeUrl] = useState("")
+
   const [coverLetter, setCoverLetter] = useState(candidate.coverLetter)
   const [level, setLevel] = useState(candidate.level)
   const [selectedStreams, setSelectedStreams] = useState<string[]>(candidate.stream)
@@ -113,6 +124,13 @@ export function CandidateEditModal({
     setSelectedStreams((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
   }
 
+  function cancelResumeAction() {
+    setResumeAction("none")
+    setResumeFile(null)
+    setNewResumeUrl("")
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
   const fileInputRef = useRef<HTMLInputElement>(null)
   const nameRef = useRef<HTMLInputElement>(null)
 
@@ -136,9 +154,10 @@ export function CandidateEditModal({
     setStatus("submitting")
     setErrorMsg("")
     try {
-      let finalUrl = resumeUrl
+      let finalUrl = candidate.resumeUrl
       let uploadedFilename: string | undefined
-      if (resumeMode === "file" && resumeFile) {
+
+      if (resumeAction === "file" && resumeFile) {
         const fd = new FormData()
         fd.append("file", resumeFile)
         const res = await fetch("/api/upload", { method: "POST", body: fd })
@@ -146,7 +165,10 @@ export function CandidateEditModal({
         if (!res.ok || !json.url) throw new Error(json.error ?? "Ошибка загрузки файла")
         finalUrl = json.url
         uploadedFilename = resumeFile.name
+      } else if (resumeAction === "link" && newResumeUrl.trim()) {
+        finalUrl = newResumeUrl.trim()
       }
+
       const resumeVersionChanged = Boolean(finalUrl && finalUrl !== candidate.resumeUrl)
       await updateCandidate(candidate.rowIndex, {
         candidateId: candidate.id,
@@ -180,7 +202,7 @@ export function CandidateEditModal({
           role="dialog"
           aria-modal="true"
           aria-labelledby="edit-candidate-title"
-          className="relative w-full max-w-lg rounded-2xl border bg-card shadow-xl"
+          className="relative w-full max-w-2xl rounded-2xl border bg-card shadow-xl"
         >
           <div className="flex items-center justify-between border-b px-6 py-4">
             <h2 id="edit-candidate-title" className="text-base font-semibold text-card-foreground">
@@ -210,51 +232,51 @@ export function CandidateEditModal({
               </button>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
-              <Field label="Имя" required>
-                <input
-                  ref={nameRef}
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Иван Иванов"
-                  className={inputCls}
-                />
-              </Field>
+            <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+                <Field label="Имя" required>
+                  <input
+                    ref={nameRef}
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Иван Иванов"
+                    className={inputCls}
+                  />
+                </Field>
 
-              <Field label="Роль">
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Product Manager"
-                  className={inputCls}
-                />
-              </Field>
+                <Field label="Роль">
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Product Manager"
+                    className={inputCls}
+                  />
+                </Field>
 
-              <Field label="Email" required>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className={inputCls}
-                />
-              </Field>
+                <Field label="Email" required>
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className={inputCls}
+                  />
+                </Field>
 
-              <Field label="Телефон">
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+_ ___ ___ ____"
-                  className={inputCls}
-                />
-              </Field>
+                <Field label="Телефон">
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+_ ___ ___ ____"
+                    className={inputCls}
+                  />
+                </Field>
 
-              <div className="grid grid-cols-2 gap-4">
                 <Field label="Уровень">
                   <input
                     type="text"
@@ -264,6 +286,7 @@ export function CandidateEditModal({
                     className={inputCls}
                   />
                 </Field>
+
                 <Field label="Активен с">
                   <input
                     type="date"
@@ -272,35 +295,7 @@ export function CandidateEditModal({
                     className={inputCls}
                   />
                 </Field>
-              </div>
 
-              <Field label="Стримы">
-                {streams.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {streams.map((s) => {
-                      const selected = selectedStreams.includes(s)
-                      return (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => toggleStream(s)}
-                          className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                            selected
-                              ? "border-primary bg-primary/10 text-primary"
-                              : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
-                          }`}
-                        >
-                          {s}
-                        </button>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Стримы не настроены</p>
-                )}
-              </Field>
-
-              <div className="grid grid-cols-2 gap-4">
                 <Field label="Страна (текущая)">
                   <select value={countryPrimary} onChange={(e) => setCountryPrimary(e.target.value)} className={inputCls}>
                     <option value="">— не указано —</option>
@@ -309,6 +304,7 @@ export function CandidateEditModal({
                     ))}
                   </select>
                 </Field>
+
                 <Field label="Страна (желаемая)">
                   <select value={countryDesired} onChange={(e) => setCountryDesired(e.target.value)} className={inputCls}>
                     <option value="">— не указано —</option>
@@ -317,113 +313,184 @@ export function CandidateEditModal({
                     ))}
                   </select>
                 </Field>
-              </div>
 
-              <Field label="Summary">
-                <textarea
-                  value={summary}
-                  onChange={(e) => setSummary(e.target.value)}
-                  placeholder="Анонимное описание кандидата — это единственное, что увидит работодатель на карточке подборки, кроме роли, уровня и страны."
-                  rows={4}
-                  className={`${inputCls} resize-none`}
-                />
-              </Field>
-
-              <Field label="Резюме">
-                <div className="space-y-2">
-                  <div className="flex rounded-lg border p-0.5 text-sm">
-                    <button
-                      type="button"
-                      onClick={() => { setResumeMode("file"); setResumeUrl("") }}
-                      className={`flex-1 rounded-md py-1.5 text-center transition-colors ${resumeMode === "file" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                      Загрузить файл
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setResumeMode("url"); setResumeFile(null); if (fileInputRef.current) fileInputRef.current.value = "" }}
-                      className={`flex-1 rounded-md py-1.5 text-center transition-colors ${resumeMode === "url" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                      Указать ссылку
-                    </button>
-                  </div>
-
-                  {resumeMode === "file" ? (
-                    <label className={`flex cursor-pointer items-center gap-2.5 rounded-lg border bg-background px-3 py-2 text-sm transition-colors hover:bg-muted ${status === "submitting" ? "pointer-events-none opacity-60" : ""}`}>
-                      {status === "submitting" && resumeFile ? (
-                        <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
-                      ) : (
-                        <Paperclip className="size-4 shrink-0 text-muted-foreground" />
-                      )}
-                      <span className={`min-w-0 truncate ${resumeFile ? "text-foreground" : "text-muted-foreground"}`}>
-                        {resumeFile ? resumeFile.name : "PDF, DOC, DOCX, RTF, ODT · до 5 МБ"}
-                      </span>
-                      {resumeFile && status !== "submitting" && (
-                        <Check className="ml-auto size-4 shrink-0 text-emerald-500" />
-                      )}
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".pdf,.doc,.docx,.rtf,.odt"
-                        onChange={handleFileChange}
-                        className="sr-only"
-                      />
-                    </label>
+                <Field label="Стримы" full>
+                  {streams.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {streams.map((s) => {
+                        const selected = selectedStreams.includes(s)
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => toggleStream(s)}
+                            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                              selected
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                            }`}
+                          >
+                            {s}
+                          </button>
+                        )
+                      })}
+                    </div>
                   ) : (
-                    <input
-                      type="url"
-                      value={resumeUrl}
-                      onChange={(e) => setResumeUrl(e.target.value)}
-                      placeholder="https://..."
-                      className={inputCls}
-                    />
+                    <p className="text-sm text-muted-foreground">Стримы не настроены</p>
                   )}
-                </div>
+                </Field>
 
-                {candidate.id && (
-                  <div className="space-y-3 pt-1">
-                    {historyLoading ? (
-                      <p className="text-xs text-muted-foreground">Загрузка истории резюме…</p>
-                    ) : resumeHistory.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        История резюме появится здесь после следующей загрузки нового файла или ссылки.
-                      </p>
-                    ) : (
-                      <>
-                        {resumeFiles.length > 0 && (
-                          <div className="space-y-1.5">
-                            <p className="text-xs font-medium text-muted-foreground">
-                              Файлы ({resumeFiles.length})
-                            </p>
-                            <ResumeVersionList items={resumeFiles} />
+                <Field label="Summary" full>
+                  <textarea
+                    value={summary}
+                    onChange={(e) => setSummary(e.target.value)}
+                    placeholder="Анонимное описание кандидата — это единственное, что увидит работодатель на карточке подборки, кроме роли, уровня и страны."
+                    rows={3}
+                    className={`${inputCls} resize-none`}
+                  />
+                </Field>
+
+                <Field label="Резюме" full>
+                  <div className="space-y-3">
+                    {candidate.resumeUrl && resumeAction === "none" && (
+                      <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                        <LinkIcon className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground">Текущее резюме</span>
+                        <a
+                          href={candidate.resumeUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0 font-medium text-primary hover:underline"
+                        >
+                          Открыть
+                        </a>
+                      </div>
+                    )}
+
+                    {resumeAction === "none" && (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setResumeAction("file")}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                        >
+                          <Plus className="size-3.5" />
+                          Добавить файл
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setResumeAction("link")}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                        >
+                          <Plus className="size-3.5" />
+                          Добавить ссылку
+                        </button>
+                      </div>
+                    )}
+
+                    {resumeAction === "file" && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <label className={`flex flex-1 cursor-pointer items-center gap-2.5 rounded-lg border bg-background px-3 py-2 text-sm transition-colors hover:bg-muted ${status === "submitting" ? "pointer-events-none opacity-60" : ""}`}>
+                            {status === "submitting" && resumeFile ? (
+                              <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                            ) : (
+                              <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                            )}
+                            <span className={`min-w-0 truncate ${resumeFile ? "text-foreground" : "text-muted-foreground"}`}>
+                              {resumeFile ? resumeFile.name : "PDF, DOC, DOCX, RTF, ODT · до 5 МБ"}
+                            </span>
+                            {resumeFile && status !== "submitting" && (
+                              <Check className="ml-auto size-4 shrink-0 text-emerald-500" />
+                            )}
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              accept=".pdf,.doc,.docx,.rtf,.odt"
+                              onChange={handleFileChange}
+                              className="sr-only"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={cancelResumeAction}
+                            className="shrink-0 rounded-lg border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
+                          >
+                            Отмена
+                          </button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Старое резюме не удаляется — остаётся в истории версий ниже.
+                        </p>
+                      </div>
+                    )}
+
+                    {resumeAction === "link" && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="url"
+                          autoFocus
+                          value={newResumeUrl}
+                          onChange={(e) => setNewResumeUrl(e.target.value)}
+                          placeholder="https://..."
+                          className={inputCls}
+                        />
+                        <button
+                          type="button"
+                          onClick={cancelResumeAction}
+                          className="shrink-0 rounded-lg border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
+                        >
+                          Отмена
+                        </button>
+                      </div>
+                    )}
+
+                    {candidate.id && (
+                      <div className="space-y-3 pt-1">
+                        {historyLoading ? (
+                          <p className="text-xs text-muted-foreground">Загрузка истории резюме…</p>
+                        ) : resumeHistory.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            История резюме появится здесь после следующей загрузки нового файла или ссылки.
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-3">
+                            {resumeFiles.length > 0 && (
+                              <div className="space-y-1.5">
+                                <p className="text-xs font-medium text-muted-foreground">
+                                  Файлы ({resumeFiles.length})
+                                </p>
+                                <ResumeVersionList items={resumeFiles} />
+                              </div>
+                            )}
+                            {resumeLinks.length > 0 && (
+                              <div className="space-y-1.5">
+                                <p className="text-xs font-medium text-muted-foreground">
+                                  Ссылки ({resumeLinks.length})
+                                </p>
+                                <ResumeVersionList items={resumeLinks} />
+                              </div>
+                            )}
                           </div>
                         )}
-                        {resumeLinks.length > 0 && (
-                          <div className="space-y-1.5">
-                            <p className="text-xs font-medium text-muted-foreground">
-                              Ссылки ({resumeLinks.length})
-                            </p>
-                            <ResumeVersionList items={resumeLinks} />
-                          </div>
-                        )}
-                      </>
+                      </div>
                     )}
                   </div>
-                )}
-              </Field>
+                </Field>
 
-              <Field label="Сопроводительное письмо">
-                <textarea
-                  value={coverLetter}
-                  onChange={(e) => setCoverLetter(e.target.value)}
-                  placeholder="О себе, опыте и навыках..."
-                  rows={4}
-                  className={`${inputCls} resize-none`}
-                />
-              </Field>
+                <Field label="Сопроводительное письмо" full>
+                  <textarea
+                    value={coverLetter}
+                    onChange={(e) => setCoverLetter(e.target.value)}
+                    placeholder="О себе, опыте и навыках..."
+                    rows={3}
+                    className={`${inputCls} resize-none`}
+                  />
+                </Field>
+              </div>
 
               {status === "error" && (
-                <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <p className="mt-5 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
                   {errorMsg}
                 </p>
               )}
@@ -431,7 +498,7 @@ export function CandidateEditModal({
               <button
                 type="submit"
                 disabled={status === "submitting"}
-                className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-5 w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {status === "submitting" ? "Сохранение…" : "Сохранить"}
               </button>

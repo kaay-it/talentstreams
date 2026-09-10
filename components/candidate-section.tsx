@@ -1,8 +1,8 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, ExternalLink, Loader2, Pencil } from "lucide-react"
-import { approveCandidate, rejectCandidate } from "@/app/actions"
+import { CheckCircle2, XCircle, FileText, Link as LinkIcon, Loader2, Pencil } from "lucide-react"
+import { approveCandidate, rejectCandidate, type ResumeVersion } from "@/app/actions"
 import { CandidateEditModal } from "@/components/candidate-edit-modal"
 import type { Candidate, CandidateStatus } from "@/lib/sheets"
 
@@ -16,7 +16,46 @@ const STATUS_OPTIONS: { value: CandidateStatus | ""; label: string }[] = [
   { value: "Отклонён", label: "Отклонённые" },
 ]
 
-function CandidateRow({ candidate, streams }: { candidate: Candidate; streams: string[] }) {
+const MAX_CHIPS = 3
+
+function ResumeChips({ items }: { items: ResumeVersion[] }) {
+  if (!items.length) return <span className="text-xs text-muted-foreground">—</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.slice(0, MAX_CHIPS).map((v) => (
+        <a
+          key={v.id}
+          href={v.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={v.kind === "file" ? v.filename || "Файл" : v.url}
+          className="inline-flex max-w-[9rem] items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+        >
+          {v.kind === "file" ? (
+            <FileText className="size-3 shrink-0" />
+          ) : (
+            <LinkIcon className="size-3 shrink-0" />
+          )}
+          <span className="truncate">
+            {v.kind === "file" ? v.filename || "Файл" : v.url.replace(/^https?:\/\//, "")}
+          </span>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function CandidateRow({
+  candidate,
+  streams,
+  files,
+  links,
+}: {
+  candidate: Candidate
+  streams: string[]
+  files: ResumeVersion[]
+  links: ResumeVersion[]
+}) {
   const [isPending, startTransition] = useTransition()
   const [localStatus, setLocalStatus] = useState<"approved" | "rejected" | null>(null)
   const [editing, setEditing] = useState(false)
@@ -40,64 +79,63 @@ function CandidateRow({ candidate, streams }: { candidate: Candidate; streams: s
   return (
     <>
       {editing && <CandidateEditModal candidate={candidate} streams={streams} onClose={() => setEditing(false)} />}
-      <div className={`border-b last:border-b-0 px-5 py-4 transition-opacity ${done ? "opacity-50" : ""}`}>
-        <div className="flex items-start gap-4">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-medium text-sm text-card-foreground">{candidate.name}</span>
-              <span
-                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                  candidate.status === "На проверке"
-                    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
-                    : candidate.status === "Активный"
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                      : "bg-muted text-muted-foreground"
-                }`}
-              >
-                {candidate.status}
-              </span>
-              {candidate.level && (
-                <span className="inline-flex items-center rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:bg-teal-900/20 dark:text-teal-400">
-                  {candidate.level}
-                </span>
-              )}
-              {candidate.stream.map((s) => (
-                <span
-                  key={s}
-                  className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                >
-                  {s}
-                </span>
-              ))}
-              {candidate.activeSince && (
-                <span className="text-xs text-muted-foreground">с {candidate.activeSince}</span>
-              )}
-            </div>
-            <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-              {candidate.email && <span>{candidate.email}</span>}
-              {candidate.phone && <span>{candidate.phone}</span>}
-              {candidate.timestamp && (
-                <span>{new Date(candidate.timestamp).toLocaleDateString("ru-RU")}</span>
-              )}
-            </div>
-            {candidate.coverLetter && (
-              <p className="mt-2 text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-                {candidate.coverLetter}
-              </p>
-            )}
-            {candidate.resumeUrl && (
-              <a
-                href={candidate.resumeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
-              >
-                Резюме <ExternalLink className="size-3" />
-              </a>
-            )}
+      <tr className={`border-b last:border-b-0 align-top transition-opacity ${done ? "opacity-50" : ""}`}>
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-sm text-card-foreground">{candidate.name}</span>
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                candidate.status === "На проверке"
+                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+                  : candidate.status === "Активный"
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                    : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {candidate.status}
+            </span>
           </div>
+          {candidate.title && (
+            <p className="mt-0.5 text-xs text-muted-foreground">{candidate.title}</p>
+          )}
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {candidate.level && (
+              <span className="inline-flex items-center rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:bg-teal-900/20 dark:text-teal-400">
+                {candidate.level}
+              </span>
+            )}
+            {candidate.stream.map((s) => (
+              <span
+                key={s}
+                className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+              >
+                {s}
+              </span>
+            ))}
+          </div>
+        </td>
 
-          <div className="flex items-center gap-2 shrink-0">
+        <td className="px-4 py-3 text-xs text-muted-foreground">
+          <div className="space-y-0.5">
+            {candidate.email && <p className="truncate">{candidate.email}</p>}
+            {candidate.phone && <p className="truncate">{candidate.phone}</p>}
+          </div>
+        </td>
+
+        <td className="px-4 py-3">
+          <ResumeChips items={files} />
+        </td>
+
+        <td className="px-4 py-3">
+          <ResumeChips items={links} />
+        </td>
+
+        <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+          {candidate.activeSince || "—"}
+        </td>
+
+        <td className="px-4 py-3">
+          <div className="flex items-center justify-end gap-2 whitespace-nowrap">
             <button
               onClick={() => setEditing(true)}
               disabled={isPending}
@@ -134,13 +172,21 @@ function CandidateRow({ candidate, streams }: { candidate: Candidate; streams: s
               </span>
             )}
           </div>
-        </div>
-      </div>
+        </td>
+      </tr>
     </>
   )
 }
 
-export function CandidateSection({ candidates, streams }: { candidates: Candidate[]; streams: string[] }) {
+export function CandidateSection({
+  candidates,
+  streams,
+  resumeHistory,
+}: {
+  candidates: Candidate[]
+  streams: string[]
+  resumeHistory: Record<string, ResumeVersion[]>
+}) {
   const [search, setSearch] = useState("")
   const [status, setStatus] = useState<CandidateStatus | "">("")
   const [stream, setStream] = useState("")
@@ -203,7 +249,34 @@ export function CandidateSection({ candidates, streams }: { candidates: Candidat
         ) : filtered.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">Кандидаты не найдены по заданным фильтрам.</p>
         ) : (
-          filtered.map((c) => <CandidateRow key={c.rowIndex} candidate={c} streams={streams} />)
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left text-sm">
+              <thead>
+                <tr className="border-b bg-muted/30 text-xs font-medium text-muted-foreground">
+                  <th className="px-4 py-2.5 font-medium">Кандидат</th>
+                  <th className="px-4 py-2.5 font-medium">Контакты</th>
+                  <th className="px-4 py-2.5 font-medium">Файлы</th>
+                  <th className="px-4 py-2.5 font-medium">Ссылки</th>
+                  <th className="px-4 py-2.5 font-medium">Активен с</th>
+                  <th className="px-4 py-2.5 font-medium text-right">Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((c) => {
+                  const history = resumeHistory[c.id] ?? []
+                  return (
+                    <CandidateRow
+                      key={c.rowIndex}
+                      candidate={c}
+                      streams={streams}
+                      files={history.filter((v) => v.kind === "file")}
+                      links={history.filter((v) => v.kind === "link")}
+                    />
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
