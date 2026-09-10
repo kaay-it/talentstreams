@@ -497,6 +497,7 @@ async function ensureSheet(sheetId: string, token: string, title: string, header
 const EMPLOYERS_HEADERS = ["ID", "Timestamp", "Name", "Company", "Email", "Phone", "Primary Contact", "Telegram", "LinkedIn", "Streams", "Status"]
 export type Candidate = {
   rowIndex: number
+  id: string
   timestamp: string
   name: string
   email: string
@@ -586,6 +587,7 @@ export async function getCandidates(): Promise<Candidate[]> {
       const r = rowToRecord(headers, row)
       return {
         rowIndex: i + 2,
+        id: r.id || "",
         timestamp: r.registrationTimestamp || "",
         name: r.name || "",
         email: r.email || "",

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, Paperclip, Loader2 } from "lucide-react"
-import { updateCandidate } from "@/app/actions"
+import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon } from "lucide-react"
+import { updateCandidate, getCandidateResumeHistory, type ResumeVersion, type ResumeVersionKind } from "@/app/actions"
 import { ADDITIONAL_COUNTRIES } from "@/components/employer-registration-modal"
 import type { Candidate } from "@/lib/sheets"
 
@@ -65,6 +65,18 @@ export function CandidateEditModal({
   const [activeSince, setActiveSince] = useState(toISODate(candidate.activeSince))
   const [summary, setSummary] = useState(candidate.summary)
 
+  const [resumeHistory, setResumeHistory] = useState<ResumeVersion[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+
+  useEffect(() => {
+    if (!candidate.id) return
+    setHistoryLoading(true)
+    getCandidateResumeHistory(candidate.id)
+      .then(setResumeHistory)
+      .catch(() => setResumeHistory([]))
+      .finally(() => setHistoryLoading(false))
+  }, [candidate.id])
+
   function toggleStream(s: string) {
     setSelectedStreams((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
   }
@@ -93,6 +105,7 @@ export function CandidateEditModal({
     setErrorMsg("")
     try {
       let finalUrl = resumeUrl
+      let uploadedFilename: string | undefined
       if (resumeMode === "file" && resumeFile) {
         const fd = new FormData()
         fd.append("file", resumeFile)
@@ -100,12 +113,20 @@ export function CandidateEditModal({
         const json = await res.json() as { url?: string; error?: string }
         if (!res.ok || !json.url) throw new Error(json.error ?? "Ошибка загрузки файла")
         finalUrl = json.url
+        uploadedFilename = resumeFile.name
       }
+      const resumeKind: ResumeVersionKind = resumeMode === "file" ? "file" : "link"
+      const resumeChanged =
+        finalUrl && finalUrl !== candidate.resumeUrl
+          ? { kind: resumeKind, filename: uploadedFilename }
+          : undefined
       await updateCandidate(candidate.rowIndex, {
+        candidateId: candidate.id,
         name,
         email,
         phone,
         resumeUrl: finalUrl,
+        resumeChanged,
         coverLetter,
         stream: selectedStreams,
         level,
@@ -329,6 +350,47 @@ export function CandidateEditModal({
                     />
                   )}
                 </div>
+
+                {candidate.id && (
+                  <div className="space-y-1.5 pt-1">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      История резюме{resumeHistory.length > 0 ? ` (${resumeHistory.length})` : ""}
+                    </p>
+                    {historyLoading ? (
+                      <p className="text-xs text-muted-foreground">Загрузка…</p>
+                    ) : resumeHistory.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Появится здесь после следующей загрузки нового резюме.
+                      </p>
+                    ) : (
+                      <ul className="divide-y rounded-lg border">
+                        {resumeHistory.map((v) => (
+                          <li key={v.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                            {v.kind === "file" ? (
+                              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <LinkIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                            )}
+                            <span className="min-w-0 flex-1 truncate text-foreground">
+                              {v.kind === "file" ? v.filename || "Файл" : "Ссылка"}
+                            </span>
+                            <span className="shrink-0 text-muted-foreground">
+                              {new Date(v.createdAt).toLocaleDateString("ru-RU")}
+                            </span>
+                            <a
+                              href={v.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="shrink-0 font-medium text-primary hover:underline"
+                            >
+                              Открыть
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </Field>
 
               <Field label="Сопроводительное письмо">

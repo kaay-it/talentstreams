@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache"
 import { appendEmployerRow, appendCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, deleteEmployerRow, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
+import { addResumeVersion, getResumeVersions, type ResumeVersion, type ResumeVersionKind } from "@/lib/db/resumes"
+export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord } from "@/lib/db/streams"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId } from "@/lib/sendpulse"
 
@@ -317,6 +319,8 @@ export type CandidateData = {
   email: string
   phone: string
   resumeUrl: string
+  resumeKind?: ResumeVersionKind
+  resumeFilename?: string
   coverLetter: string
 }
 
@@ -324,8 +328,9 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
   if (!data.name.trim()) throw new Error("Укажите имя")
   if (!data.email.trim()) throw new Error("Укажите email")
 
+  const id = crypto.randomUUID()
   await appendCandidateRow({
-    "id": crypto.randomUUID(),
+    "id": id,
     "timestamp": new Date().toISOString(),
     "name": data.name,
     "email": data.email,
@@ -334,15 +339,26 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
     "cover letter": data.coverLetter,
     "status": "На проверке",
   })
+
+  if (data.resumeUrl && data.resumeKind) {
+    await addResumeVersion({
+      candidateId: id,
+      kind: data.resumeKind,
+      filename: data.resumeFilename,
+      url: data.resumeUrl,
+    })
+  }
 }
 
 export async function updateCandidate(
   rowIndex: number,
   data: {
+    candidateId: string
     name: string
     email: string
     phone: string
     resumeUrl: string
+    resumeChanged?: { kind: ResumeVersionKind; filename?: string }
     coverLetter: string
     stream: string[]
     level: string
@@ -369,7 +385,22 @@ export async function updateCandidate(
     title: data.title,
     summary: data.summary,
   })
+
+  if (data.resumeChanged && data.resumeUrl) {
+    await addResumeVersion({
+      candidateId: data.candidateId,
+      kind: data.resumeChanged.kind,
+      filename: data.resumeChanged.filename,
+      url: data.resumeUrl,
+    })
+  }
+
   revalidatePath("/editor/candidates")
+}
+
+/** Resume version history for a candidate (editor only — keyed by the Sheets `id` column). */
+export async function getCandidateResumeHistory(candidateId: string): Promise<ResumeVersion[]> {
+  return getResumeVersions(candidateId)
 }
 
 export async function registerEmployer(data: EmployerData): Promise<void> {
