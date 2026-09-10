@@ -20,6 +20,8 @@ export async function addResumeVersion(data: {
   kind: ResumeVersionKind
   filename?: string
   url: string
+  /** Backdate the entry (backfill only) — defaults to now for real-time writes. */
+  createdAt?: Date
 }): Promise<void> {
   if (!data.candidateId || !data.url) return
   await db.insert(candidateResumes).values({
@@ -27,6 +29,7 @@ export async function addResumeVersion(data: {
     kind: data.kind,
     filename: data.filename ?? "",
     url: data.url,
+    ...(data.createdAt && { createdAt: data.createdAt }),
   })
 }
 
