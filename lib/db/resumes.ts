@@ -2,6 +2,7 @@ import "server-only"
 import { desc, eq } from "drizzle-orm"
 import { db } from "./index"
 import { candidateResumes } from "./schema"
+import { blobFilenameFromUrl } from "../blob"
 
 export type ResumeVersionKind = "file" | "link"
 
@@ -24,10 +25,11 @@ export async function addResumeVersion(data: {
   createdAt?: Date
 }): Promise<void> {
   if (!data.candidateId || !data.url) return
+  const filename = data.filename || (data.kind === "file" ? blobFilenameFromUrl(data.url) : "")
   await db.insert(candidateResumes).values({
     candidateId: data.candidateId,
     kind: data.kind,
-    filename: data.filename ?? "",
+    filename,
     url: data.url,
     ...(data.createdAt && { createdAt: data.createdAt }),
   })

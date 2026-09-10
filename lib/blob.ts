@@ -27,3 +27,26 @@ export function isOwnFileUrl(url: string): boolean {
 
   return false
 }
+
+/**
+ * Best-effort display name for a resume file URL — the blob's own pathname segment
+ * (e.g. "1754460447259-a1b2c3d4.pdf"). Not the human filename the candidate originally
+ * uploaded — Vercel Blob never stores that separately, only our generated path — but a
+ * more honest fallback than a blank field when the real filename wasn't passed through.
+ */
+export function blobFilenameFromUrl(url: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return ""
+  }
+
+  const inner = parsed.pathname === "/api/resume" ? parsed.searchParams.get("url") : null
+  try {
+    const target = new URL(inner ?? url)
+    return decodeURIComponent(target.pathname.split("/").pop() ?? "")
+  } catch {
+    return ""
+  }
+}
