@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
-import { appendEmployerRow, appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, deleteEmployerRow, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
+import { appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord } from "@/lib/db/streams"
+import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 
@@ -498,25 +499,23 @@ export async function registerEmployer(data: EmployerData): Promise<void> {
     throw new Error("Работодатель с таким номером телефона уже зарегистрирован")
   }
 
-  await appendEmployerRow({
-    "ID": crypto.randomUUID(),
-    "Timestamp": new Date().toISOString(),
-    "Name": data.name,
-    "Company": data.company,
-    "Email": data.email,
-    "Phone": data.phone,
-    "Primary Contact": data.primaryContact,
-    "Telegram": data.telegram || "",
-    "LinkedIn": data.linkedin || "",
-    "Streams": data.streams.join(", "),
-    "Status": "На проверке",
-    "Country": data.country,
-    "Additional Countries": data.additionalCountries.join(", "),
+  await createEmployer({
+    name: data.name,
+    company: data.company,
+    email: data.email,
+    phone: data.phone,
+    primaryContact: data.primaryContact,
+    telegram: data.telegram || "",
+    linkedin: data.linkedin || "",
+    streams: data.streams,
+    status: "На проверке",
+    country: data.country,
+    additionalCountries: data.additionalCountries,
   })
 }
 
 export async function updateEmployer(
-  rowIndex: number,
+  token: string,
   data: {
     name: string
     company: string
@@ -541,10 +540,9 @@ export async function updateEmployer(
     throw new Error("Укажите LinkedIn-профиль")
   }
 
-  const employers = await getEmployers()
-  const existing = employers.find((e) => e.rowIndex === rowIndex)
+  const existing = await getEmployerByToken(token)
 
-  await updateEmployerFields(rowIndex, {
+  await updateEmployerFields(token, {
     name: data.name,
     company: data.company,
     email: data.email,
@@ -552,9 +550,9 @@ export async function updateEmployer(
     primaryContact: data.primaryContact,
     telegram: data.telegram,
     linkedin: data.linkedin,
-    streams: data.streams.join(", "),
+    streams: data.streams,
     country: data.country,
-    additionalCountries: data.additionalCountries.join(", "),
+    additionalCountries: data.additionalCountries,
   })
 
   if (existing?.status === "Подтверждён") {
@@ -576,30 +574,28 @@ export async function updateEmployer(
   revalidatePath("/editor/employers")
 }
 
-export async function confirmEmployer(rowIndex: number, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "telegram" | "linkedin" | "primaryContact" | "streams">): Promise<void> {
+export async function confirmEmployer(token: string, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "telegram" | "linkedin" | "primaryContact" | "streams">): Promise<void> {
   await syncEmployerToSendPulse(employer)
-  await updateEmployerStatus(rowIndex, "Подтверждён")
+  await updateEmployerFields(token, { status: "Подтверждён" })
   revalidatePath("/editor")
 }
 
-export async function rejectEmployer(rowIndex: number): Promise<void> {
-  const employers = await getEmployers()
-  const existing = employers.find((e) => e.rowIndex === rowIndex)
+export async function rejectEmployer(token: string): Promise<void> {
+  const existing = await getEmployerByToken(token)
   if (existing?.status === "Подтверждён") {
     await removeEmployerFromSendPulse(existing)
   }
-  await updateEmployerStatus(rowIndex, "Отклонён")
+  await updateEmployerFields(token, { status: "Отклонён" })
   revalidatePath("/editor")
   revalidatePath("/editor/employers")
 }
 
-export async function deleteEmployer(rowIndex: number): Promise<void> {
-  const employers = await getEmployers()
-  const existing = employers.find((e) => e.rowIndex === rowIndex)
+export async function deleteEmployer(token: string): Promise<void> {
+  const existing = await getEmployerByToken(token)
   if (existing?.status === "Подтверждён") {
     await removeEmployerFromSendPulse(existing)
   }
-  await deleteEmployerRow(rowIndex)
+  await deleteEmployerRecord(token)
   revalidatePath("/editor")
   revalidatePath("/editor/employers")
 }

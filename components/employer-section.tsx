@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react"
 import { CheckCircle2, XCircle, Ban, Trash2, Building2, Pencil } from "lucide-react"
 import { confirmEmployer, rejectEmployer, deleteEmployer } from "@/app/actions"
 import { EmployerEditModal } from "@/components/employer-edit-modal"
-import type { Employer, EmployerStatus } from "@/lib/sheets"
+import type { Employer, EmployerStatus } from "@/lib/db/employers"
 
 const SELECT_CLASS =
   "rounded-md border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
@@ -89,7 +89,7 @@ export function EmployerSection({ employers, streams }: { employers: Employer[];
         ) : (
           <div className="divide-y">
             {filtered.map((e) => (
-              <EmployerRow key={e.rowIndex} employer={e} streams={streams} />
+              <EmployerRow key={e.token} employer={e} streams={streams} />
             ))}
           </div>
         )}
@@ -109,7 +109,7 @@ function EmployerRow({ employer, streams }: { employer: Employer; streams: strin
     setError(null)
     startTransition(async () => {
       try {
-        await confirmEmployer(employer.rowIndex, employer)
+        await confirmEmployer(employer.token, employer)
         setLocalStatus("confirmed")
       } catch (err) {
         setError(err instanceof Error ? err.message : "Неизвестная ошибка")
@@ -121,7 +121,7 @@ function EmployerRow({ employer, streams }: { employer: Employer; streams: strin
     setError(null)
     startTransition(async () => {
       try {
-        await rejectEmployer(employer.rowIndex)
+        await rejectEmployer(employer.token)
         setLocalStatus(result)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Неизвестная ошибка")
@@ -133,7 +133,7 @@ function EmployerRow({ employer, streams }: { employer: Employer; streams: strin
     setError(null)
     startTransition(async () => {
       try {
-        await deleteEmployer(employer.rowIndex)
+        await deleteEmployer(employer.token)
         setLocalStatus("deleted")
         setConfirmingDelete(false)
       } catch (err) {

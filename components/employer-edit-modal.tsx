@@ -11,7 +11,7 @@ import {
   ADDITIONAL_COUNTRIES,
   ANY_COUNTRY,
 } from "@/components/employer-registration-modal"
-import type { Employer } from "@/lib/sheets"
+import type { Employer } from "@/lib/db/employers"
 
 type ContactMethod = EmployerData["primaryContact"]
 
@@ -104,7 +104,7 @@ export function EmployerEditModal({
     setStatus("submitting")
     setErrorMsg("")
     try {
-      await updateEmployer(employer.rowIndex, {
+      await updateEmployer(employer.token, {
         name,
         company,
         email,
