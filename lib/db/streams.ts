@@ -26,6 +26,12 @@ export async function getStreamsDetailed(): Promise<StreamRecord[]> {
   }
 }
 
+export async function getStreamIdByName(name: string): Promise<number | null> {
+  if (!name) return null
+  const rows = await db.select({ id: streams.id }).from(streams).where(eq(streams.name, name)).limit(1)
+  return rows[0]?.id ?? null
+}
+
 export async function updateStreamRecord(
   id: number,
   data: { name: string; type: string; description: string },
