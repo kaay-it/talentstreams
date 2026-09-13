@@ -1106,47 +1106,6 @@ export function isSheetsConfigured(): boolean {
   }
 }
 
-// ── Profile column migration ──────────────────────────────────────────────────
-
-const EMPLOYER_EXTRA_COLUMNS = ["Country", "Additional Countries"]
-
-export async function ensureEmployerColumns(): Promise<{ added: string[] }> {
-  const { email, privateKey, sheetId } = getEnv()
-  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
-
-  const res = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Employers'!A1:Z1")}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  )
-  if (!res.ok) throw new Error(`Failed to read Employers header row (${res.status}): ${await res.text()}`)
-
-  const data = (await res.json()) as { values?: string[][] }
-  const currentHeaders = (data.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
-
-  const missing = EMPLOYER_EXTRA_COLUMNS.filter(
-    (col) => !currentHeaders.includes(col.toLowerCase()),
-  )
-  if (!missing.length) return { added: [] }
-
-  const startIdx = currentHeaders.length + 1
-  const endIdx = startIdx + missing.length - 1
-  const range = `'Employers'!${colLetter(startIdx)}1:${colLetter(endIdx)}1`
-
-  const updateRes = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
-    {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ values: [missing] }),
-    },
-  )
-  if (!updateRes.ok) throw new Error(`Failed to add employer columns (${updateRes.status}): ${await updateRes.text()}`)
-
-  return { added: missing }
-}
-
-const DISTRIBUTION_COLUMNS = ["Level", "Industry", "Function", "Country Primary", "Country Desired", "Summary", "Excluded Companies", "Excluded Industries"]
-
 function colLetter(n: number): string {
   let s = ""
   while (n > 0) {
@@ -1157,42 +1116,3 @@ function colLetter(n: number): string {
   return s
 }
 
-/**
- * Reads the header row of the main profiles sheet and appends any missing
- * distribution-tag columns (Level, Industry, Function, Country Primary,
- * Country Desired) after the last existing column.
- */
-export async function ensureProfileColumns(): Promise<{ added: string[] }> {
-  const { email, privateKey, sheetId } = getEnv()
-  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
-
-  const res = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("A1:AZ1")}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  )
-  if (!res.ok) throw new Error(`Failed to read profile header row (${res.status}): ${await res.text()}`)
-
-  const data = (await res.json()) as { values?: string[][] }
-  const currentHeaders = (data.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
-
-  const missing = DISTRIBUTION_COLUMNS.filter(
-    (col) => !currentHeaders.includes(col.toLowerCase()),
-  )
-  if (!missing.length) return { added: [] }
-
-  const startIdx = currentHeaders.length + 1
-  const endIdx = startIdx + missing.length - 1
-  const range = `${colLetter(startIdx)}1:${colLetter(endIdx)}1`
-
-  const updateRes = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
-    {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ values: [missing] }),
-    },
-  )
-  if (!updateRes.ok) throw new Error(`Failed to add columns (${updateRes.status}): ${await updateRes.text()}`)
-
-  return { added: missing }
-}

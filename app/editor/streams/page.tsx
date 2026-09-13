@@ -24,7 +24,7 @@ export default async function StreamsPage({
   )
 
   return (
-    <div className="px-6 py-8 max-w-4xl">
+    <div className="px-6 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Стримы</h1>
         <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">
