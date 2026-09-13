@@ -23,7 +23,7 @@ participant "TalentStreams\nWeb App" as app
 participant "Neon · streams"        as neonStreams  #d4f0d4
 participant "Sheets · Candidates"   as sh_cands    #d0e8ff
 participant "Sheets · Mailing lists" as sh_mail    #d0e8ff
-participant "Sheets · Employers"    as sh_emp      #d0e8ff
+participant "Neon · employers"      as sh_emp      #d4f0d4
 participant "Vercel Blob\n(private)" as blob       #fff3cd
 participant "Neon · contactRequests" as neonDb     #d4f0d4
 participant "Neon · candidateResumes" as neonResumes #d4f0d4
@@ -252,10 +252,10 @@ app --> editor : Кандидат в статусе «На проверке» �
 editor -> app : Нажимает Pencil-кнопку в строке работодателя\n(доступна для всех статусов)
 app --> editor : EmployerEditModal — форма как EmployerRegistrationModal,\nпредзаполнена (имя, компания, email, телефон, способ связи,\nTelegram/LinkedIn, стримы, страна, доп. страны), без чекбокса согласия
 
-editor -> app : updateEmployer(rowIndex, { name, company, email, phone,\n  primaryContact, telegram, linkedin, streams,\n  country, additionalCountries })
-app -> sh_emp : getEmployers() → find(rowIndex)\n(старые email/стримы/token/status до записи)
+editor -> app : updateEmployer(token, { name, company, email, phone,\n  primaryContact, telegram, linkedin, streams,\n  country, additionalCountries })
+app -> sh_emp : getEmployerByToken(token)\n(старые email/стримы/status до записи; прямой WHERE, TASK-DB-3)
 sh_emp --> app : existing
-app -> sh_emp : updateEmployerFields(rowIndex, data)\n(параллельные PUT по колонкам 'Employers'!…)
+app -> sh_emp : updateEmployerFields(token, data)\nUPDATE employers SET ... WHERE token = ...
 sh_emp --> app : OK
 
 alt existing.status == "Подтверждён"
@@ -277,16 +277,18 @@ app --> employer : Форма с выбором стримов
 
 employer -> app : Заполняет форму\n{ имя, компания, email, телефон,\n  способ связи, Telegram, LinkedIn,\n  streams: ["Finance"] }
 
-app -> sh_emp : appendEmployerRow({ ID: uuid, …, Status: "На проверке" })
+app -> sh_emp : createEmployer({ token: uuid, …, status: "На проверке" })\nINSERT INTO employers (TASK-DB-3 — раньше appendEmployerRow в Sheets)
 sh_emp --> app : OK
 
 app --> employer : «Заявка отправлена — ожидайте подтверждения»
 
 note over sh_emp
-  Лист «Employers»:
+  Таблица employers (Neon, TASK-DB-3):
   ───────────────────────────────────────────────────────────────
-  ID (UUID)   | Timestamp | Name    | Company | … | Streams  | Status
-  8f3a1c…     | 21.07.26  | Alisher | Uzum    | … | Finance  | На проверке
+  token (UUID) | timestamp | name    | company | … | streams   | status
+  8f3a1c…      | 21.07.26  | Alisher | Uzum    | … | {Finance} | На проверке
+  streams/additionalCountries — нативные Postgres text[], не строка через запятую.
+  Лист «Employers» в Google Sheets остаётся как архив, приложение его больше не читает.
 end note
 
 == 3а. Редактор подтверждает работодателя ==
@@ -298,12 +300,12 @@ app -> neonStreams : getStreams() — опции фильтра "Стрим"
 neonStreams --> app : ["Finance", "Tech", …]
 app --> editor : Раздел «Работодатели» (TASK-30): панель фильтров сверху\n(поиск, статус — по умолчанию «Все статусы», страна, стрим),\nплоский список вместо коллапсируемых секций
 
-editor -> app : confirmEmployer(rowIndex, employerData)
+editor -> app : confirmEmployer(token, employerData)
 app -> sp_master : POST /addressbooks/MASTER/emails\n{ email, variables: { Имя, phone, employer_token: UUID, … } }
 sp_master --> app : { "result": true }
 app -> sp_stream : POST /addressbooks/FINANCE_BOOK/emails\n{ email, variables: { Имя, phone, employer_token: UUID, … } }
 sp_stream --> app : { "result": true }
-app -> sh_emp : updateEmployerStatus(rowIndex, "Подтверждён")
+app -> sh_emp : updateEmployerFields(token, { status: "Подтверждён" })\nUPDATE employers SET status = ... WHERE token = ...
 sh_emp --> app : OK
 app --> editor : Работодатель перемещён в группу «Подтверждён»
 
@@ -322,34 +324,34 @@ note over editor, app
   без браузерного window.confirm().
 end note
 
-editor -> app : «Отклонить» (На проверке) или «Отключить» (Подтверждён)\n— оба вызывают один и тот же rejectEmployer(rowIndex)
-app -> sh_emp : getEmployers() → find(rowIndex)
+editor -> app : «Отклонить» (На проверке) или «Отключить» (Подтверждён)\n— оба вызывают один и тот же rejectEmployer(token)
+app -> sh_emp : getEmployerByToken(token)
 sh_emp --> app : existing
 alt existing.status == "Подтверждён"
   app -> sp_master : removeEmployerFromSendPulse(existing)\nDELETE /addressbooks/{id}/emails — из мастер-книги\nи всех книг текущих стримов, без исключений
   sp_master --> app : OK
 end
-app -> sh_emp : updateEmployerStatus(rowIndex, "Отклонён")
+app -> sh_emp : updateEmployerFields(token, { status: "Отклонён" })
 sh_emp --> app : OK
 app --> editor : Статус «Отклонён»\n(если был подтверждён — ещё и отписан от SendPulse)
 
 editor -> app : Корзина в строке → «Да, удалить»\n(после отдельного подтверждения в UI)
-app -> app : deleteEmployer(rowIndex)
-app -> sh_emp : getEmployers() → find(rowIndex)
+app -> app : deleteEmployer(token)
+app -> sh_emp : getEmployerByToken(token)
 sh_emp --> app : existing
 alt existing.status == "Подтверждён"
   app -> sp_master : removeEmployerFromSendPulse(existing)
   sp_master --> app : OK
 end
-app -> sh_emp : deleteEmployerRow(rowIndex)\nbatchUpdate deleteDimension(ROWS, rowIndex-1..rowIndex)\n(физическое удаление строки, не просто очистка)
+app -> sh_emp : deleteEmployer(token)\nDELETE FROM employers WHERE token = ...\n(TASK-DB-3 — раньше deleteEmployerRow с batchUpdate/deleteDimension в Sheets)
 sh_emp --> app : OK
 app --> editor : Строка удалена из таблицы
 
 editor -> app : «Подтвердить» у отклонённого (status == "Отклонён")\n— та же кнопка/экшен, что и первое подтверждение заявки
-app -> app : confirmEmployer(rowIndex, employerData)
+app -> app : confirmEmployer(token, employerData)
 app -> sp_master : syncEmployerToSendPulse(employerData)\nPOST /addressbooks/MASTER/emails + /addressbooks/{стрим}/emails\n(безусловно — не важно, каким был статус до этого)
 sp_master --> app : { "result": true }
-app -> sh_emp : updateEmployerStatus(rowIndex, "Подтверждён")
+app -> sh_emp : updateEmployerFields(token, { status: "Подтверждён" })
 sh_emp --> app : OK
 app --> editor : Работодатель снова «Подтверждён», возвращён в рассылку
 

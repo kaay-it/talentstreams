@@ -16,6 +16,22 @@ export const candidateResumes = pgTable("candidateResumes", {
   createdAt:   timestamp("createdAt").defaultNow().notNull(),
 })
 
+export const employers = pgTable("employers", {
+  token:               text("token").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name:                text("name").notNull().default(""),
+  company:             text("company").notNull().default(""),
+  email:               text("email").notNull().default(""),
+  phone:               text("phone").notNull().default(""),
+  primaryContact:      text("primaryContact").notNull().default(""),
+  telegram:            text("telegram").notNull().default(""),
+  linkedin:            text("linkedin").notNull().default(""),
+  streams:             text("streams").array().notNull().default([]),
+  status:              text("status").notNull().default("На проверке"),
+  country:             text("country").notNull().default(""),
+  additionalCountries: text("additionalCountries").array().notNull().default([]),
+  timestamp:           timestamp("timestamp").defaultNow().notNull(),
+})
+
 export const contactRequests = pgTable("contactRequests", {
   id:            text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   timestamp:     timestamp("timestamp").defaultNow().notNull(),

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import { Info } from "lucide-react"
-import { getEmployers } from "@/lib/sheets"
+import { getEmployers } from "@/lib/db/employers"
 import { getStreams } from "@/lib/db/streams"
 import { EmployerSection } from "@/components/employer-section"
 

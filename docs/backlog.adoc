@@ -35,7 +35,7 @@ NOTE: ℹ️ Документ разделён на две части: <<Вып�
 | Реализован: curl-triggered публикация с авторизацией по токену
 
 | Регистрация работодателя
-| Реализована: форма → Google Sheets со статусом «На проверке». В SendPulse не добавляется — только после подтверждения редактором.
+| Реализована: форма → Neon со статусом «На проверке» (TASK-DB-3 ✅ — раньше писала в Google Sheets). В SendPulse не добавляется — только после подтверждения редактором.
 
 | Подтверждение работодателя
 | Реализовано: в `/editor` редактор подтверждает или отклоняет заявку. При подтверждении — добавление в SendPulse (мастер-книга + книги выбранных стримов).
@@ -44,7 +44,7 @@ NOTE: ℹ️ Документ разделён на две части: <<Вып�
 | Реализована: форма → Google Sheets (SendPulse не используется). Резюме: загрузка файла (PDF, DOC, DOCX, RTF, ODT, до 5 МБ) в Vercel Blob через `POST /api/upload` или ввод ссылки вручную — альтернативы. Доступ к файлу через прокси-роут `GET /api/resume` с авторизацией по Bearer-токену. URL резюме в Sheets — ссылка на прокси (`APP_URL/api/resume?url=...`), всегда только последняя версия. Полная история версий резюме (файлы и ссылки, с датами) хранится в Neon и видна в редакторе (TASK-32 ✅) — старые blob-файлы при замене больше не теряются и не остаются мусором без ссылок.
 
 | Google Sheets интеграция
-| Реализована: чтение профилей, подборок, стримов, работодателей; запись регистраций; авто-миграция колонок кандидатов (`ensureCandidateColumns`, вызывается внутри `appendCandidateRow` при каждой записи — не разовая ручная операция). `GOOGLE_SERVICE_ACCOUNT_JSON` парсится устойчиво к сырым переносам строк в `private_key` (`safeJsonParse()` — типичный артефакт `vercel env pull`); ошибки конфигурации теперь конкретные (что именно не задано/невалидно), а не общая фраза.
+| Реализована: чтение профилей, подборок, стримов (стримы и работодатели уже перенесены в Neon — TASK-DB-8, TASK-DB-3); запись регистраций кандидатов; авто-миграция колонок кандидатов (`ensureCandidateColumns`, вызывается внутри `appendCandidateRow` при каждой записи — не разовая ручная операция). `GOOGLE_SERVICE_ACCOUNT_JSON` парсится устойчиво к сырым переносам строк в `private_key` (`safeJsonParse()` — типичный артефакт `vercel env pull`); ошибки конфигурации теперь конкретные (что именно не задано/невалидно), а не общая фраза.
 
 | Robots / noindex
 | Реализовано: `app/robots.ts` (Disallow: /list/, /profile/), meta robots noindex на страницах подборки и профиля
@@ -555,6 +555,20 @@ NOTE: ℹ️ Фильтры сознательно не персистятся �
 
 ---
 
+==== ✅ TASK-DB-3: Employers → Neon
+
+*Почему первый кандидат на перенос:* блокер («сначала полный UI-редактор, потом перенос хранения») снят полностью — `EmployerEditModal` (TASK-31) покрывает все поля, а весь жизненный цикл статуса (Подтвердить/Отключить/Отклонить/Удалить/Подтвердить заново) теперь тоже целиком через UI (TASK-31-доп./TASK-33-парность) — прямого захода в Google Sheets не требуется ни для одного поля. У Candidates та же миграция ещё преждевременна (несколько полей до сих пор правятся только в Sheets), у Mailing Lists — упирается в ещё не построенный конструктор выпусков (TASK-29).
+
+* `lib/db/schema.ts` — новая таблица `employers` (`token` text PK, `$defaultFn(() => crypto.randomUUID())` — тот же UUID, что раньше был колонкой `ID`, он же `employer_token` в SendPulse и `?e=` в публичной ссылке; `streams`/`additionalCountries` — нативные Postgres `text[]`, а не comma-joined строка, как было в Sheets, — реальное упрощение: убирает `.join(", ")`/`parseMultiValue()` на всех вызывающих сторонах). Миграция `lib/db/migrations/0003_redundant_chat.sql`, применена к продовой Neon.
+* `lib/db/employers.ts` (новый файл) — тот же паттерн, что `lib/db/streams.ts`/`contact-requests.ts` (`import "server-only"`, плоские async-функции, никаких классов): `getEmployers()`, `getEmployerByToken(token)` (теперь честный `WHERE token = ...` вместо «выгрузить всех и найти в JS», как было раньше), `getEmployersByStream(stream)` (перенесена 1-в-1 для паритета — вызывающих в приложении сейчас нет), `createEmployer(data)`, `updateEmployerFields(token, data)` (объединяет прежние `updateEmployerStatus`+`updateEmployerFields` в одну функцию — в Sheets они были раздельными только из-за ячеечной записи, в Drizzle любое обновление — один `db.update(...).set(data)` независимо от набора полей), `deleteEmployer(token)`, `filterCandidatesForEmployer()` (чистая функция без I/O, перенесена вместе с типом `Employer`, который теперь ей и принадлежит).
+* Идентификатор везде сменился с `rowIndex` (позиция строки в таблице — только в Sheets имела смысл) на `token` (тот же UUID, что уже был единственным стабильным ключом во всём приложении — просто теперь используется явно, а не как побочное поле).
+* Бэкафилл (`scripts/backfill-employers-to-neon.ts`, одноразовый, удалён после использования — тот же паттерн, что `scripts/backfill-resume-history.ts` из TASK-32): пока старый Sheets-код ещё был на месте, прочитал все 14 строк из листа «Employers» и вставил в Neon с сохранением исходных `token`/`timestamp`/`status`. Лист «Employers» в Google Sheets **не удалён** — оставлен как архив, аналогично тому, как TASK-DB-2 оставил архивным лист «Contact Requests» после переноса в Neon.
+* Переключены на новый модуль: `app/actions.ts` (`registerEmployer`/`updateEmployer`/`confirmEmployer`/`rejectEmployer`/`deleteEmployer` — параметр `rowIndex` → `token`; `syncEmployerToSendPulse`/`removeEmployerFromSendPulse` изменений не потребовали — они и раньше принимали только простые объекты `{name, email, ...}`, полностью независимые от способа хранения), `app/editor/employers/page.tsx`, `app/list/[listId]/page.tsx` (публичная персонализация по `?e=` токену — `getEmployerByToken`/`filterCandidatesForEmployer`, без изменения логики), `components/employer-section.tsx`, `components/employer-edit-modal.tsx` (только импорт типа и `employer.rowIndex` → `employer.token` в вызовах действий и React `key`).
+* Удалён весь Sheets-код по работодателям из `lib/sheets.ts`: `Employer`, `EmployerStatus`, `parseEmployerRows`, `getEmployers`, `getEmployerByToken`, `getEmployersByStream`, `appendEmployerRow`, `updateEmployerStatus`, `updateEmployerFields` (employer-версия), `deleteEmployerRow`, `EMPLOYER_FIELD_HEADER_ALIASES`, `EMPLOYERS_HEADERS`, `filterCandidatesForEmployer` (перенесена) — подтверждено `grep`, что вне `lib/sheets.ts` ничего из этого больше не импортируется.
+* Проверено вручную полным жизненным циклом на реальном тестовом работодателе через настоящий UI (регистрация → Подтвердить → редактирование через карандаш → Отключить → Подтвердить заново → Удалить), включая проверку публичной ссылки `/list/[listId]?e=<token>` для уже перенесённого работодателя — тестовые данные полностью удалены после проверки (0 остатков в Neon).
+
+---
+
 == Активные задачи (требуется сделать)
 
 === 🔴 Критично — гео-сегментация рассылки
@@ -774,12 +788,6 @@ NOTE: ℹ️ Задержка записи в Global Config — до 10 секу
 === Отложено — миграция оставшихся таблиц в Neon
 
 NOTE: ℹ️ Полный анализ, стоимость и схема данных — в разделе <<Приложение: переход на реляционную СУБД>>. Ниже — только статус по оставшимся таблицам.
-
-==== TASK-DB-3 (отложено): Employers → Neon
-
-Основной блокер снят частично: редактор работодателя в UI теперь есть (`EmployerEditModal`, TASK-31 ✅) — имя, компания, email, телефон, способ связи, Telegram/LinkedIn, стримы, страна и доп. страны редактируются через форму, без прямого доступа к Sheets. Статус (Подтверждён/Отклонён) правится отдельно через Подтвердить/Отклонить, как и раньше. Миграция хранения в Neon сама по себе ещё не сделана — данные физически остаются в Google Sheets, `EmployerEditModal` пишет туда же через `updateEmployerFields()`.
-
----
 
 ==== TASK-DB-4 (отложено): Candidates → Neon
 
@@ -1009,11 +1017,11 @@ contact_requests -- запросы на контакт
 
 | Contact Requests | ✅ Только оно | ❌ Никогда | ✅ Перенесено в Neon (TASK-DB-2)
 | Streams | ❌ | ✅ | ✅ Перенесено в Neon + UI готов (TASK-DB-8)
-| Employers | ✅ Форма + `EmployerEditModal` (TASK-31) | ⚠ Статус и поля вне формы редактирования | Остаётся в Sheets — TASK-DB-3, отложено (редактор в UI уже есть, миграция хранения — нет)
+| Employers | ✅ Полностью через UI | ❌ Никогда (лист остаётся архивом) | ✅ Перенесено в Neon (TASK-DB-3)
 | Candidates | ✅ Регистрация + `CandidateEditModal` (TASK-23, расширена) | ⚠ Только поля вне формы редактирования (title/bio/industry/func/summary/excluded*) | Остаётся в Sheets — TASK-DB-4, отложено (частичный редактор в UI уже есть, миграция хранения — нет)
 | Mailing Lists | ❌ | ✅ Полностью | Остаётся в Sheets — TASK-DB-5, отложено (нужен конструктор выпусков в UI)
 |===
 
 Первый шаг — Contact Requests и Streams — уже сделаны: это единственные таблицы, которые редактор никогда (Contact Requests) или крайне редко и только через UI (Streams) не трогает напрямую в Sheets. Остальные таблицы остаются в Sheets до появления соответствующего UI в приложении — статус и детали см. <<Отложено — миграция оставшихся таблиц в Neon>>.
 
-NOTE: ℹ️ `lib/sendpulse.ts` миграции не требует. Схема Drizzle расширяется по мере переноса таблиц — новые таблицы добавляются в `lib/db/schema.ts` в TASK-DB-3/4/5.
+NOTE: ℹ️ `lib/sendpulse.ts` миграции не требует. Схема Drizzle расширяется по мере переноса таблиц — новые таблицы добавляются в `lib/db/schema.ts` (`employers` добавлена в TASK-DB-3 ✅; ещё предстоят TASK-DB-4/5).
