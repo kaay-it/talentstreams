@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation"
-import { AddColumnsButton } from "@/components/add-columns-button"
 
 export const dynamic = "force-dynamic"
 
@@ -16,24 +15,12 @@ export default async function SettingsPage({
   }
 
   return (
-    <div className="px-6 py-8 max-w-3xl">
+    <div className="px-6 py-8">
       <div className="mb-6">
         <h1 className="text-lg font-semibold">Настройки</h1>
       </div>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Google Sheets</h2>
-        <div className="rounded-xl border bg-card px-5 py-4">
-          <p className="text-sm font-medium mb-1">Колонки Google Sheets</p>
-          <p className="text-sm text-muted-foreground mb-4">
-            Добавляет недостающие колонки в листы кандидатов и работодателей:
-            профили — Level, Industry, Function, Country Primary, Country Desired, Summary, Excluded Companies, Excluded Industries;
-            работодатели — Country, Additional Countries.
-            Операция идемпотентна — уже существующие колонки не затрагиваются.
-          </p>
-          <AddColumnsButton />
-        </div>
-      </section>
+      <p className="text-sm text-muted-foreground">Пока здесь нечего настраивать.</p>
     </div>
   )
 }

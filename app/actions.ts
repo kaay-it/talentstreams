@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
-import { appendEmployerRow, appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, ensureProfileColumns, ensureEmployerColumns, ensureCandidateColumns, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, deleteEmployerRow, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
+import { appendEmployerRow, appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateEmployerStatus, updateCandidateStatus, updateCandidateFields, updateEmployerFields, deleteEmployerRow, getEmployers, getEmployerByToken, type Employer, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
@@ -113,19 +113,6 @@ async function removeEmployerFromSendPulse(employer: { email: string; streams: s
       if (id) await removeFromAddressBook(employer.email, id, token)
     }),
   )
-}
-
-export async function addProfileColumns(): Promise<{ added: string[] }> {
-  return ensureProfileColumns()
-}
-
-export async function addAllColumns(): Promise<{ added: string[] }> {
-  const [profiles, employers, candidates] = await Promise.all([
-    ensureProfileColumns(),
-    ensureEmployerColumns(),
-    ensureCandidateColumns(),
-  ])
-  return { added: [...profiles.added, ...employers.added, ...candidates.added] }
 }
 
 export async function approveCandidate(rowIndex: number): Promise<void> {

@@ -23,7 +23,7 @@ export default async function RequestsPage({
   const newCount = requests.filter((r) => r.status === "Новый запрос").length
 
   return (
-    <div className="px-6 py-8 max-w-5xl">
+    <div className="px-6 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Запросы на контакт</h1>
         <div className="flex items-center gap-2">
@@ -42,7 +42,7 @@ export default async function RequestsPage({
         <Info className="mt-0.5 size-4 shrink-0" />
         <p>
           Запросы поступают когда работодатель нажимает «Хочу связаться» на странице подборки.
-          Смените статус через выпадающий список — изменение сохраняется в Google Sheets.
+          Смените статус через выпадающий список — изменение сохраняется в базе данных.
         </p>
       </div>
 

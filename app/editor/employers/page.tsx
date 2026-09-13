@@ -21,7 +21,7 @@ export default async function EmployersPage({
   const [employers, streams] = await Promise.all([getEmployers(), getStreams()])
 
   return (
-    <div className="px-6 py-8 max-w-3xl">
+    <div className="px-6 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Работодатели</h1>
         <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">
