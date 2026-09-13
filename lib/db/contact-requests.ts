@@ -56,7 +56,7 @@ export async function getContactRequests(): Promise<ContactRequest[]> {
       employerEmail: employers.email,
     })
     .from(contactRequests)
-    .leftJoin(employers, eq(contactRequests.employerToken, employers.token))
+    .innerJoin(employers, eq(contactRequests.employerToken, employers.token))
     .leftJoin(streams, eq(contactRequests.streamId, streams.id))
     .orderBy(desc(contactRequests.timestamp))
 
@@ -66,10 +66,10 @@ export async function getContactRequests(): Promise<ContactRequest[]> {
     listId: r.listId,
     stream: r.streamName ?? "",
     candidateId: r.candidateId,
-    employerToken: r.employerToken ?? "",
-    employerName: r.employerName ?? "",
-    company: r.employerCompany ?? "",
-    employerEmail: r.employerEmail ?? "",
+    employerToken: r.employerToken,
+    employerName: r.employerName,
+    company: r.employerCompany,
+    employerEmail: r.employerEmail,
     status: r.status as ContactRequestStatus,
   }))
 }

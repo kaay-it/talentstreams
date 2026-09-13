@@ -38,6 +38,6 @@ export const contactRequests = pgTable("contactRequests", {
   listId:        text("listId").notNull().default(""),
   streamId:      integer("streamId").references(() => streams.id, { onDelete: "set null" }),
   candidateId:   text("candidateId").notNull().default(""),
-  employerToken: text("employerToken").references(() => employers.token, { onDelete: "set null" }),
+  employerToken: text("employerToken").notNull().references(() => employers.token, { onDelete: "cascade" }),
   status:        text("status").notNull().default("Новый запрос"),
 })
