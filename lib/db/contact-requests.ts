@@ -1,7 +1,7 @@
 import "server-only"
 import { desc, eq } from "drizzle-orm"
 import { db } from "./index"
-import { contactRequests } from "./schema"
+import { contactRequests, employers, streams } from "./schema"
 
 export type ContactRequestStatus =
   | "Новый запрос"
@@ -29,39 +29,46 @@ export type ContactRequest = {
 
 export async function appendContactRequest(data: {
   listId: string
-  stream: string
+  streamId: number | null
   candidateId: string
   employerToken: string
-  employerName: string
-  employerCompany: string
-  employerEmail: string
 }): Promise<void> {
   await db.insert(contactRequests).values({
     listId: data.listId,
-    stream: data.stream,
+    streamId: data.streamId,
     candidateId: data.candidateId,
     employerToken: data.employerToken,
-    employerName: data.employerName,
-    company: data.employerCompany,
-    employerEmail: data.employerEmail,
   })
 }
 
 export async function getContactRequests(): Promise<ContactRequest[]> {
   const rows = await db
-    .select()
+    .select({
+      id: contactRequests.id,
+      timestamp: contactRequests.timestamp,
+      listId: contactRequests.listId,
+      candidateId: contactRequests.candidateId,
+      employerToken: contactRequests.employerToken,
+      status: contactRequests.status,
+      streamName: streams.name,
+      employerName: employers.name,
+      employerCompany: employers.company,
+      employerEmail: employers.email,
+    })
     .from(contactRequests)
+    .innerJoin(employers, eq(contactRequests.employerToken, employers.token))
+    .leftJoin(streams, eq(contactRequests.streamId, streams.id))
     .orderBy(desc(contactRequests.timestamp))
 
   return rows.map((r) => ({
     id: r.id,
     timestamp: r.timestamp.toISOString(),
     listId: r.listId,
-    stream: r.stream,
+    stream: r.streamName ?? "",
     candidateId: r.candidateId,
     employerToken: r.employerToken,
     employerName: r.employerName,
-    company: r.company,
+    company: r.employerCompany,
     employerEmail: r.employerEmail,
     status: r.status as ContactRequestStatus,
   }))

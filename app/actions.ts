@@ -6,7 +6,7 @@ import { appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
-import { updateStreamRecord, createStreamRecord, deleteStreamRecord } from "@/lib/db/streams"
+import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
@@ -620,15 +620,13 @@ export async function submitGeneralInquiry(listId: string, employerToken: string
 
   const lists = await getMailingLists()
   const list = lists.find((l) => l.listId === listId)
+  const streamId = await getStreamIdByName(list?.stream ?? "")
 
   await appendContactRequest({
     listId,
-    stream: list?.stream ?? "",
+    streamId,
     candidateId: "",
     employerToken,
-    employerName: employer.name,
-    employerCompany: employer.company,
-    employerEmail: employer.email,
   })
 }
 
@@ -644,15 +642,13 @@ export async function submitContactRequest(
 
   const lists = await getMailingLists()
   const list = lists.find((l) => l.listId === listId)
+  const streamId = await getStreamIdByName(list?.stream ?? "")
 
   await appendContactRequest({
     listId,
-    stream: list?.stream ?? "",
+    streamId,
     candidateId,
     employerToken,
-    employerName: employer.name,
-    employerCompany: employer.company,
-    employerEmail: employer.email,
   })
 }
 
