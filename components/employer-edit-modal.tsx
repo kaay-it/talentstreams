@@ -104,7 +104,7 @@ export function EmployerEditModal({
     setStatus("submitting")
     setErrorMsg("")
     try {
-      await updateEmployer(employer.token, {
+      const result = await updateEmployer(employer.token, {
         name,
         company,
         email,
@@ -116,10 +116,15 @@ export function EmployerEditModal({
         country,
         additionalCountries,
       })
-      setStatus("success")
-    } catch (err) {
+      if (result.ok) {
+        setStatus("success")
+      } else {
+        setStatus("error")
+        setErrorMsg(result.error)
+      }
+    } catch {
       setStatus("error")
-      setErrorMsg(err instanceof Error ? err.message : "Не удалось сохранить изменения")
+      setErrorMsg("Не удалось сохранить изменения")
     }
   }
 

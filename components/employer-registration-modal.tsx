@@ -140,11 +140,16 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     e.preventDefault()
     setStatus("submitting")
     try {
-      await registerEmployer({ name, company, email, phone, primaryContact, telegram, linkedin, streams: selectedStreams, country, additionalCountries })
-      setStatus("success")
-    } catch (err) {
+      const result = await registerEmployer({ name, company, email, phone, primaryContact, telegram, linkedin, streams: selectedStreams, country, additionalCountries })
+      if (result.ok) {
+        setStatus("success")
+      } else {
+        setStatus("error")
+        setErrorMsg(result.error)
+      }
+    } catch {
       setStatus("error")
-      setErrorMsg(err instanceof Error ? err.message : "Не удалось отправить заявку. Попробуйте позже.")
+      setErrorMsg("Не удалось отправить заявку. Попробуйте позже.")
     }
   }
 

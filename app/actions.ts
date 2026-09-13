@@ -475,15 +475,20 @@ export async function deleteCandidate(rowIndex: number, candidateId: string): Pr
   revalidatePath("/editor/candidates")
 }
 
-export async function registerEmployer(data: EmployerData): Promise<void> {
-  if (!data.name.trim()) throw new Error("Укажите имя")
-  if (!data.email || !data.phone) throw new Error("Email и телефон обязательны")
-  if (!data.streams.length) throw new Error("Выберите хотя бы один стрим")
+export type RegisterEmployerResult = { ok: true } | { ok: false; error: string }
+
+/** Returns a result object instead of throwing: Next.js redacts thrown Error messages
+ * from Server Actions in production builds, so user-facing validation errors (as opposed
+ * to unexpected failures) must travel back as data, not as an exception. */
+export async function registerEmployer(data: EmployerData): Promise<RegisterEmployerResult> {
+  if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
+  if (!data.email || !data.phone) return { ok: false, error: "Email и телефон обязательны" }
+  if (!data.streams.length) return { ok: false, error: "Выберите хотя бы один стрим" }
   if (data.primaryContact === "telegram" && !data.telegram.trim()) {
-    throw new Error("Укажите Telegram-имя")
+    return { ok: false, error: "Укажите Telegram-имя" }
   }
   if (data.primaryContact === "linkedin" && !data.linkedin.trim()) {
-    throw new Error("Укажите LinkedIn-профиль")
+    return { ok: false, error: "Укажите LinkedIn-профиль" }
   }
 
   const existing = await getEmployers()
@@ -493,10 +498,10 @@ export async function registerEmployer(data: EmployerData): Promise<void> {
   const phoneNorm = digitsOnly(data.phone)
 
   if (active.some((e) => e.email.toLowerCase() === emailNorm)) {
-    throw new Error("Работодатель с таким email уже зарегистрирован")
+    return { ok: false, error: "Работодатель с таким email уже зарегистрирован" }
   }
   if (phoneNorm && active.some((e) => digitsOnly(e.phone) === phoneNorm)) {
-    throw new Error("Работодатель с таким номером телефона уже зарегистрирован")
+    return { ok: false, error: "Работодатель с таким номером телефона уже зарегистрирован" }
   }
 
   await createEmployer({
@@ -512,6 +517,7 @@ export async function registerEmployer(data: EmployerData): Promise<void> {
     country: data.country,
     additionalCountries: data.additionalCountries,
   })
+  return { ok: true }
 }
 
 export async function updateEmployer(
@@ -528,16 +534,16 @@ export async function updateEmployer(
     country: string
     additionalCountries: string[]
   },
-): Promise<void> {
-  if (!data.name.trim()) throw new Error("Укажите имя")
-  if (!data.email.trim()) throw new Error("Укажите email")
-  if (!data.phone.trim()) throw new Error("Укажите телефон")
-  if (!data.streams.length) throw new Error("Выберите хотя бы один стрим")
+): Promise<RegisterEmployerResult> {
+  if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
+  if (!data.email.trim()) return { ok: false, error: "Укажите email" }
+  if (!data.phone.trim()) return { ok: false, error: "Укажите телефон" }
+  if (!data.streams.length) return { ok: false, error: "Выберите хотя бы один стрим" }
   if (data.primaryContact === "telegram" && !data.telegram.trim()) {
-    throw new Error("Укажите Telegram-имя")
+    return { ok: false, error: "Укажите Telegram-имя" }
   }
   if (data.primaryContact === "linkedin" && !data.linkedin.trim()) {
-    throw new Error("Укажите LinkedIn-профиль")
+    return { ok: false, error: "Укажите LinkedIn-профиль" }
   }
 
   const existing = await getEmployerByToken(token)
@@ -572,6 +578,7 @@ export async function updateEmployer(
   }
 
   revalidatePath("/editor/employers")
+  return { ok: true }
 }
 
 export async function confirmEmployer(token: string, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "telegram" | "linkedin" | "primaryContact" | "streams">): Promise<void> {
