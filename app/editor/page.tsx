@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation"
-import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle } from "lucide-react"
+import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle, ExternalLink } from "lucide-react"
 import { getMailingLists } from "@/lib/sheets"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
@@ -98,17 +98,16 @@ export default async function ReleasesPage({
                           Отправлено
                         </span>
                       )}
-                    </div>
-                    <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
                       <a
                         href={`/list/${list.listId}${editorSecret ? `?secret=${editorSecret}` : ""}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="hover:text-foreground hover:underline"
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
                       >
-                        /list/{list.listId}
+                        <ExternalLink className="size-3" />
+                        Посмотреть рассылку {list.listId}
                       </a>
-                    </p>
+                    </div>
                   </div>
 
                   <PublishButton listId={list.listId} alreadySent={alreadySent} bookEmpty={bookEmpty} />
