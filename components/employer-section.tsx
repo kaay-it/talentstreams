@@ -1,9 +1,10 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, Ban, Trash2, Building2, Pencil } from "lucide-react"
+import { CheckCircle2, XCircle, Ban, Trash2, Building2, Pencil, Plus } from "lucide-react"
 import { confirmEmployer, rejectEmployer, deleteEmployer } from "@/app/actions"
 import { EmployerEditModal } from "@/components/employer-edit-modal"
+import { EmployerCreateModal } from "@/components/employer-create-modal"
 import type { Employer, EmployerStatus } from "@/lib/db/employers"
 
 const SELECT_CLASS =
@@ -27,6 +28,7 @@ export function EmployerSection({ employers, streams }: { employers: Employer[];
   const [status, setStatus] = useState<EmployerStatus | "">("")
   const [country, setCountry] = useState("")
   const [stream, setStream] = useState("")
+  const [creating, setCreating] = useState(false)
 
   const countries = useMemo(
     () => Array.from(new Set(employers.map((e) => e.country).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
@@ -46,10 +48,6 @@ export function EmployerSection({ employers, streams }: { employers: Employer[];
       return true
     })
   }, [employers, search, status, country, stream])
-
-  if (!employers.length) {
-    return <p className="text-sm text-muted-foreground">Заявок пока нет.</p>
-  }
 
   return (
     <div className="space-y-3">
@@ -78,13 +76,24 @@ export function EmployerSection({ employers, streams }: { employers: Employer[];
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        <span className="ml-auto text-xs text-muted-foreground shrink-0">
+        <span className="text-xs text-muted-foreground shrink-0">
           {filtered.length} {employerPlural(filtered.length)}
         </span>
+        <button
+          onClick={() => setCreating(true)}
+          className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          <Plus className="size-3.5" />
+          Добавить работодателя
+        </button>
       </div>
 
+      {creating && <EmployerCreateModal streams={streams} onClose={() => setCreating(false)} />}
+
       <div className="rounded-xl border bg-card overflow-hidden">
-        {filtered.length === 0 ? (
+        {employers.length === 0 ? (
+          <p className="px-5 py-8 text-center text-sm text-muted-foreground">Заявок пока нет.</p>
+        ) : filtered.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">Работодатели не найдены по заданным фильтрам.</p>
         ) : (
           <div className="divide-y">

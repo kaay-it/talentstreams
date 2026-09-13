@@ -517,6 +517,7 @@ export async function registerEmployer(data: EmployerData): Promise<RegisterEmpl
     country: data.country,
     additionalCountries: data.additionalCountries,
   })
+  revalidatePath("/editor/employers")
   return { ok: true }
 }
 
