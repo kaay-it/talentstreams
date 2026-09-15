@@ -5,6 +5,7 @@ import { CheckCircle2, XCircle, Ban, Trash2, FileText, Link as LinkIcon, Loader2
 import { approveCandidate, rejectCandidate, deleteCandidate, type ResumeVersion } from "@/app/actions"
 import { CandidateEditModal } from "@/components/candidate-edit-modal"
 import { CandidateCreateModal } from "@/components/candidate-create-modal"
+import { withDownloadFilename } from "@/lib/blob"
 import type { Candidate, CandidateStatus } from "@/lib/sheets"
 
 const SELECT_CLASS =
@@ -28,7 +29,7 @@ function ResumeChips({ items }: { items: ResumeVersion[] }) {
       {shown.map((v) => (
         <a
           key={v.id}
-          href={v.url}
+          href={v.kind === "file" ? withDownloadFilename(v.url, v.filename) : v.url}
           target="_blank"
           rel="noopener noreferrer"
           title={v.kind === "file" ? v.filename || "Файл" : v.url}

@@ -46,3 +46,16 @@ export function blobFilenameFromUrl(url: string): string {
   if (!parsed) return ""
   return decodeURIComponent(parsed.pathname.split("/").pop() ?? "")
 }
+
+/**
+ * Appends the human filename to an `/api/resume` proxy URL so the browser downloads/saves
+ * it under that name instead of the blob's own generated path (e.g. "1754460447259-a1b2c3d4.pdf").
+ * No-op for URLs that don't go through our proxy (external links candidates typed in).
+ */
+export function withDownloadFilename(url: string, filename: string): string {
+  if (!filename || resolveBlobUrl(url) === null) return url
+  const parsed = tryParseUrl(url)
+  if (!parsed || parsed.pathname !== "/api/resume") return url
+  parsed.searchParams.set("filename", filename)
+  return parsed.toString()
+}

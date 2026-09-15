@@ -5,6 +5,7 @@ import { createPortal } from "react-dom"
 import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Plus } from "lucide-react"
 import { updateCandidate, getCandidateResumeHistory, type ResumeVersion } from "@/app/actions"
 import { ADDITIONAL_COUNTRIES } from "@/components/employer-registration-modal"
+import { withDownloadFilename } from "@/lib/blob"
 import type { Candidate } from "@/lib/sheets"
 
 const inputCls =
@@ -44,7 +45,7 @@ function ResumeVersionList({ items }: { items: ResumeVersion[] }) {
             {new Date(v.createdAt).toLocaleDateString("ru-RU")}
           </span>
           <a
-            href={v.url}
+            href={v.kind === "file" ? withDownloadFilename(v.url, v.filename) : v.url}
             target="_blank"
             rel="noopener noreferrer"
             className="shrink-0 font-medium text-primary hover:underline"
