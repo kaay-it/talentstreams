@@ -50,7 +50,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         candidateModal = component "CandidateRegistrationModal" "Форма регистрации кандидата: имя, email, телефон, сопроводительное письмо. Резюме — загрузить файл (PDF/DOC/DOCX/RTF/ODT, до 5 МБ) или указать URL — альтернативные варианты. Загрузка файла происходит при сабмите формы через POST /api/upload. Передаёт, для файла, resumeFilename (тип 'file'/'link' сервер определяет сам по URL, не по клиенту) — первая версия резюме попадает в историю (TASK-32), так как id кандидата генерируется этой же формой синхронно (crypto.randomUUID()), не внешним скриптом." "React Client Component" "UI"
 
-        profileView = component "ProfileView" "Полная карточка профиля: имя, роль, bio, контакты, теги стримов, дополнительные поля. Кнопка «назад»." "React Client Component" "UI"
+        profileView = component "ProfileView" "Полная карточка профиля: имя, роль, контакты (email/телефон), теги стримов, произвольные дополнительные поля из неопознанных колонок таблицы. Кнопка «назад»." "React Client Component" "UI"
 
         contactButton = component "ContactButton" "Кнопка «Хочу связаться» на карточке подборки. Вызывает `submitContactRequest`, записывает запрос в лист «Contact Requests». Без токена — неактивна." "React Client Component" "UI"
 

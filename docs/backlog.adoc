@@ -617,6 +617,35 @@ NOTE: ℹ️ Ссылки на резюме в БД абсолютные (`APP_U
 
 ---
 
+==== ✅ Удаление отдельных файлов/ссылок резюме из истории версий
+
+У каждой версии резюме (Файлы/Ссылки) в `CandidateEditModal` теперь есть корзина — удаляет запись из `candidateResumes` (Neon) и, для файлов, сам файл из Vercel Blob (best-effort, тот же паттерн, что `deleteCandidate()`). Требует отдельного подтверждения в строке («Удалить? Да/Отмена»), без `window.confirm()`.
+
+Версия, совпадающая с текущим `candidate.resumeUrl`, не удаляется — кнопка задизейблена с подсказкой «сначала загрузите новую версию»: иначе можно было бы удалить активное резюме и оставить в Sheets ссылку на уже стёртый файл. Новый экшен `deleteCandidateResumeVersion(candidateId, versionId)` (`app/actions.ts`) смотрит `kind`/`url` заново из Neon по `versionId`, а не доверяет значениям от клиента.
+
+---
+
+==== ✅ Дата регистрации работодателя в редакторе
+
+`employers.timestamp` существовал с самого переноса в Neon (TASK-DB-3) и хранил настоящие даты у всех записей — просто никогда не выводился в `/editor/employers`. Добавлена строка «зарегистрирован {дата}» в `EmployerRow` (`components/employer-section.tsx`), тем же форматом, что «Дата регистрации» у кандидатов. Только вывод — без изменений в данных.
+
+NOTE: ℹ️ Был запрос backfill'нуть существующие записи фиксированной датой — отклонён после проверки: у всех записей уже были настоящие разные даты регистрации, backfill стёр бы реальные данные без причины.
+
+---
+
+==== ✅ Убраны bio/website/location из кода
+
+Поля существовали в `Profile` (`lib/sheets.ts`) и рендерились в `ProfileView` (`/profile/[id]`), но колонок `bio`/`website`/`location` никогда не было в боевой таблице «Candidates Database» — проверено прямым чтением заголовка (`getSheetTable()`). Поля были кодом без данных с самого начала.
+
+* `lib/sheets.ts` — `bio`/`website`/`location` убраны из `Profile`, `KNOWN_KEYS`, `HEADER_ALIASES` (включая алиас `резюме` → `bio`) и `buildProfile()`.
+* `components/profile-view.tsx` — убран блок bio, `website`/`location` из списка контактов (`Globe`/`MapPin` импорты тоже убраны — больше не используются).
+* `app/profile/[id]/page.tsx` — `generateMetadata()` больше не пытается взять `description` из `profile.bio`.
+* `app/page.tsx` — из подсказки «Рекомендуемые колонки» на экране первоначальной настройки убраны несуществующие поля.
+
+Заодно (по отдельному запросу, до этой правки) из боевой таблицы вручную удалены три никем не читаемых столбца заметок — `Интервьюер`, `Баллы`, `Примечания` (проверено: `Баллы` был заполнен у 8/117 строк, остальные два — пустые везде; данные признаны ненужными и удалены осознанно). `docs/manager-playbook.adoc` обновлён — соответствующая строка убрана из таблицы полей.
+
+---
+
 == Активные задачи (требуется сделать)
 
 === 🔴 Критично — гео-сегментация рассылки
@@ -839,7 +868,7 @@ NOTE: ℹ️ Полный анализ, стоимость и схема дан�
 
 ==== TASK-DB-4 (отложено): Candidates → Neon
 
-Основной блокер снят почти полностью: `CandidateEditModal` (TASK-23 ✅, расширена дважды) теперь редактирует контакты, `title`, `summary`, `level`, `stream`, `countryPrimary`/`countryDesired`, `activeSince` — включая оба поля, которые видит работодатель на карточке подборки. Не редактируются через UI: `bio`, `website`, `location`, `industry`, `func`, `excludedCompanies`/`excludedIndustries` — эти поля (в основном неиспользуемые системой или редко нужные) редактор по-прежнему заполняет напрямую в Sheets. Миграция хранения в Neon сама по себе ещё не сделана.
+Основной блокер снят почти полностью: `CandidateEditModal` (TASK-23 ✅, расширена дважды) теперь редактирует контакты, `title`, `summary`, `level`, `stream`, `countryPrimary`/`countryDesired`, `activeSince` — включая оба поля, которые видит работодатель на карточке подборки. Не редактируются через UI: `industry`, `func`, `excludedCompanies`/`excludedIndustries` — эти поля (в основном неиспользуемые системой или редко нужные) редактор по-прежнему заполняет напрямую в Sheets. `bio`/`website`/`location` убраны из кода целиком (см. ниже) — колонок с такими названиями в реальной таблице никогда не было. Миграция хранения в Neon сама по себе ещё не сделана.
 
 ---
 
@@ -1031,7 +1060,7 @@ Vercel Postgres (декабрь 2024) был упразднён и перене�
 [source,sql]
 ----
 candidates       -- профили + регистрации (текущий главный лист)
-  id UUID PK, name, title, bio, email, phone, website, location,
+  id UUID PK, name, title, email, phone,
   stream, level, industry, func, country_primary, country_desired,
   summary, excluded_companies TEXT[], excluded_industries TEXT[],
   status, active_since, registration_timestamp, cover_letter, resume_url
@@ -1068,7 +1097,7 @@ NOTE: ℹ️ Это первоначальный проектный наброс
 | Contact Requests | ✅ Только оно | ❌ Никогда | ✅ Перенесено в Neon (TASK-DB-2)
 | Streams | ❌ | ✅ | ✅ Перенесено в Neon + UI готов (TASK-DB-8)
 | Employers | ✅ Полностью через UI | ❌ Никогда (лист остаётся архивом) | ✅ Перенесено в Neon (TASK-DB-3)
-| Candidates | ✅ Регистрация + `CandidateEditModal` (TASK-23, расширена) | ⚠ Только поля вне формы редактирования (title/bio/industry/func/summary/excluded*) | Остаётся в Sheets — TASK-DB-4, отложено (частичный редактор в UI уже есть, миграция хранения — нет)
+| Candidates | ✅ Регистрация + `CandidateEditModal` (TASK-23, расширена) | ⚠ Только поля вне формы редактирования (industry/func/excluded*) | Остаётся в Sheets — TASK-DB-4, отложено (частичный редактор в UI уже есть, миграция хранения — нет)
 | Mailing Lists | ❌ | ✅ Полностью | Остаётся в Sheets — TASK-DB-5, отложено (нужен конструктор выпусков в UI)
 |===
 

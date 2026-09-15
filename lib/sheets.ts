@@ -8,18 +8,15 @@ export type CandidateStatus = "На проверке" | "Активный" | "О
  * A single profile/visiting-card record from the main Candidates Database sheet.
  * Registration form submissions write basic fields here (id, name, email, phone,
  * cover letter, resume url, status "На проверке"). Editor enriches the remaining
- * fields (title, bio, stream, level, etc.) and approves/rejects via the editor UI.
+ * fields (title, stream, level, etc.) and approves/rejects via the editor UI.
  * Columns are read dynamically from the header row — any extra columns land in `extra`.
  */
 export type Profile = {
   id: string
   name: string
   title: string
-  bio: string
   email: string
   phone: string
-  website: string
-  location: string
   /** One or more stream tags from a multi-select dropdown in the sheet. */
   stream: string[]
   // ── Distribution tags (§5 spec) ───────────────────────────────────────────
@@ -215,7 +212,7 @@ async function fetchSheetValues(sheetId: string, range: string): Promise<string[
 }
 
 const KNOWN_KEYS = [
-  "id", "name", "title", "bio", "email", "phone", "website", "location", "stream",
+  "id", "name", "title", "email", "phone", "stream",
   "level", "industry", "func", "countryPrimary", "countryDesired", "summary",
   "excludedCompanies", "excludedIndustries",
   "status", "activeSince", "registrationTimestamp", "coverLetter", "resumeUrl",
@@ -227,12 +224,8 @@ const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   кандидат: "name",
   title: "title",
   роль: "title",
-  bio: "bio",
-  резюме: "bio",
   email: "email",
   phone: "phone",
-  website: "website",
-  location: "location",
   stream: "stream",
   стрим: "stream",
   level: "level",
@@ -305,11 +298,8 @@ function buildProfile(headers: string[], row: string[]): Profile {
     id: resolveRowId(headers, row, record),
     name: record.name || "",
     title: record.title || "",
-    bio: record.bio || "",
     email: record.email || "",
     phone: record.phone || "",
-    website: record.website || "",
-    location: record.location || "",
     stream: parseMultiValue(record.stream || ""),
     level: record.level || "",
     industry: record.industry || "",
