@@ -4,8 +4,6 @@ import {
   ArrowLeft,
   Mail,
   Phone,
-  Globe,
-  MapPin,
 } from "lucide-react"
 
 export function ProfileView({ profile, backUrl = "/" }: { profile: Profile; backUrl?: string }) {
@@ -19,16 +17,6 @@ export function ProfileView({ profile, backUrl = "/" }: { profile: Profile; back
       icon: Phone,
       label: profile.phone,
       href: `tel:${profile.phone}`,
-    },
-    profile.website && {
-      icon: Globe,
-      label: profile.website.replace(/^https?:\/\//, ""),
-      href: profile.website.startsWith("http") ? profile.website : `https://${profile.website}`,
-    },
-    profile.location && {
-      icon: MapPin,
-      label: profile.location,
-      href: null,
     },
   ].filter(Boolean) as { icon: typeof Mail; label: string; href: string | null }[]
 
@@ -64,10 +52,6 @@ export function ProfileView({ profile, backUrl = "/" }: { profile: Profile; back
                   </span>
                 ))}
               </div>
-            )}
-
-            {profile.bio && (
-              <p className="mt-6 text-pretty leading-relaxed text-card-foreground">{profile.bio}</p>
             )}
 
             {contacts.length > 0 && (

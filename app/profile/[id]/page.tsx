@@ -16,7 +16,7 @@ export async function generateMetadata({
     if (!profile) return { title: "Профиль не найден", robots: { index: false, follow: false } }
     return {
       title: `${profile.name}${profile.title ? ` — ${profile.title}` : ""}`,
-      description: profile.bio || `Визитка ${profile.name}`,
+      description: `Визитка ${profile.name}`,
       robots: { index: false, follow: false },
     }
   } catch {
