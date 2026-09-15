@@ -7,8 +7,8 @@
 
 - **Next.js 14** — App Router, Server Components, Server Actions (`"use server"` в `app/actions.ts`)
 - **TypeScript**
-- **Google Sheets** — профили кандидатов, подборки, работодатели (Service Account API v4)
-- **Neon (PostgreSQL)** — `contactRequests` и `streams` (Drizzle ORM + neon-http driver)
+- **Google Sheets** — профили кандидатов, подборки (Service Account API v4)
+- **Neon (PostgreSQL)** — `contactRequests`, `streams`, `employers`, `candidateResumes` (Drizzle ORM + neon-http driver)
 - **Vercel Blob** — приватное хранилище файлов резюме
 - **SendPulse** — email-рассылки (адресные книги, кампании, merge-теги)
 - **Tailwind CSS + lucide-react**
@@ -57,17 +57,21 @@ lib/
   sendpulse.ts                      # SendPulse: OAuth, книги, кампании
   db/
     index.ts                        # Drizzle клиент (neon-http)
-    schema.ts                       # Схемы: contactRequests, streams
-    contact-requests.ts             # CRUD запросов
+    schema.ts                       # Схемы: contactRequests, streams, employers, candidateResumes
+    contact-requests.ts             # CRUD запросов (FK на employers/streams)
     streams.ts                      # CRUD стримов
+    employers.ts                    # CRUD работодателей (TASK-DB-3)
+    resumes.ts                      # История версий резюме кандидата (TASK-32)
     migrations/                     # SQL-миграции
 
 components/
   candidate-registration-modal.tsx  # Форма кандидата (публичная)
   candidate-edit-modal.tsx          # Редактирование кандидата: контакты, резюме, уровень, стримы, страны, дата активности
+  candidate-create-modal.tsx        # Быстрое добавление кандидата из редактора (без публичной формы)
   candidate-section.tsx             # Фильтры (поиск/статус/стрим/уровень) + список + Pencil
   employer-registration-modal.tsx   # Экспортирует константы (страны/стримы/способы связи) для переиспользования
   employer-edit-modal.tsx           # Редактирование работодателя — форма как у регистрации, без чекбокса согласия
+  employer-create-modal.tsx         # Быстрое добавление работодателя из редактора (переиспользует registerEmployer)
   employer-section.tsx              # Фильтры (поиск/статус/страна/стрим) + список + Pencil
   streams-table.tsx                 # Inline-редактор стримов + счётчик подходящих кандидатов (TASK-27)
   contact-requests-section.tsx
@@ -75,6 +79,8 @@ components/
   publish-button.tsx
   contact-button.tsx
   general-inquiry-button.tsx
+  profile-view.tsx                  # Полная карточка профиля кандидата
+  campaign-history.tsx              # История отправленных кампаний на странице выпусков
 
 docs/
   backlog.adoc                      # ГЛАВНЫЙ ДОКУМЕНТ: все задачи и статусы
@@ -96,12 +102,15 @@ docs/
 ### Vercel Blob — резюме
 - Загрузка: `POST /api/upload` → `put(filename, file, { access: "private" })`
 - В Sheets хранится прокси-URL: `APP_URL/api/resume?url=<encodedBlobUrl>`
-- Прокси: `GET /api/resume` — читает blob server-side с `Authorization: Bearer BLOB_READ_WRITE_TOKEN`
+- Прокси: `GET /api/resume` — читает blob server-side с `Authorization: Bearer BLOB_READ_WRITE_TOKEN`; необязательный `?filename=` задаёт имя скачиваемого файла (`Content-Disposition`, кириллица через `filename*=UTF-8''`) — иначе браузер скачивает файл под именем из blob-пути
 - Защита от open redirect: проверка hostname `*.blob.vercel-storage.com`
+- История версий резюме кандидата хранится в Neon (`candidateResumes`, TASK-32) — Sheets по-прежнему держит только URL последней версии
 
-### Neon — два типа данных
-- `contactRequests` — запросы работодателей на контакт с кандидатами
+### Neon — таблицы
+- `contactRequests` — запросы работодателей на контакт с кандидатами; `employerToken` (FK на `employers.token`, `ON DELETE CASCADE` — запрос без работодателя не имеет смысла) и `streamId` (FK на `streams.id`, `ON DELETE SET NULL`)
 - `streams` — стримы (Industry/Functional), полный CRUD через `/editor/streams`
+- `employers` — работодатели (TASK-DB-3); `token` — тот же UUID, что `employer_token` в SendPulse и `?e=` в публичной ссылке; `streams`/`additionalCountries` — нативные Postgres `text[]`
+- `candidateResumes` — история версий резюме кандидата (TASK-32); кандидаты сами остаются в Google Sheets
 - Миграции: `scripts/migrate.mjs`
 
 ### Server Actions
@@ -130,9 +139,11 @@ docs/
 | Авто-маппинг кандидат → стрим (по колонке Stream) | ✅ TASK-27 |
 | Персонализация рассылок (токен работодателя) | ✅ TASK-13 |
 | Модерация кандидатов (Добавить/Отклонить) | ✅ TASK-11 |
-| Contact Requests → Neon | ✅ TASK-DB-2 |
+| Contact Requests → Neon (+ FK на employers/streams) | ✅ TASK-DB-2 |
 | Стримы → Neon + CRUD-редактор | ✅ TASK-DB-8 |
 | Работодатели → Neon (было Sheets) | ✅ TASK-DB-3 |
+| История версий резюме кандидата (Neon) | ✅ TASK-32 |
+| Отключение/удаление/быстрое добавление кандидата и работодателя в редакторе | ✅ TASK-33 |
 | Приветственное письмо работодателю | ✅ TASK-10 |
 
 ## Активные задачи (приоритет)
