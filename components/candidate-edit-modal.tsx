@@ -34,7 +34,10 @@ function ResumeVersionList({ items }: { items: ResumeVersion[] }) {
           ) : (
             <LinkIcon className="size-3.5 shrink-0 text-muted-foreground" />
           )}
-          <span className="min-w-0 flex-1 truncate text-foreground">
+          <span
+            title={v.kind === "file" ? v.filename || "Файл" : v.url}
+            className="min-w-0 flex-1 truncate text-foreground"
+          >
             {v.kind === "file" ? v.filename || "Файл" : v.url}
           </span>
           <span className="shrink-0 text-muted-foreground">
@@ -352,21 +355,6 @@ export function CandidateEditModal({
 
                 <Field label="Резюме" full>
                   <div className="space-y-3">
-                    {candidate.resumeUrl && resumeAction === "none" && (
-                      <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-                        <LinkIcon className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate text-muted-foreground">Текущее резюме</span>
-                        <a
-                          href={candidate.resumeUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="shrink-0 font-medium text-primary hover:underline"
-                        >
-                          Открыть
-                        </a>
-                      </div>
-                    )}
-
                     {resumeAction === "none" && (
                       <div className="flex gap-2">
                         <button
@@ -454,7 +442,7 @@ export function CandidateEditModal({
                             История резюме появится здесь после следующей загрузки нового файла или ссылки.
                           </p>
                         ) : (
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-3">
                             {resumeFiles.length > 0 && (
                               <div className="space-y-1.5">
                                 <p className="text-xs font-medium text-muted-foreground">

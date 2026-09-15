@@ -21,9 +21,11 @@ const MAX_CHIPS = 3
 
 function ResumeChips({ items }: { items: ResumeVersion[] }) {
   if (!items.length) return <span className="text-xs text-muted-foreground">—</span>
+  const shown = items.slice(0, MAX_CHIPS)
+  const rest = items.slice(MAX_CHIPS)
   return (
     <div className="flex flex-wrap gap-1">
-      {items.slice(0, MAX_CHIPS).map((v) => (
+      {shown.map((v) => (
         <a
           key={v.id}
           href={v.url}
@@ -42,6 +44,14 @@ function ResumeChips({ items }: { items: ResumeVersion[] }) {
           </span>
         </a>
       ))}
+      {rest.length > 0 && (
+        <span
+          title={rest.map((v) => (v.kind === "file" ? v.filename || "Файл" : v.url)).join("\n")}
+          className="inline-flex items-center rounded-full border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground"
+        >
+          +{rest.length}
+        </span>
+      )}
     </div>
   )
 }
