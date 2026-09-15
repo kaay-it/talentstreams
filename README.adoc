@@ -12,7 +12,9 @@
 
 * *Next.js 14* (App Router, Server Components, Server Actions)
 * *TypeScript*
-* *Google Sheets* — единственная база данных (Service Account API v4)
+* *Google Sheets* — профили кандидатов, подборки рассылок (Service Account API v4)
+* *Neon (PostgreSQL)* — работодатели, запросы на контакт, стримы, история версий резюме (Drizzle ORM + neon-http driver)
+* *Vercel Blob* — приватное хранилище файлов резюме
 * *SendPulse* — email-рассылки (адресные книги, кампании, merge-теги)
 * *Tailwind CSS + lucide-react*
 
@@ -26,6 +28,12 @@
 GOOGLE_SHEET_ID=...
 GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}
 
+# Neon (PostgreSQL)
+DATABASE_URL=...
+
+# Vercel Blob
+BLOB_READ_WRITE_TOKEN=...
+
 # SendPulse
 SENDPULSE_CLIENT_ID=...
 SENDPULSE_CLIENT_SECRET=...
@@ -38,7 +46,9 @@ APP_URL=https://your-domain.com
 EDITOR_SECRET=your-secret-string
 ----
 
-`EDITOR_SECRET` защищает `/editor` — без него страница возвращает 404.
+`EDITOR_SECRET` защищает `/editor` и `/api/publish` — без него страница возвращает 404, а API-роут отвечает 401.
+
+`APP_URL` используется для формирования proxy-ссылок на резюме (`APP_URL/api/resume?url=...`) — эти ссылки сохраняются в базе, поэтому значение должно совпадать для всех, кто их открывает (даже при локальной разработке против общей базы, см. ниже).
 
 == Запуск локально
 
@@ -50,68 +60,100 @@ npm run dev
 
 Приложение доступно на http://localhost:3000.
 
+CAUTION: Локальный `npm run dev` обычно указывает на ту же базу (Neon) и ту же таблицу Google Sheets, что и продакшн — отдельного стенда нет. Ссылки на резюме, сохранённые в базе, абсолютные (`APP_URL/api/resume?...`) и всегда ведут на `APP_URL` из `.env.local`, даже если открыты со страницы, отрендеренной локально.
+
 == Структура проекта
 
 ----
 app/
-  page.tsx                   # Главная: лендинг, формы регистрации
-  list/[listId]/page.tsx     # Страница подборки (требует ?e= или ?secret=)
-  profile/[id]/page.tsx      # Полный профиль кандидата
+  page.tsx                     # Главная: лендинг, формы регистрации
+  list/[listId]/page.tsx       # Страница подборки (требует ?e= или ?secret=)
+  profile/[id]/page.tsx        # Полный профиль кандидата
   editor/
-    layout.tsx               # Боковое меню редактора
-    page.tsx                 # Выпуски (Releases)
-    employers/page.tsx       # Управление работодателями
-    settings/page.tsx        # Настройки и миграция колонок
-  api/publish/[listId]/      # API-роут для curl-запуска рассылки
-  actions.ts                 # Все Server Actions
+    layout.tsx                 # Боковое меню редактора
+    page.tsx                   # Выпуски (Releases)
+    employers/page.tsx         # Управление работодателями
+    candidates/page.tsx        # Управление кандидатами
+    requests/page.tsx          # Запросы на контакт
+    streams/page.tsx           # CRUD стримов
+    settings/page.tsx          # Задел на будущее (пока пусто)
+  api/
+    publish/[listId]/route.ts  # API-роут для curl-запуска рассылки
+    upload/route.ts            # POST: загрузка резюме → Vercel Blob
+    resume/route.ts            # GET: прокси приватных blob-файлов
+  actions.ts                   # Все Server Actions
 
 lib/
-  sheets.ts                  # Google Sheets: чтение, запись, типы
-  sendpulse.ts               # SendPulse: OAuth, книги, кампании
+  sheets.ts                    # Google Sheets: чтение, запись, типы (кандидаты, подборки)
+  sendpulse.ts                 # SendPulse: OAuth, книги, кампании
+  blob.ts                      # Хелперы для ссылок на Vercel Blob (в т.ч. имя скачиваемого файла)
+  db/
+    index.ts                   # Drizzle-клиент (neon-http)
+    schema.ts                  # Схемы: contactRequests, streams, employers, candidateResumes
+    contact-requests.ts        # CRUD запросов на контакт
+    streams.ts                 # CRUD стримов
+    employers.ts               # CRUD работодателей
+    resumes.ts                 # История версий резюме кандидата
+    migrations/                # SQL-миграции (drizzle-kit)
 
 components/
-  employer-registration-modal.tsx   # Форма работодателя
-  candidate-registration-modal.tsx  # Форма кандидата
-  employer-section.tsx              # UI подтверждения/отклонения заявок
+  employer-registration-modal.tsx   # Форма работодателя (публичная)
+  employer-edit-modal.tsx           # Редактирование работодателя в редакторе
+  employer-create-modal.tsx         # Быстрое добавление работодателя из редактора
+  employer-section.tsx              # UI подтверждения/отклонения/редактирования заявок
+  candidate-registration-modal.tsx  # Форма кандидата (публичная)
+  candidate-edit-modal.tsx          # Редактирование кандидата в редакторе
+  candidate-create-modal.tsx        # Быстрое добавление кандидата из редактора
+  candidate-section.tsx             # Таблица кандидатов: фильтры, модерация, резюме
+  contact-requests-section.tsx      # UI управления запросами на контакт
+  streams-table.tsx                 # Inline-редактор стримов
   contact-button.tsx                # Кнопка «Хочу связаться»
+  general-inquiry-button.tsx        # Кнопка «Связаться с нами» (общий запрос)
   publish-button.tsx                # Кнопка запуска рассылки
   editor-nav.tsx                    # Боковая навигация редактора
 
 docs/
   spec.adoc                  # Техническое задание
-  backlog.adoc               # Задачи: выполненные и активные
+  backlog.adoc               # Задачи: выполненные и активные — главный источник правды по архитектуре
+  manager-playbook.adoc      # Инструкция для нетехнического менеджера
   workspace.dsl              # C4-архитектура (Structurizr)
-  editor-stream-flow.puml    # Sequence-диаграмма жизненного цикла стрима
+  editor-stream-flow.puml    # Sequence-диаграмма жизненного цикла
 ----
 
-== Google Sheets — структура листов
+== Где что хранится
 
-Все листы создаются автоматически при первой записи.
-Листы `Candidates` и `Mailing lists` заполняются редактором вручную.
+Данные разделены между Google Sheets и Neon — не по историческим причинам, а по тому, кто их пишет:
 
-=== Candidates (основной лист)
+[cols="2,1,3", options="header"]
+|===
+| Данные | Хранилище | Почему
 
-Обязательные колонки: `id`, `name`, `stream`.
-Дополнительные добавляются кнопкой *«Добавить колонки»* в `/editor/settings`:
-`Level`, `Industry`, `Function`, `Country Primary`, `Country Desired`, `Summary`,
-`Excluded Companies`, `Excluded Industries`.
+| Кандидаты (профили, регистрации)
+| Google Sheets
+| Часть полей всё ещё правится только напрямую в таблице (`bio`, `industry`, `func` и т. д.) — полный редактор в UI пока не построен
 
-=== Mailing lists
+| Стримы
+| Neon
+| Полный CRUD через `/editor/streams`, таблицу больше не открывают
 
-`List ID` (UUID), `Stream`, `Date`, `Candidate ID` — по одной строке на кандидата в выпуске.
+| Работодатели
+| Neon
+| Полный жизненный цикл (регистрация → подтверждение → редактирование → отключение → удаление) через UI
 
-=== Employers
+| Запросы на контакт
+| Neon
+| Приложение единственный писатель — редактор никогда не правит эти строки напрямую
 
-`ID` (UUID = employer token), `Timestamp`, `Name`, `Company`, `Email`, `Phone`,
-`Primary Contact`, `Telegram`, `LinkedIn`, `Streams`, `Status`.
+| История версий резюме кандидата
+| Neon
+| Отдельная таблица (`candidateResumes`) — Sheets хранит только URL последней версии
 
-Статус: `На проверке` → `Подтверждён` / `Отклонён`.
-При подтверждении работодатель добавляется в SendPulse с переменной `employer_token`.
+| Файлы резюме
+| Vercel Blob (приватное)
+| Доступ только через прокси `/api/resume`
+|===
 
-=== Streams
-
-Одна колонка: названия стримов, по одному на строку.
-Используется для формирования выпадающего списка в форме регистрации.
+Подробности и статус миграции оставшихся таблиц — `docs/backlog.adoc`, раздел «Приложение: переход на реляционную СУБД».
 
 == Доступ к подборке `/list/[listId]`
 
@@ -119,7 +161,7 @@ docs/
 | Параметр | Результат
 
 | `?e=[employer_token]`
-| Персонализированная подборка: кандидаты фильтруются по предпочтениям работодателя
+| Персонализированная подборка: кандидаты фильтруются по предпочтениям работодателя (исключённые компании/отрасли, гео)
 
 | `?secret=[EDITOR_SECRET]`
 | Все кандидаты без фильтрации (просмотр редактора)
@@ -130,23 +172,29 @@ docs/
 
 == Добавление новой функциональности
 
-=== Новое поле в профиле кандидата
+=== Новое поле в профиле кандидата (Google Sheets)
 
 . Добавьте ключ в массив `KNOWN_KEYS` (`lib/sheets.ts`).
-. Добавьте поле в тип `Profile` (`lib/sheets.ts`).
-. Добавьте алиасы в `HEADER_ALIASES` (английское и русское название заголовка).
-. Заполните поле в `buildProfile`.
-. Если колонку нужно создавать автоматически — добавьте название в `DISTRIBUTION_COLUMNS`.
+. Добавьте поле в тип `Profile` или `Candidate` (`lib/sheets.ts`).
+. Добавьте алиасы в `HEADER_ALIASES` (английское и русское название заголовка) — используются функцией `mapHeader()` везде при чтении/записи.
+. Заполните поле в `buildProfile()` / `rowToRecord()`.
+
+=== Новая таблица или поле в Neon
+
+. Добавьте/измените схему в `lib/db/schema.ts` (Drizzle).
+. `npm run db:generate` — сгенерировать миграцию (`drizzle-kit`), затем `npm run db:migrate` — применить.
+. CRUD-функции — в соответствующем файле `lib/db/*.ts` (`import "server-only"`, плоские async-функции, без классов).
 
 === Новый Server Action
 
 Добавьте async-функцию с директивой `"use server"` в `app/actions.ts`.
-Для мутаций, которые должны обновить UI редактора, вызывайте `revalidatePath("/editor")`.
+Для мутаций, которые должны обновить UI редактора, вызывайте `revalidatePath(...)`.
+Для ожидаемых пользовательских ошибок (валидация, дубликаты) — возвращайте `{ ok: false, error }` вместо `throw`: Next.js в production-сборке заменяет сообщение любого `throw new Error(...)` из Server Action на общий текст, чтобы не утекали детали непредвиденных ошибок — это ломает вывод ожидаемых сообщений пользователю (пример — `registerEmployer()`).
 
 === Новый раздел редактора
 
 . Создайте `app/editor/<раздел>/page.tsx` с проверкой `EDITOR_SECRET`.
-. Добавьте пункт в массив `NAV_ITEMS` в `components/editor-nav.tsx`.
+. Добавьте пункт в массив разделов в `components/editor-nav.tsx`.
 
 === Новая SendPulse-переменная контакта
 
@@ -155,10 +203,11 @@ docs/
 
 == Документация
 
-* `docs/spec.adoc` — полное техническое задание с описанием всех сценариев
-* `docs/backlog.adoc` — список задач с приоритетами и зависимостями
+* `docs/backlog.adoc` — главный источник правды по архитектуре: список задач с приоритетами, статус миграции каждой таблицы, детали реализации каждой завершённой задачи
+* `docs/spec.adoc` — техническое задание (бизнес-логика, правила распределения по стримам, тексты писем)
+* `docs/manager-playbook.adoc` — инструкция для нетехнического менеджера
 * `docs/workspace.dsl` — C4-модель (открывается в https://structurizr.com/dsl[Structurizr DSL])
-* `docs/editor-stream-flow.puml` — PlantUML sequence-диаграмма
+* `docs/editor-stream-flow.puml` — PlantUML sequence-диаграмма жизненного цикла стрима
 
 == Запуск рассылки через API
 

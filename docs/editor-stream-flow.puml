@@ -121,10 +121,13 @@ end note
 
 note over app, blob
   При открытии ссылки на резюме из редактора или Google Sheets:
-  GET /api/resume?url=<encodedBlobUrl>
+  GET /api/resume?url=<encodedBlobUrl>&filename=<realFilename>
   → проверка hostname (*.blob.vercel-storage.com)
   → fetch(blobUrl, { Authorization: Bearer BLOB_READ_WRITE_TOKEN })
-  → стриминг файла клиенту с Content-Type
+  → стриминг файла клиенту с Content-Type и Content-Disposition
+    (?filename= — настоящее имя из candidateResumes.filename,
+    иначе браузер скачивает файл под именем из blob-пути;
+    кириллица — через filename*=UTF-8'')
 end note
 
 == 2а. Редактор модерирует анкеты кандидатов ==
@@ -291,6 +294,13 @@ note over sh_emp
   Лист «Employers» в Google Sheets остаётся как архив, приложение его больше не читает.
 end note
 
+note over editor, app
+  «+ Добавить работодателя» в /editor/employers (EmployerCreateModal) вызывает
+  тот же registerEmployer(data), что и публичная форма выше — та же валидация
+  (обязательные поля, дубли email/телефона), тот же статус «На проверке».
+  Разница только в том, кто заполняет форму.
+end note
+
 == 3а. Редактор подтверждает работодателя ==
 
 editor -> app : GET /editor/employers?secret=…
@@ -412,7 +422,7 @@ end note
 alt ?e=[token] — персонализированный доступ работодателя
 employer -> app : GET /list/f04a9b3e-…?e=8f3a1c…
 app -> sh_emp : getEmployerByToken("8f3a1c…")
-sh_emp --> app : { name, company, industry, … }
+sh_emp --> app : { name, company, country, … }
 app -> sh_mail : getMailingList("f04a9b3e-…")
 sh_mail --> app : { stream, date, candidate_ids: [UUID, UUID] }
 app -> sh_cands : getProfiles() → фильтр по candidate_ids
@@ -442,19 +452,26 @@ end note
 
 employer -> app : Нажимает «Хочу связаться» под карточкой кандидата
 app -> app : submitContactRequest(candidateId, listId, employerToken)
-app -> sh_emp : getEmployerByToken(employerToken)
-sh_emp --> app : { name, company, email, … }
-app -> sh_mail : getMailingLists() → stream для listId
+app -> sh_emp : getEmployerByToken(employerToken)\n(только проверка, что токен существует)
+sh_emp --> app : employer | null
+app -> sh_mail : getMailingLists() → имя стрима для listId
 sh_mail --> app : { stream: "Finance", … }
-app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, stream,\n  candidateId, employerToken, employerName, company, employerEmail,\n  status: "Новый запрос" }
+app -> neonStreams : getStreamIdByName("Finance")
+neonStreams --> app : streamId
+app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, streamId,\n  candidateId, employerToken, status: "Новый запрос" }
 neonDb --> app : OK
 app --> employer : «Запрос отправлен — мы свяжемся с кандидатом»
 
 note over neonDb
   Таблица contactRequests (Neon / PostgreSQL):
-  ──────────────────────────────────────────────────────────────────────────────
-  id (UUID)  | timestamp   | listId  | stream  | candidateId | employerToken | … | status
-  e7f2a1…    | 2026-08-05  | f04a9b… | Finance | a3f8e2c1-…  | 8f3a1c…       | … | Новый запрос
+  ────────────────────────────────────────────────────────────────────
+  id (UUID)  | timestamp   | listId  | streamId | candidateId | employerToken | status
+  e7f2a1…    | 2026-08-05  | f04a9b… | 2        | a3f8e2c1-…  | 8f3a1c…       | Новый запрос
+  employerToken — FK на employers.token (ON DELETE CASCADE: удаление
+  работодателя удаляет и его запросы). streamId — FK на streams.id
+  (ON DELETE SET NULL). employerName/company/employerEmail и текстовый
+  stream убраны — резолвятся через join на employers/streams при чтении
+  (getContactRequests()), чтобы не дублировать данные.
 end note
 
 == 8. Работодатель оставляет общий запрос ==
@@ -467,9 +484,13 @@ end note
 
 employer -> app : Нажимает «Связаться с нами»
 app -> app : submitGeneralInquiry(listId, employerToken)
-app -> sh_emp : getEmployerByToken(employerToken)
-sh_emp --> app : { name, company, email, … }
-app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, stream,\n  candidateId: "", employerToken, employerName, company, employerEmail,\n  status: "Новый запрос" }
+app -> sh_emp : getEmployerByToken(employerToken)\n(только проверка, что токен существует)
+sh_emp --> app : employer | null
+app -> sh_mail : getMailingLists() → имя стрима для listId
+sh_mail --> app : { stream: "Finance", … }
+app -> neonStreams : getStreamIdByName("Finance")
+neonStreams --> app : streamId
+app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, streamId,\n  candidateId: "", employerToken, status: "Новый запрос" }
 neonDb --> app : OK
 app --> employer : «Запрос принят — мы свяжемся с вами»
 
