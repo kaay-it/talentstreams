@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
 import { appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
-import { addResumeVersion, getResumeVersions, deleteResumeVersions, type ResumeVersion } from "@/lib/db/resumes"
+import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
@@ -448,6 +448,27 @@ export async function updateCandidate(
 /** Resume version history for a candidate (editor only — keyed by the Sheets `id` column). */
 export async function getCandidateResumeHistory(candidateId: string): Promise<ResumeVersion[]> {
   return getResumeVersions(candidateId)
+}
+
+/**
+ * Deletes a single resume version from the history list (editor only). Looks the version up
+ * fresh from Neon by id rather than trusting kind/url from the client, so a stale or crafted
+ * "link" kind can't leave an orphaned file in Vercel Blob. Blob deletion is best-effort, same
+ * as deleteCandidate() — a failed delete is logged, not fatal, so the row still gets removed.
+ */
+export async function deleteCandidateResumeVersion(candidateId: string, versionId: string): Promise<void> {
+  const versions = await getResumeVersions(candidateId)
+  const version = versions.find((v) => v.id === versionId)
+  if (version?.kind === "file") {
+    const blobUrl = resolveBlobUrl(version.url)
+    if (blobUrl) {
+      await del(blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN }).catch((err) => {
+        console.warn("[deleteCandidateResumeVersion] failed to delete blob:", blobUrl, err)
+      })
+    }
+  }
+  await deleteResumeVersion(versionId)
+  revalidatePath("/editor/candidates")
 }
 
 /**

@@ -60,6 +60,11 @@ export async function deleteResumeVersions(candidateId: string): Promise<void> {
   await db.delete(candidateResumes).where(eq(candidateResumes.candidateId, candidateId))
 }
 
+/** Deletes a single resume version row (used when the editor removes one file/link from the history list). */
+export async function deleteResumeVersion(id: string): Promise<void> {
+  await db.delete(candidateResumes).where(eq(candidateResumes.id, id))
+}
+
 /**
  * Resume versions for many candidates at once, grouped by candidateId (each group newest
  * first) — one query instead of one-per-candidate, for list pages showing several candidates.
