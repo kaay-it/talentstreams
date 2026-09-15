@@ -174,6 +174,7 @@ function EmployerRow({ employer, streams }: { employer: Employer; streams: strin
             {employer.streams.length ? ` · ${employer.streams.join(", ")}` : ""}
             {employer.country ? ` · ${employer.country}` : ""}
             {employer.additionalCountries.length ? ` (+ ${employer.additionalCountries.join(", ")})` : ""}
+            {employer.timestamp ? ` · зарегистрирован ${new Date(employer.timestamp).toLocaleDateString("ru-RU")}` : ""}
           </p>
         </div>
 
