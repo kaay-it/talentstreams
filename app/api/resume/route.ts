@@ -29,12 +29,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         { status: 502 },
       )
     }
-    const filename = parsed.pathname.split("/").pop() ?? "resume"
+    const rawFilename = req.nextUrl.searchParams.get("filename")
+    const filename = (rawFilename || parsed.pathname.split("/").pop() || "resume").replace(/[\r\n"]/g, "")
+    const asciiFallback = filename.replace(/[^\x20-\x7E]/g, "_") || "resume"
     const contentType = fileRes.headers.get("content-type") || "application/octet-stream"
     return new NextResponse(fileRes.body, {
       headers: {
         "Content-Type": contentType,
-        "Content-Disposition": `inline; filename="${filename}"`,
+        "Content-Disposition": `inline; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
       },
     })
   } catch (err) {

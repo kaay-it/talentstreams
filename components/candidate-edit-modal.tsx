@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useTransition } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Plus } from "lucide-react"
-import { updateCandidate, getCandidateResumeHistory, type ResumeVersion } from "@/app/actions"
+import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Plus, Trash2 } from "lucide-react"
+import { updateCandidate, getCandidateResumeHistory, deleteCandidateResumeVersion, type ResumeVersion } from "@/app/actions"
 import { ADDITIONAL_COUNTRIES } from "@/components/employer-registration-modal"
+import { withDownloadFilename } from "@/lib/blob"
 import type { Candidate } from "@/lib/sheets"
 
 const inputCls =
@@ -24,31 +25,110 @@ function toRuDate(isoDate: string): string {
   return `${d}.${mo}.${y}`
 }
 
-function ResumeVersionList({ items }: { items: ResumeVersion[] }) {
+function ResumeVersionRow({
+  version,
+  candidateId,
+  isCurrent,
+  onDeleted,
+}: {
+  version: ResumeVersion
+  candidateId: string
+  isCurrent: boolean
+  onDeleted: (id: string) => void
+}) {
+  const [isPending, startTransition] = useTransition()
+  const [confirming, setConfirming] = useState(false)
+
+  function handleDelete() {
+    startTransition(async () => {
+      await deleteCandidateResumeVersion(candidateId, version.id)
+      onDeleted(version.id)
+    })
+  }
+
   return (
-    <ul className="divide-y rounded-lg border">
-      {items.map((v) => (
-        <li key={v.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-          {v.kind === "file" ? (
-            <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <LinkIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-          <span className="min-w-0 flex-1 truncate text-foreground">
-            {v.kind === "file" ? v.filename || "Файл" : v.url}
-          </span>
-          <span className="shrink-0 text-muted-foreground">
-            {new Date(v.createdAt).toLocaleDateString("ru-RU")}
-          </span>
+    <li className="flex items-center gap-2 px-3 py-1.5 text-xs">
+      {version.kind === "file" ? (
+        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <LinkIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <span
+        title={version.kind === "file" ? version.filename || "Файл" : version.url}
+        className="min-w-0 flex-1 truncate text-foreground"
+      >
+        {version.kind === "file" ? version.filename || "Файл" : version.url}
+      </span>
+      <span className="shrink-0 text-muted-foreground">
+        {new Date(version.createdAt).toLocaleDateString("ru-RU")}
+      </span>
+
+      {confirming ? (
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span className="font-medium text-destructive">Удалить?</span>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={isPending}
+            className="font-medium text-destructive hover:underline disabled:opacity-50"
+          >
+            Да
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            disabled={isPending}
+            className="text-muted-foreground hover:underline disabled:opacity-50"
+          >
+            Отмена
+          </button>
+        </span>
+      ) : (
+        <>
           <a
-            href={v.url}
+            href={version.kind === "file" ? withDownloadFilename(version.url, version.filename) : version.url}
             target="_blank"
             rel="noopener noreferrer"
             className="shrink-0 font-medium text-primary hover:underline"
           >
             Открыть
           </a>
-        </li>
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            disabled={isCurrent}
+            title={isCurrent ? "Это текущее резюме — сначала загрузите новую версию" : "Удалить"}
+            className="flex shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-destructive disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </>
+      )}
+    </li>
+  )
+}
+
+function ResumeVersionList({
+  items,
+  candidateId,
+  currentResumeUrl,
+  onDeleted,
+}: {
+  items: ResumeVersion[]
+  candidateId: string
+  currentResumeUrl: string
+  onDeleted: (id: string) => void
+}) {
+  return (
+    <ul className="divide-y rounded-lg border">
+      {items.map((v) => (
+        <ResumeVersionRow
+          key={v.id}
+          version={v}
+          candidateId={candidateId}
+          isCurrent={v.url === currentResumeUrl}
+          onDeleted={onDeleted}
+        />
       ))}
     </ul>
   )
@@ -122,6 +202,10 @@ export function CandidateEditModal({
 
   function toggleStream(s: string) {
     setSelectedStreams((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
+  }
+
+  function handleResumeVersionDeleted(id: string) {
+    setResumeHistory((prev) => prev.filter((v) => v.id !== id))
   }
 
   function cancelResumeAction() {
@@ -352,21 +436,6 @@ export function CandidateEditModal({
 
                 <Field label="Резюме" full>
                   <div className="space-y-3">
-                    {candidate.resumeUrl && resumeAction === "none" && (
-                      <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-                        <LinkIcon className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate text-muted-foreground">Текущее резюме</span>
-                        <a
-                          href={candidate.resumeUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="shrink-0 font-medium text-primary hover:underline"
-                        >
-                          Открыть
-                        </a>
-                      </div>
-                    )}
-
                     {resumeAction === "none" && (
                       <div className="flex gap-2">
                         <button
@@ -454,13 +523,18 @@ export function CandidateEditModal({
                             История резюме появится здесь после следующей загрузки нового файла или ссылки.
                           </p>
                         ) : (
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-3">
                             {resumeFiles.length > 0 && (
                               <div className="space-y-1.5">
                                 <p className="text-xs font-medium text-muted-foreground">
                                   Файлы ({resumeFiles.length})
                                 </p>
-                                <ResumeVersionList items={resumeFiles} />
+                                <ResumeVersionList
+                                  items={resumeFiles}
+                                  candidateId={candidate.id}
+                                  currentResumeUrl={candidate.resumeUrl}
+                                  onDeleted={handleResumeVersionDeleted}
+                                />
                               </div>
                             )}
                             {resumeLinks.length > 0 && (
@@ -468,7 +542,12 @@ export function CandidateEditModal({
                                 <p className="text-xs font-medium text-muted-foreground">
                                   Ссылки ({resumeLinks.length})
                                 </p>
-                                <ResumeVersionList items={resumeLinks} />
+                                <ResumeVersionList
+                                  items={resumeLinks}
+                                  candidateId={candidate.id}
+                                  currentResumeUrl={candidate.resumeUrl}
+                                  onDeleted={handleResumeVersionDeleted}
+                                />
                               </div>
                             )}
                           </div>
