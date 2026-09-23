@@ -790,12 +790,14 @@ export async function getMailingLists(): Promise<MailingListSummary[]> {
     if (candidateId) entry.candidateIds.add(candidateId)
   }
 
-  return Array.from(byListId.entries()).map(([listId, { stream, date, candidateIds }]) => ({
-    listId,
-    stream,
-    date,
-    candidateCount: candidateIds.size,
-  }))
+  return Array.from(byListId.entries())
+    .map(([listId, { stream, date, candidateIds }]) => ({
+      listId,
+      stream,
+      date,
+      candidateCount: candidateIds.size,
+    }))
+    .sort((a, b) => (parseRuDate(b.date) ?? -Infinity) - (parseRuDate(a.date) ?? -Infinity))
 }
 
 /**
@@ -813,6 +815,143 @@ export function candidateMatchesStream(candidate: Profile, stream: { name: strin
 /** Active candidates (TASK-27) tagged into the given stream. */
 export function getCandidatesForStream(candidates: Profile[], stream: { name: string }): Profile[] {
   return candidates.filter((c) => candidateMatchesStream(c, stream))
+}
+
+/**
+ * Parses the ru-RU date text stored in the "Active Since" column (e.g. "21.07.2026",
+ * as written by approveCandidate()) into a timestamp. Returns null if empty/unparseable —
+ * an empty activeSince means "always eligible", not "never eligible", so callers must
+ * treat null as a pass, not a fail.
+ */
+export function parseRuDate(s: string): number | null {
+  const m = s.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/)
+  if (!m) return null
+  const [, d, mo, y] = m
+  return new Date(Number(y), Number(mo) - 1, Number(d)).getTime()
+}
+
+/**
+ * Candidates eligible for a new release of the given stream: tagged into the stream
+ * (candidateMatchesStream) and already active — activeSince is empty (never set, treated
+ * as always-eligible) or on/before today. Does not exclude candidates already published
+ * recently (TASK-05, publication pause rules, not implemented) or already in another
+ * pending release — the editor reviews the list before creating it.
+ */
+export function getEligibleCandidatesForRelease(candidates: Profile[], stream: { name: string }): Profile[] {
+  const todayEnd = new Date()
+  todayEnd.setHours(23, 59, 59, 999)
+  return getCandidatesForStream(candidates, stream).filter((c) => {
+    const t = parseRuDate(c.activeSince)
+    return t === null || t <= todayEnd.getTime()
+  })
+}
+
+/**
+ * Creates a new mailing list ("release"): one row per candidate in the "Mailing lists" sheet,
+ * all sharing the same generated List ID/stream/date — the same shape a manager would type
+ * by hand, just written in one batch call instead of row by row.
+ */
+export async function createMailingListRows(data: {
+  stream: string
+  date: string
+  candidateIds: string[]
+}): Promise<{ listId: string }> {
+  if (!data.candidateIds.length) throw new Error("Выберите хотя бы одного кандидата")
+
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+  const listId = crypto.randomUUID()
+
+  const headerRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Mailing lists'!A1:Z1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!headerRes.ok) throw new Error(`Failed to read Mailing lists header (${headerRes.status}): ${await headerRes.text()}`)
+  const headerData = (await headerRes.json()) as { values?: string[][] }
+  const rawHeaders = (headerData.values?.[0] ?? []).map((h) => (h ?? "").trim())
+  if (!rawHeaders.length) throw new Error("Лист «Mailing lists» пуст или не найден")
+  const mappedHeaders = rawHeaders.map((h) => MAILING_LIST_COL_ALIASES[h.toLowerCase()] ?? h.toLowerCase())
+
+  const rowFor = (candidateId: string) =>
+    mappedHeaders.map((h) => {
+      if (h === "list_id") return listId
+      if (h === "stream") return data.stream
+      if (h === "date") return data.date
+      if (h === "candidate_id") return candidateId
+      return ""
+    })
+
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Mailing lists'!A1")}:append` +
+    `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ values: data.candidateIds.map(rowFor) }),
+  })
+  if (!res.ok) throw new Error(`Sheets append failed (${res.status}): ${await res.text()}`)
+
+  return { listId }
+}
+
+/**
+ * Permanently deletes every row of a mailing list ("release") from the
+ * "Mailing lists" sheet. Callers must check the release was never sent
+ * (app/actions.ts checks SendPulse campaigns) — deleting a sent release
+ * would desync it from a campaign already delivered to employers.
+ */
+export async function deleteMailingListRows(listId: string): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const metaRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!metaRes.ok) throw new Error(`Failed to load sheet metadata (${metaRes.status}): ${await metaRes.text()}`)
+  const meta = (await metaRes.json()) as { sheets: { properties: { sheetId: number; title: string } }[] }
+  const sheet = meta.sheets.find((s) => s.properties.title === "Mailing lists")
+  if (!sheet) throw new Error("Лист «Mailing lists» не найден")
+
+  const values = await fetchSheetValues(sheetId, MAILING_LIST_RANGE)
+  if (!values.length) throw new Error(`Подборка не найдена: ${listId}`)
+  const rawHeaders = values[0].map((h) => (h ?? "").trim())
+  const mappedHeaders = rawHeaders.map((h) => MAILING_LIST_COL_ALIASES[h.toLowerCase()] ?? h.toLowerCase())
+  const listIdIdx = mappedHeaders.indexOf("list_id")
+  if (listIdIdx < 0) throw new Error("Лист «Mailing lists» не найден")
+
+  const sheetRows = values
+    .slice(1)
+    .map((row, i) => ({ row, sheetRow: i + 2 })) // +1 for the header row, +1 for 1-indexing
+    .filter(({ row }) => (row[listIdIdx] ?? "").trim() === listId)
+    .map(({ sheetRow }) => sheetRow)
+
+  if (!sheetRows.length) throw new Error(`Подборка не найдена: ${listId}`)
+
+  // Delete from the bottom up within one batch — otherwise deleting an earlier row
+  // shifts the indices of the rows still queued for deletion below it.
+  const requests = sheetRows
+    .sort((a, b) => b - a)
+    .map((sheetRow) => ({
+      deleteDimension: {
+        range: {
+          sheetId: sheet.properties.sheetId,
+          dimension: "ROWS",
+          startIndex: sheetRow - 1,
+          endIndex: sheetRow,
+        },
+      },
+    }))
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ requests }),
+    },
+  )
+  if (!res.ok) throw new Error(`Failed to delete mailing list rows (${res.status}): ${await res.text()}`)
 }
 
 /** Whether Google Sheets credentials are configured AND the key looks valid. */

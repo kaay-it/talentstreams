@@ -2,13 +2,13 @@
 
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
-import { appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
+import { appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateCandidateStatus, updateCandidateFields, createMailingListRows, deleteMailingListRows, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId } from "@/lib/sendpulse"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, getCampaigns } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -130,6 +130,38 @@ export async function approveCandidate(rowIndex: number, currentActiveSince?: st
 export async function rejectCandidate(rowIndex: number): Promise<void> {
   await updateCandidateStatus(rowIndex, "Отклонён" as CandidateStatus)
   revalidatePath("/editor/candidates")
+}
+
+/** Creates a new release ("Mailing lists" rows) for a stream — the automated alternative to
+ * typing rows by hand in Google Sheets. The editor picks the final candidate list in the UI;
+ * this just writes it. */
+export async function createMailingList(data: {
+  stream: string
+  date: string
+  candidateIds: string[]
+}): Promise<{ listId: string }> {
+  if (!data.stream.trim()) throw new Error("Выберите стрим")
+  if (!data.date.trim()) throw new Error("Укажите дату рассылки")
+  const result = await createMailingListRows(data)
+  revalidatePath("/editor")
+  return result
+}
+
+/** Deletes a release ("Mailing lists" rows) — only allowed before it has ever been sent,
+ * since a sent release is already out in a SendPulse campaign and deleting it here
+ * would desync the site from what employers actually received. */
+export async function deleteMailingList(listId: string): Promise<void> {
+  const list = await getMailingList(listId)
+  if (!list) throw new Error(`Подборка не найдена: ${listId}`)
+
+  const campaignTitle = `${list.stream} — ${list.date}`
+  const campaigns = await getCampaigns()
+  if (campaigns.some((c) => c.name === campaignTitle)) {
+    throw new Error("Эта рассылка уже отправлена — удалить её нельзя")
+  }
+
+  await deleteMailingListRows(listId)
+  revalidatePath("/editor")
 }
 
 export type PublishResult = {
