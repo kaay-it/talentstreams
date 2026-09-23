@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, Ban, Trash2, FileText, Link as LinkIcon, Loader2, Pencil, Plus } from "lucide-react"
+import { CheckCircle2, XCircle, Ban, Trash2, FileText, Link as LinkIcon, Loader2, Pencil, Plus, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { approveCandidate, rejectCandidate, deleteCandidate, type ResumeVersion } from "@/app/actions"
 import { CandidateEditModal } from "@/components/candidate-edit-modal"
 import { CandidateCreateModal } from "@/components/candidate-create-modal"
@@ -19,6 +19,55 @@ const STATUS_OPTIONS: { value: CandidateStatus | ""; label: string }[] = [
 ]
 
 const MAX_CHIPS = 3
+
+type SortField = "timestamp" | "activeSince"
+
+/** candidate.timestamp is written as new Date().toISOString() but can be left empty on manually-entered rows. */
+function parseIsoDate(s: string): number | null {
+  if (!s) return null
+  const t = new Date(s).getTime()
+  return Number.isNaN(t) ? null : t
+}
+
+/** candidate.activeSince is stored as ru-RU text ("21.07.2026"), not ISO — see toRuDate() in candidate-edit-modal.tsx. */
+function parseRuDate(s: string): number | null {
+  const m = s.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/)
+  if (!m) return null
+  const [, d, mo, y] = m
+  return new Date(Number(y), Number(mo) - 1, Number(d)).getTime()
+}
+
+function SortableHeader({
+  label,
+  field,
+  sortField,
+  sortDir,
+  onSort,
+}: {
+  label: string
+  field: SortField
+  sortField: SortField | null
+  sortDir: "asc" | "desc"
+  onSort: (field: SortField) => void
+}) {
+  const active = sortField === field
+  return (
+    <th className="whitespace-nowrap px-4 py-2.5 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-foreground ${active ? "text-foreground" : ""}`}
+      >
+        {label}
+        {active ? (
+          sortDir === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
+        ) : (
+          <ArrowUpDown className="size-3 opacity-40" />
+        )}
+      </button>
+    </th>
+  )
+}
 
 function ResumeChips({ items }: { items: ResumeVersion[] }) {
   if (!items.length) return <span className="text-xs text-muted-foreground">—</span>
@@ -276,6 +325,17 @@ export function CandidateSection({
   const [stream, setStream] = useState("")
   const [level, setLevel] = useState("")
   const [creating, setCreating] = useState(false)
+  const [sortField, setSortField] = useState<SortField | null>(null)
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortField(field)
+      setSortDir("desc")
+    }
+  }
 
   const levels = useMemo(
     () => Array.from(new Set(candidates.map((c) => c.level).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
@@ -295,6 +355,23 @@ export function CandidateSection({
       return true
     })
   }, [candidates, search, status, stream, level])
+
+  const sorted = useMemo(() => {
+    if (!sortField) return filtered
+    const getValue = sortField === "timestamp"
+      ? (c: Candidate) => parseIsoDate(c.timestamp)
+      : (c: Candidate) => parseRuDate(c.activeSince)
+    // Stable-ish: rows without a parseable date always sort to the end, regardless of direction.
+    return filtered
+      .map((c, i) => ({ c, i, v: getValue(c) }))
+      .sort((a, b) => {
+        if (a.v === null && b.v === null) return a.i - b.i
+        if (a.v === null) return 1
+        if (b.v === null) return -1
+        return sortDir === "asc" ? a.v - b.v : b.v - a.v
+      })
+      .map((x) => x.c)
+  }, [filtered, sortField, sortDir])
 
   return (
     <div className="space-y-3">
@@ -351,13 +428,13 @@ export function CandidateSection({
                   <th className="whitespace-nowrap px-4 py-2.5 font-medium">Контакты</th>
                   <th className="whitespace-nowrap px-4 py-2.5 font-medium">Файлы</th>
                   <th className="whitespace-nowrap px-4 py-2.5 font-medium">Ссылки</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Дата регистрации</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Активен с</th>
+                  <SortableHeader label="Дата регистрации" field="timestamp" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Активен с" field="activeSince" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                   <th className="whitespace-nowrap px-4 py-2.5 font-medium text-right">Действия</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((c) => {
+                {sorted.map((c) => {
                   const history = resumeHistory[c.id] ?? []
                   return (
                     <CandidateRow
