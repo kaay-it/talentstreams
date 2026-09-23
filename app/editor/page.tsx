@@ -85,7 +85,7 @@ export default async function ReleasesPage({
       <div className="mb-6 flex items-start gap-2 rounded-xl border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
         <p>
-          Кнопка «Создать рассылку» собирает выпуск сама — активные кандидаты стрима с уже наступившей датой «Активен с», список можно поправить перед созданием. Это единственный способ создать выпуск — данные хранятся в базе, лист «Mailing lists» в Google Sheets остался архивом и больше не читается.
+          Кнопка «Создать рассылку» собирает выпуск сама — активные кандидаты стрима с уже наступившей датой «Активен с», список можно поправить перед созданием.
           Кнопка «Отправить» создаёт кампанию в SendPulse и рассылает письмо всем работодателям стрима.
           Убедитесь, что заданы переменные окружения <code>APP_URL</code>, <code>SENDPULSE_FROM_EMAIL</code> и <code>SENDPULSE_FROM_NAME</code>.
         </p>
