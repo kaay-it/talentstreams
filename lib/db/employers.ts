@@ -64,6 +64,19 @@ export async function getEmployersByStream(stream: string): Promise<Employer[]> 
 }
 
 /**
+ * Confirmed employers subscribed to a given stream — mirrors getCandidatesForStream()
+ * (lib/sheets.ts, TASK-27): filters an already-loaded array instead of querying per stream,
+ * so a page listing all streams does one fetch instead of one per stream.
+ */
+export function confirmedEmployersForStream(employers: Employer[], stream: { name: string }): Employer[] {
+  const name = stream.name.trim().toLowerCase()
+  if (!name) return []
+  return employers.filter(
+    (e) => e.status === "Подтверждён" && e.streams.some((s) => s.trim().toLowerCase() === name),
+  )
+}
+
+/**
  * Filter candidates for a specific employer, removing those who have excluded
  * the employer's company or industry from their preferences.
  */
