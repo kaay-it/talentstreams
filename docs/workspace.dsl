@@ -70,7 +70,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         requestsPage = component "RequestsPage (/editor/requests)" "Управление запросами: два раздела — «Общие запросы» (без кандидата, 3 статуса) и «По кандидатам» (7 статусов). Выпадающий список для смены статуса." "Next.js Server Component" "Page"
 
-        streamsPage = component "StreamsPage (/editor/streams)" "Редактор стримов: список Stream / Тип / Описание из Neon. Полный CRUD через inline-редактирование (StreamsTable), удаление и добавление новых строк. Пункт «Стримы» в EditorNav." "Next.js Server Component" "Page"
+        streamsPage = component "StreamsPage (/editor/streams)" "Редактор стримов: список Stream / Тип / Описание из Neon. Полный CRUD через inline-редактирование (StreamsTable), удаление и добавление новых строк. Колонка «Кандидаты» (TASK-27) и «Подписчики» — число подтверждённых работодателей на стрим (confirmedEmployersForStream, lib/db/employers.ts), оба счётчика считаются в памяти на одном запросе, без отдельного похода в БД на стрим. Пункт «Стримы» в EditorNav." "Next.js Server Component" "Page"
 
         contactRequestsSection = component "ContactRequestsSection" "Список запросов с цветными бейджами и выпадающим статусом. Разделён на «Общие запросы» и «По кандидатам»." "React Client Component" "UI"
 
@@ -177,7 +177,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
     talentStreams.webApp.requestsPage -> talentStreams.webApp.dbLib "getContactRequests()"
     talentStreams.webApp.requestsPage -> talentStreams.webApp.sheetsLib "getProfiles()"
     talentStreams.webApp.requestsPage -> talentStreams.webApp.contactRequestsSection "Рендерит"
-    talentStreams.webApp.streamsPage -> talentStreams.webApp.dbLib "getStreamsDetailed()"
+    talentStreams.webApp.streamsPage -> talentStreams.webApp.dbLib "getStreamsDetailed() / getEmployers() — подсчёт подтверждённых подписчиков на стрим"
     talentStreams.webApp.streamsPage -> talentStreams.webApp.sheetsLib "getProfiles() — подсчёт подходящих кандидатов на стрим (TASK-27)"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.generalInquiryButton "Рендерит (при наличии токена)"
     talentStreams.webApp.contactRequestsSection -> talentStreams.webApp.serverActions "setContactRequestStatus(id)"

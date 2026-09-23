@@ -17,9 +17,11 @@ const EMPTY_FORM = { name: "", type: "Industry", description: "" }
 export function StreamsTable({
   streams,
   candidateCounts = {},
+  subscriberCounts = {},
 }: {
   streams: StreamRecord[]
   candidateCounts?: Record<number, number>
+  subscriberCounts?: Record<number, number>
 }) {
   const [editingId, setEditingId]   = useState<number | null>(null)
   const [editData, setEditData]     = useState<typeof EMPTY_FORM | null>(null)
@@ -77,6 +79,7 @@ export function StreamsTable({
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Название</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground w-36">Тип</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground w-28" title="Активные кандидаты, чей тег совпадает с названием стрима (TASK-27)">Кандидаты</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground w-28" title="Подтверждённые работодатели, подписанные на этот стрим">Подписчики</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Описание</th>
               <th className="px-4 py-3 w-20" />
             </tr>
@@ -114,6 +117,9 @@ export function StreamsTable({
                       </td>
                       <td className="px-4 py-3.5 text-muted-foreground">
                         {candidateCounts[stream.id] ?? 0}
+                      </td>
+                      <td className="px-4 py-3.5 text-muted-foreground">
+                        {subscriberCounts[stream.id] ?? 0}
                       </td>
                       <td className="px-4 py-2">
                         <input
@@ -163,6 +169,15 @@ export function StreamsTable({
                           <span className="text-muted-foreground/40">0</span>
                         )}
                       </td>
+                      <td className="px-4 py-3.5">
+                        {subscriberCounts[stream.id] ? (
+                          <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-400">
+                            {subscriberCounts[stream.id]}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/40">0</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3.5 text-muted-foreground">
                         {stream.description || <span className="text-muted-foreground/40">—</span>}
                       </td>
@@ -206,6 +221,7 @@ export function StreamsTable({
                     {STREAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </td>
+                <td className="px-4 py-3.5 text-muted-foreground/40">—</td>
                 <td className="px-4 py-3.5 text-muted-foreground/40">—</td>
                 <td className="px-4 py-2">
                   <input
