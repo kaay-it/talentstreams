@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
-import { appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
+import { appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateCandidateStatus, updateCandidateFields, createMailingListRows, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
@@ -130,6 +130,21 @@ export async function approveCandidate(rowIndex: number, currentActiveSince?: st
 export async function rejectCandidate(rowIndex: number): Promise<void> {
   await updateCandidateStatus(rowIndex, "Отклонён" as CandidateStatus)
   revalidatePath("/editor/candidates")
+}
+
+/** Creates a new release ("Mailing lists" rows) for a stream — the automated alternative to
+ * typing rows by hand in Google Sheets. The editor picks the final candidate list in the UI;
+ * this just writes it. */
+export async function createMailingList(data: {
+  stream: string
+  date: string
+  candidateIds: string[]
+}): Promise<{ listId: string }> {
+  if (!data.stream.trim()) throw new Error("Выберите стрим")
+  if (!data.date.trim()) throw new Error("Укажите дату рассылки")
+  const result = await createMailingListRows(data)
+  revalidatePath("/editor")
+  return result
 }
 
 export type PublishResult = {

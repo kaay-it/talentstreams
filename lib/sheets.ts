@@ -815,6 +815,83 @@ export function getCandidatesForStream(candidates: Profile[], stream: { name: st
   return candidates.filter((c) => candidateMatchesStream(c, stream))
 }
 
+/**
+ * Parses the ru-RU date text stored in the "Active Since" column (e.g. "21.07.2026",
+ * as written by approveCandidate()) into a timestamp. Returns null if empty/unparseable —
+ * an empty activeSince means "always eligible", not "never eligible", so callers must
+ * treat null as a pass, not a fail.
+ */
+export function parseRuDate(s: string): number | null {
+  const m = s.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/)
+  if (!m) return null
+  const [, d, mo, y] = m
+  return new Date(Number(y), Number(mo) - 1, Number(d)).getTime()
+}
+
+/**
+ * Candidates eligible for a new release of the given stream: tagged into the stream
+ * (candidateMatchesStream) and already active — activeSince is empty (never set, treated
+ * as always-eligible) or on/before today. Does not exclude candidates already published
+ * recently (TASK-05, publication pause rules, not implemented) or already in another
+ * pending release — the editor reviews the list before creating it.
+ */
+export function getEligibleCandidatesForRelease(candidates: Profile[], stream: { name: string }): Profile[] {
+  const todayEnd = new Date()
+  todayEnd.setHours(23, 59, 59, 999)
+  return getCandidatesForStream(candidates, stream).filter((c) => {
+    const t = parseRuDate(c.activeSince)
+    return t === null || t <= todayEnd.getTime()
+  })
+}
+
+/**
+ * Creates a new mailing list ("release"): one row per candidate in the "Mailing lists" sheet,
+ * all sharing the same generated List ID/stream/date — the same shape a manager would type
+ * by hand, just written in one batch call instead of row by row.
+ */
+export async function createMailingListRows(data: {
+  stream: string
+  date: string
+  candidateIds: string[]
+}): Promise<{ listId: string }> {
+  if (!data.candidateIds.length) throw new Error("Выберите хотя бы одного кандидата")
+
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+  const listId = crypto.randomUUID()
+
+  const headerRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Mailing lists'!A1:Z1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!headerRes.ok) throw new Error(`Failed to read Mailing lists header (${headerRes.status}): ${await headerRes.text()}`)
+  const headerData = (await headerRes.json()) as { values?: string[][] }
+  const rawHeaders = (headerData.values?.[0] ?? []).map((h) => (h ?? "").trim())
+  if (!rawHeaders.length) throw new Error("Лист «Mailing lists» пуст или не найден")
+  const mappedHeaders = rawHeaders.map((h) => MAILING_LIST_COL_ALIASES[h.toLowerCase()] ?? h.toLowerCase())
+
+  const rowFor = (candidateId: string) =>
+    mappedHeaders.map((h) => {
+      if (h === "list_id") return listId
+      if (h === "stream") return data.stream
+      if (h === "date") return data.date
+      if (h === "candidate_id") return candidateId
+      return ""
+    })
+
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'Mailing lists'!A1")}:append` +
+    `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ values: data.candidateIds.map(rowFor) }),
+  })
+  if (!res.ok) throw new Error(`Sheets append failed (${res.status}): ${await res.text()}`)
+
+  return { listId }
+}
+
 /** Whether Google Sheets credentials are configured AND the key looks valid. */
 export function isSheetsConfigured(): boolean {
   const sheetId = process.env.GOOGLE_SHEET_ID

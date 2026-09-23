@@ -1,9 +1,12 @@
 import { notFound } from "next/navigation"
 import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle, ExternalLink } from "lucide-react"
-import { getMailingLists } from "@/lib/sheets"
+import { getMailingLists, getProfiles, getEligibleCandidatesForRelease, isSheetsConfigured } from "@/lib/sheets"
+import { getStreams } from "@/lib/db/streams"
+import { getEmployers, confirmedEmployersForStream } from "@/lib/db/employers"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
 import { CampaignHistory } from "@/components/campaign-history"
+import { ReleaseCreateModal, type EligibleCandidate } from "@/components/release-create-modal"
 
 export const dynamic = "force-dynamic"
 
@@ -19,7 +22,28 @@ export default async function ReleasesPage({
     notFound()
   }
 
-  const [lists, campaigns] = await Promise.all([getMailingLists(), getCampaigns()])
+  const [lists, campaigns, streams, candidates, allEmployers] = await Promise.all([
+    getMailingLists(),
+    getCampaigns(),
+    getStreams(),
+    isSheetsConfigured() ? getProfiles() : Promise.resolve([]),
+    getEmployers(),
+  ])
+
+  const eligibleByStream: Record<string, EligibleCandidate[]> = Object.fromEntries(
+    streams.map((name) => [
+      name,
+      getEligibleCandidatesForRelease(candidates, { name }).map((c) => ({
+        id: c.id,
+        name: c.name,
+        title: c.title,
+        level: c.level,
+      })),
+    ]),
+  )
+  const subscriberCountByStream: Record<string, number> = Object.fromEntries(
+    streams.map((name) => [name, confirmedEmployersForStream(allEmployers, { name }).length]),
+  )
 
   const campaignsByTitle = new Map<string, Campaign[]>()
   for (const c of campaigns) {
@@ -41,17 +65,25 @@ export default async function ReleasesPage({
 
   return (
     <div className="px-6 py-8">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between gap-3">
         <h1 className="text-lg font-semibold">Выпуски</h1>
-        <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">
-          {lists.length} {mailingPlural(lists.length)}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">
+            {lists.length} {mailingPlural(lists.length)}
+          </span>
+          <ReleaseCreateModal
+            streams={streams}
+            eligibleByStream={eligibleByStream}
+            subscriberCountByStream={subscriberCountByStream}
+            editorSecret={editorSecret}
+          />
+        </div>
       </div>
 
       <div className="mb-6 flex items-start gap-2 rounded-xl border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
         <p>
-          Выпуски формируются вручную в Google Sheets (лист «Mailing lists»).
+          Кнопка «Создать рассылку» собирает выпуск сама — активные кандидаты стрима с уже наступившей датой «Активен с», список можно поправить перед созданием. Так же можно добавить строки вручную в Google Sheets (лист «Mailing lists»).
           Кнопка «Отправить» создаёт кампанию в SendPulse и рассылает письмо всем работодателям стрима.
           Убедитесь, что заданы переменные окружения <code>APP_URL</code>, <code>SENDPULSE_FROM_EMAIL</code> и <code>SENDPULSE_FROM_NAME</code>.
         </p>
