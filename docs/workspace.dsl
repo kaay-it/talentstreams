@@ -90,9 +90,9 @@ workspace "TalentStreams" "Платформа подборки проверен�
         resumeApi = component "Resume API (/api/resume)" "GET-роут прокси для приватных файлов Vercel Blob: получает ?url=, проверяет hostname (*.blob.vercel-storage.com), делает fetch с Authorization: Bearer BLOB_READ_WRITE_TOKEN и стримит ответ клиенту. Защита от open redirect по hostname." "Next.js Route Handler" "Logic"
 
         # Integrations
-        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nАутентификация: safeJsonParse() устойчив к сырым переносам строк в private_key GOOGLE_SERVICE_ACCOUNT_JSON (артефакт vercel env pull); ошибки конфигурации — конкретные (что не задано/невалидно), не общая фраза.\nЧтение: профили, подборки. Стримы (TASK-DB-8) и работодатели (TASK-DB-3) перенесены в Neon.\nЗапись: регистрации кандидатов (appendCandidateRow вызывает ensureCandidateColumns автоматически, возвращает { rowIndex } из updates.updatedRange — нужен createCandidate() для донаполнения строки сразу после вставки, TASK-33); статусы и поля кандидата (updateCandidateStatus, updateCandidateFields, включая title/summary/stream/level/countryPrimary/countryDesired/activeSince).\nУдаление: deleteCandidateRow(rowIndex) (TASK-33) — batchUpdate/deleteDimension, целится в первый лист таблицы (sheets[0]), т. к. диапазоны кандидатов нигде не квалифицированы именем листа.\nАвто-миграция колонок кандидатов: ensureCandidateColumns() — вызывается внутри appendCandidateRow() при каждой записи, не разовая ручная операция.\nАвтосоздание листов через ensureSheet().\ncandidateMatchesStream() / getCandidatesForStream() — сопоставление кандидата стриму по колонке Stream (multi-select), без учёта регистра (TASK-27 ✅).\nparseRuDate() / getEligibleCandidatesForRelease() — кандидаты стрима со статусом «Активный» (уже гарантирован getProfiles()) и уже наступившей/пустой датой Active Since (упрощённый TASK-28).\ncreateMailingListRows({ stream, date, candidateIds }) — генерирует List ID (crypto.randomUUID()), одним batch values:append пишет по строке на кандидата в лист «Mailing lists» — тот же формат, что ручной ввод, но List ID гарантированно одинаковый на всех строках (упрощённый TASK-29).\ndeleteMailingListRows(listId) — удаляет все строки выпуска одним batchUpdate (deleteDimension на каждую строку, по убыванию номера строки в одном запросе, иначе удаление верхней строки сдвигает индексы ещё не удалённых нижних).\ngetMailingLists() — сортирует выпуски по убыванию даты через parseRuDate() (новые сверху); выпуски без распознанной даты уходят в конец. Раньше отдавала в порядке появления List ID в листе, т. е. по факту в порядке добавления строк.\nContact Requests, Streams и Employers перенесены в Neon → lib/db/contact-requests.ts, lib/db/streams.ts, lib/db/employers.ts." "TypeScript, Google Sheets API v4" "Integration"
+        sheetsLib = component "Sheets Library (lib/sheets.ts)" "Весь доступ к Google Sheets через Service Account JWT.\nАутентификация: safeJsonParse() устойчив к сырым переносам строк в private_key GOOGLE_SERVICE_ACCOUNT_JSON (артефакт vercel env pull); ошибки конфигурации — конкретные (что не задано/невалидно), не общая фраза.\nЧтение: профили кандидатов. Стримы (TASK-DB-8), работодатели (TASK-DB-3) и подборки (TASK-DB-5) перенесены в Neon.\nЗапись: регистрации кандидатов (appendCandidateRow вызывает ensureCandidateColumns автоматически, возвращает { rowIndex } из updates.updatedRange — нужен createCandidate() для донаполнения строки сразу после вставки, TASK-33); статусы и поля кандидата (updateCandidateStatus, updateCandidateFields, включая title/summary/stream/level/countryPrimary/countryDesired/activeSince).\nУдаление: deleteCandidateRow(rowIndex) (TASK-33) — batchUpdate/deleteDimension, целится в первый лист таблицы (sheets[0]), т. к. диапазоны кандидатов нигде не квалифицированы именем листа.\nАвто-миграция колонок кандидатов: ensureCandidateColumns() — вызывается внутри appendCandidateRow() при каждой записи, не разовая ручная операция.\nАвтосоздание листов через ensureSheet().\ncandidateMatchesStream() / getCandidatesForStream() — сопоставление кандидата стриму по колонке Stream (multi-select), без учёта регистра (TASK-27 ✅).\nparseRuDate() / getEligibleCandidatesForRelease() — кандидаты стрима со статусом «Активный» (уже гарантирован getProfiles()) и уже наступившей/пустой датой Active Since (упрощённый TASK-28); parseRuDate() также используется lib/db/mailing-lists.ts для одноразовой конвертации ru-RU→ISO в бэкафилле (TASK-DB-5).\nContact Requests, Streams, Employers и Mailing Lists перенесены в Neon → lib/db/contact-requests.ts, lib/db/streams.ts, lib/db/employers.ts, lib/db/mailing-lists.ts (TASK-DB-5)." "TypeScript, Google Sheets API v4" "Integration"
 
-        dbLib = component "DB Library (lib/db/)" "Drizzle ORM + @neondatabase/serverless (neon-http driver).\nschema.ts — схемы таблиц contactRequests, streams, candidateResumes (TASK-32) и employers (TASK-DB-3).\nindex.ts — клиент drizzle(neon(DATABASE_URL)).\ncontact-requests.ts — appendContactRequest(), getContactRequests(), updateContactRequestStatus(id).\nstreams.ts — getStreams(), getStreamsDetailed(), createStreamRecord(), updateStreamRecord(), deleteStreamRecord().\nresumes.ts (TASK-32) — addResumeVersion({candidateId, kind, filename?, url}) (no-op если candidateId/url пустые), getResumeVersions(candidateId) — история версий резюме, новые сверху, getResumeVersionsForCandidates(ids) — то же батчем, deleteResumeVersions(candidateId) (TASK-33) — удаляет всю историю кандидата.\nemployers.ts (TASK-DB-3) — getEmployers(), getEmployerByToken(token) (прямой WHERE token = ..., не выгрузка всех строк с поиском в JS, как было в Sheets), getEmployersByStream(stream), createEmployer(data), updateEmployerFields(token, data) (объединяет прежние updateEmployerStatus+updateEmployerFields в одну функцию — в Sheets они были раздельными только из-за ячеечной записи), deleteEmployer(token), filterCandidatesForEmployer() (чистая функция без I/O, перенесена вместе с типом Employer). streams/additionalCountries — нативные Postgres text[], не comma-joined строка.\nMigrations: scripts/migrate.mjs." "TypeScript, Drizzle ORM, Neon" "Integration"
+        dbLib = component "DB Library (lib/db/)" "Drizzle ORM + @neondatabase/serverless (neon-http driver).\nschema.ts — схемы таблиц contactRequests, streams, candidateResumes (TASK-32), employers (TASK-DB-3) и mailingListEntries (TASK-DB-5).\nindex.ts — клиент drizzle(neon(DATABASE_URL)).\ncontact-requests.ts — appendContactRequest(), getContactRequests(), updateContactRequestStatus(id).\nstreams.ts — getStreams(), getStreamsDetailed(), createStreamRecord(), updateStreamRecord(), deleteStreamRecord().\nmailing-lists.ts (TASK-DB-5) — getMailingList(listId) (джойн с getProfiles() из lib/sheets.ts — кандидаты не переехали), getMailingListMeta(listId) (лёгкий вариант без джойна, для publishMailingList()/deleteMailingList()/submitContactRequest()/submitGeneralInquiry() — им нужны только stream/date), getMailingLists() (сортировка по убыванию targetDate — прямое сравнение ISO-строк, без parseRuDate), createMailingListRows({stream, date, candidateIds}) (date — ISO с <input type=\"date\">, пишется напрямую в нативную колонку targetDate), deleteMailingListRows(listId). Публичный date остаётся ru-RU текстом (isoToRu()) — конвертация происходит один раз на границе модуля, вызывающий код (кампании SendPulse, alreadySent-сопоставление, письмо) не меняется.\nresumes.ts (TASK-32) — addResumeVersion({candidateId, kind, filename?, url}) (no-op если candidateId/url пустые), getResumeVersions(candidateId) — история версий резюме, новые сверху, getResumeVersionsForCandidates(ids) — то же батчем, deleteResumeVersions(candidateId) (TASK-33) — удаляет всю историю кандидата.\nemployers.ts (TASK-DB-3) — getEmployers(), getEmployerByToken(token) (прямой WHERE token = ..., не выгрузка всех строк с поиском в JS, как было в Sheets), getEmployersByStream(stream), createEmployer(data), updateEmployerFields(token, data) (объединяет прежние updateEmployerStatus+updateEmployerFields в одну функцию — в Sheets они были раздельными только из-за ячеечной записи), deleteEmployer(token), filterCandidatesForEmployer() (чистая функция без I/O, перенесена вместе с типом Employer). streams/additionalCountries — нативные Postgres text[], не comma-joined строка.\nMigrations: scripts/migrate.mjs." "TypeScript, Drizzle ORM, Neon" "Integration"
 
         sendPulseLib = component "SendPulse Library (lib/sendpulse.ts)" "OAuth 2.0 с кэшем токена (59 мин). Кэш адресных книг с TTL 60 с.\ngetOrCreateBook() — авто-создание книги.\ngetBookEmailCount() — проверка подписчиков до рассылки.\ncreateCampaign() / getCampaigns()." "TypeScript, SendPulse REST API" "Integration"
       }
@@ -102,11 +102,11 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     employer -> talentStreams "Просматривает подборки, подписывается на рассылку, запрашивает контакт с кандидатом"
     candidate -> talentStreams "Регистрируется как кандидат"
-    editor -> googleSheets "Заполняет листы: Candidates, Mailing lists"
+    editor -> googleSheets "Заполняет лист Candidates. Mailing lists — архив прошлых выпусков, больше не читается и не заполняется приложением"
     editor -> talentStreams "Подтверждает работодателей, запускает рассылки через /editor"
 
-    talentStreams -> googleSheets "Читает профили, подборки; пишет заявки и статусы кандидатов. Стримы и работодатели перенесены в Neon." "HTTPS, Sheets API v4"
-    talentStreams -> neon "INSERT/SELECT/UPDATE contactRequests, streams, employers, candidateResumes" "HTTPS, Neon HTTP API"
+    talentStreams -> googleSheets "Читает профили; пишет заявки и статусы кандидатов. Стримы, работодатели и подборки перенесены в Neon." "HTTPS, Sheets API v4"
+    talentStreams -> neon "INSERT/SELECT/UPDATE contactRequests, streams, employers, candidateResumes, mailingListEntries" "HTTPS, Neon HTTP API"
     talentStreams -> sendPulse "Добавляет подтверждённых работодателей; создаёт кампании" "HTTPS, REST API"
     talentStreams -> vercelBlob "Загружает резюме (PUT) и читает их (GET с Bearer-токеном) через /api/upload и /api/resume" "HTTPS, Vercel Blob API"
 
@@ -144,10 +144,10 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     talentStreams.webApp.homePage -> talentStreams.webApp.sheetsLib "getStreams()"
     talentStreams.webApp.profilePage -> talentStreams.webApp.sheetsLib "getProfile(id)"
-    talentStreams.webApp.mailingListPage -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
+    talentStreams.webApp.mailingListPage -> talentStreams.webApp.dbLib "getMailingList(listId) — джойн с getProfiles() (кандидаты остаются в Sheets)"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.dbLib "getStreamsDetailed() — типы стримов для тегов на карточке (TASK-27)"
-    talentStreams.webApp.releasesPage -> talentStreams.webApp.sheetsLib "getMailingLists() / getProfiles() — подходящие кандидаты на стрим для ReleaseCreateModal"
-    talentStreams.webApp.releasesPage -> talentStreams.webApp.dbLib "getStreams() / getEmployers() — подтверждённые подписчики на стрим для ReleaseCreateModal"
+    talentStreams.webApp.releasesPage -> talentStreams.webApp.sheetsLib "getProfiles() — подходящие кандидаты на стрим для ReleaseCreateModal"
+    talentStreams.webApp.releasesPage -> talentStreams.webApp.dbLib "getMailingLists() / getStreams() / getEmployers() — выпуски и подтверждённые подписчики на стрим для ReleaseCreateModal"
     talentStreams.webApp.releasesPage -> talentStreams.webApp.sendPulseLib "getBookEmailCount() — проверка пустой книги"
     talentStreams.webApp.employersPage -> talentStreams.webApp.dbLib "getEmployers()"
     talentStreams.webApp.employersPage -> talentStreams.webApp.dbLib "getStreams() — опции фильтра"
@@ -163,8 +163,8 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     talentStreams.webApp.publishApi -> talentStreams.webApp.serverActions "publishMailingList(listId)"
 
-    talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendCandidateRow(), getMailingList()"
-    talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "createEmployer(), updateEmployerFields()"
+    talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "appendCandidateRow()"
+    talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "createEmployer(), updateEmployerFields(), getMailingListMeta(), createMailingListRows(), deleteMailingListRows()"
     talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "syncEmployerToSendPulse() / createCampaign()"
     talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "appendContactRequest() / updateContactRequestStatus(id) / addResumeVersion() / getResumeVersions(candidateId)"
 
@@ -175,7 +175,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
     editor -> talentStreams.webApp.publishApi "curl /api/publish/{listId}?token=…"
 
     talentStreams.webApp.sheetsLib -> googleSheets "fetchSheetValues(), values.update()" "HTTPS, Sheets API v4"
-    talentStreams.webApp.dbLib -> neon "INSERT / SELECT / UPDATE contactRequests, streams, employers, candidateResumes" "HTTPS, Neon HTTP API"
+    talentStreams.webApp.dbLib -> neon "INSERT / SELECT / UPDATE contactRequests, streams, employers, candidateResumes, mailingListEntries" "HTTPS, Neon HTTP API"
     talentStreams.webApp.sendPulseLib -> sendPulse "POST /oauth/access_token, GET /addressbooks, POST /addressbooks/{id}/emails, POST /campaigns" "HTTPS"
 
     talentStreams.webApp.candidateModal -> talentStreams.webApp.uploadApi "POST /api/upload (при сабмите, если выбран файл)"
@@ -235,38 +235,41 @@ workspace "TalentStreams" "Платформа подборки проверен�
     dynamic talentStreams.webApp "MailingListView" "Сценарий просмотра персонализированной подборки" {
       talentStreams.webApp.mailingListPage -> talentStreams.webApp.dbLib "getEmployerByToken(?e= из searchParams)"
       talentStreams.webApp.dbLib -> neon "SELECT * FROM employers WHERE token = ..."
-      talentStreams.webApp.mailingListPage -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
-      talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000"
+      talentStreams.webApp.mailingListPage -> talentStreams.webApp.dbLib "getMailingList(listId)"
+      talentStreams.webApp.dbLib -> neon "SELECT * FROM mailingListEntries WHERE listId = ..."
+      talentStreams.webApp.dbLib -> talentStreams.webApp.sheetsLib "getProfiles() — джойн с кандидатами, которые остаются в Sheets"
       talentStreams.webApp.sheetsLib -> googleSheets "GET профили основного листа"
       talentStreams.webApp.mailingListPage -> talentStreams.webApp.dbLib "filterCandidatesForEmployer(entries, employer)"
       talentStreams.webApp.mailingListPage -> talentStreams.webApp.contactButton "Рендерит кнопку под каждой анонимной карточкой (с employerToken)"
       autolayout lr
     }
 
-    dynamic talentStreams.webApp "CreateRelease" "Сценарий автоматического создания выпуска редактором (упрощённые TASK-28/TASK-29)" {
-      talentStreams.webApp.releaseCreateModal -> talentStreams.webApp.serverActions "createMailingList({ stream, date, candidateIds })"
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "createMailingListRows({ stream, date, candidateIds })"
-      talentStreams.webApp.sheetsLib -> googleSheets "POST 'Mailing lists'!A1:append (одним батчем, по строке на кандидата, общий List ID)"
+    dynamic talentStreams.webApp "CreateRelease" "Сценарий автоматического создания выпуска редактором (упрощённые TASK-28/TASK-29, хранение — TASK-DB-5)" {
+      talentStreams.webApp.releaseCreateModal -> talentStreams.webApp.serverActions "createMailingList({ stream, date, candidateIds }) — date уже ISO с <input type=\"date\">"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "createMailingListRows({ stream, date, candidateIds })"
+      talentStreams.webApp.dbLib -> neon "INSERT INTO mailingListEntries (одним батчем, по строке на кандидата, общий listId, targetDate = date как есть)"
       autolayout lr
     }
 
     dynamic talentStreams.webApp "DeleteRelease" "Сценарий удаления ещё не отправленного выпуска редактором" {
       talentStreams.webApp.releaseDeleteButton -> talentStreams.webApp.serverActions "deleteMailingList(listId)"
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "getMailingListMeta(listId) — только stream/date, без джойна с кандидатами"
+      talentStreams.webApp.dbLib -> neon "SELECT stream, targetDate FROM mailingListEntries WHERE listId = ... LIMIT 1"
       talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "getCampaigns() — проверка, не отправлен ли уже"
       talentStreams.webApp.sendPulseLib -> sendPulse "GET /campaigns"
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "deleteMailingListRows(listId)"
-      talentStreams.webApp.sheetsLib -> googleSheets "POST :batchUpdate (deleteDimension на каждую строку выпуска)"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "deleteMailingListRows(listId)"
+      talentStreams.webApp.dbLib -> neon "DELETE FROM mailingListEntries WHERE listId = ..."
       autolayout lr
     }
 
     dynamic talentStreams.webApp "PublishMailingList" "Сценарий публикации выпуска редактором" {
-      talentStreams.webApp.releasesPage -> talentStreams.webApp.sheetsLib "getMailingLists()"
-      talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000"
+      talentStreams.webApp.releasesPage -> talentStreams.webApp.dbLib "getMailingLists()"
+      talentStreams.webApp.dbLib -> neon "SELECT * FROM mailingListEntries"
       talentStreams.webApp.releasesPage -> talentStreams.webApp.sendPulseLib "getBookEmailCount(stream)"
       talentStreams.webApp.sendPulseLib -> sendPulse "GET /addressbooks?limit=500"
       talentStreams.webApp.publishButton -> talentStreams.webApp.serverActions "publishMailingList(listId)"
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "getMailingList(listId)"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "getMailingListMeta(listId)"
+      talentStreams.webApp.dbLib -> neon "SELECT stream, targetDate FROM mailingListEntries WHERE listId = ... LIMIT 1"
       talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "createCampaign(bookId, subject, html)"
       talentStreams.webApp.sendPulseLib -> sendPulse "POST /oauth/access_token → POST /campaigns"
       autolayout lr
@@ -276,8 +279,8 @@ workspace "TalentStreams" "Платформа подборки проверен�
       talentStreams.webApp.contactButton -> talentStreams.webApp.serverActions "submitContactRequest(candidateId, listId, employerToken)"
       talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "getEmployerByToken(token) — только проверка существования"
       talentStreams.webApp.dbLib -> neon "SELECT * FROM employers WHERE token = ..."
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sheetsLib "getMailingLists() — получение имени стрима"
-      talentStreams.webApp.sheetsLib -> googleSheets "GET 'Mailing lists'!A1:Z1000"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "getMailingListMeta(listId) — получение имени стрима"
+      talentStreams.webApp.dbLib -> neon "SELECT stream, targetDate FROM mailingListEntries WHERE listId = ... LIMIT 1"
       talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "getStreamIdByName(name) — резолвит streamId"
       talentStreams.webApp.dbLib -> neon "SELECT id FROM streams WHERE name = ..."
       talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "appendContactRequest({id: uuid, listId, streamId, candidateId, employerToken, status: 'Новый запрос'})"

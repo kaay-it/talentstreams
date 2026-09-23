@@ -22,7 +22,7 @@ actor       "Кандидат"              as candidate
 participant "TalentStreams\nWeb App" as app
 participant "Neon · streams"        as neonStreams  #d4f0d4
 participant "Sheets · Candidates"   as sh_cands    #d0e8ff
-participant "Sheets · Mailing lists" as sh_mail    #d0e8ff
+participant "Neon · mailingListEntries" as sh_mail  #d4f0d4
 participant "Neon · employers"      as sh_emp      #d4f0d4
 participant "Vercel Blob\n(private)" as blob       #fff3cd
 participant "Neon · contactRequests" as neonDb     #d4f0d4
@@ -379,42 +379,43 @@ note right of sh_cands
   getProfiles() фильтрует: Status = «Активный» или пустой (legacy)
 end note
 
-alt Через кнопку «Создать рассылку» (упрощённые TASK-28/TASK-29)
-  editor -> app : Открывает ReleaseCreateModal, выбирает стрим и дату
-  app -> sh_cands : getEligibleCandidatesForRelease(candidates, stream)\n(уже загружены постранично при рендере /editor —\nстатус «Активный» через getProfiles(), плюс Active Since\nпустой или уже наступил)
-  sh_cands --> app : подходящие кандидаты + число подтверждённых\nподписчиков (confirmedEmployersForStream)
-  app --> editor : Предзаполненный чекбокс-список\n(предупреждение, если < 6 / > 10 или 0 подписчиков)
-  editor -> app : Снимает/оставляет кандидатов, жмёт «Создать рассылку»
-  app -> app : createMailingList({ stream, date, candidateIds })
-  app -> sh_mail : createMailingListRows(...)\nList ID = crypto.randomUUID(), один batch values:append —\nпо строке на кандидата, List ID гарантированно одинаковый
-  sh_mail --> app : { listId }
-  app --> editor : «Выпуск создан» + ссылка на подборку
-else Вручную в Google Sheets
-  editor -> sh_mail : Создаёт строки нового выпуска\n(List ID — UUID, Stream, Date, Candidate ID — UUID)
-end
+editor -> app : Открывает ReleaseCreateModal, выбирает стрим и дату
+app -> sh_cands : getEligibleCandidatesForRelease(candidates, stream)\n(уже загружены постранично при рендере /editor —\nстатус «Активный» через getProfiles(), плюс Active Since\nпустой или уже наступил)
+sh_cands --> app : подходящие кандидаты + число подтверждённых\nподписчиков (confirmedEmployersForStream)
+app --> editor : Предзаполненный чекбокс-список\n(предупреждение, если < 6 / > 10 или 0 подписчиков)
+editor -> app : Снимает/оставляет кандидатов, жмёт «Создать рассылку»
+app -> app : createMailingList({ stream, date, candidateIds })\n(date уже ISO — берётся прямо из <input type="date">)
+app -> sh_mail : createMailingListRows(...)\nlistId = crypto.randomUUID(), один batch INSERT —\nпо строке на кандидата, listId гарантированно одинаковый
+sh_mail --> app : { listId }
+app --> editor : «Выпуск создан» + ссылка на подборку
 
 note right of sh_mail
-  List ID (UUID)                        | Stream  | Date       | Candidate ID (UUID)
-  f04a9b3e-2c7d-4e1f-b8a0-3d6c9e5f1027 | Finance | 21.07.2026 | a3f8e2c1-…
-  f04a9b3e-2c7d-4e1f-b8a0-3d6c9e5f1027 | Finance | 21.07.2026 | 7c1d4f82-…
-  Оба пути пишут в один и тот же формат — ручной ввод по-прежнему
-  доступен, автоматика лишь избавляет от риска разных List ID
-  в строках одного выпуска (частая ошибка при вставке пачкой).
+  Таблица mailingListEntries (Neon / PostgreSQL, TASK-DB-5):
+  ──────────────────────────────────────────────────────────────────────
+  id (UUID)  | listId (UUID) | stream  | targetDate | candidateId (UUID)
+  9c1b2e3f-… | f04a9b3e-…    | Finance | 2026-07-21 | a3f8e2c1-…
+  4d5e6a7b-… | f04a9b3e-…    | Finance | 2026-07-21 | 7c1d4f82-…
+  targetDate — нативная Postgres date-колонка (не текст); наружу
+  (кампании SendPulse, письмо, UI) отдаётся как ru-RU текст через
+  isoToRu(). Одинаковый listId на всех строках выпуска гарантирован
+  одним batch INSERT — единственный способ создать выпуск теперь и
+  есть эта кнопка: архивный лист «Mailing lists» в Sheets больше не
+  читается, ручной ввод туда ни на что не влияет.
 end note
 
 == 4а. Редактор удаляет ещё не отправленный выпуск ==
 
 editor -> app : Нажимает корзину у карточки выпуска\n(видна только пока выпуск ни разу не отправлялся),\nподтверждает «Да, удалить»
 app -> app : deleteMailingList("f04a9b3e-…")
-app -> sh_mail : getMailingList("f04a9b3e-…")
-sh_mail --> app : { stream: "Finance", date: "21.07.2026", … }
+app -> sh_mail : getMailingListMeta("f04a9b3e-…")\n(лёгкий запрос — только stream/targetDate, без джойна с кандидатами)
+sh_mail --> app : { stream: "Finance", date: "21.07.2026" }
 app -> sp_camp : getCampaigns()\n(проверка: нет ли уже кампании с именем "Finance — 21.07.2026")
 sp_camp --> app : список кампаний
 
 alt кампания с таким именем уже есть
   app --> editor : Ошибка «Эта рассылка уже отправлена — удалить её нельзя»
 else кампании ещё нет
-  app -> sh_mail : deleteMailingListRows("f04a9b3e-…")\nbatchUpdate: deleteDimension на каждую строку выпуска,\nпо убыванию номера строки в одном запросе
+  app -> sh_mail : deleteMailingListRows("f04a9b3e-…")\nDELETE FROM mailingListEntries WHERE listId = ...
   sh_mail --> app : OK
   app --> editor : Карточка выпуска пропадает из списка
 end
@@ -434,8 +435,8 @@ note over editor, app
 end note
 
 editor -> app : publishMailingList("f04a9b3e-…")\n(Server Action или API-роут)
-app -> sh_mail : getMailingList("f04a9b3e-…")
-sh_mail --> app : { stream: "Finance", date: "21.07.2026",\n  entries: [2 кандидата] }
+app -> sh_mail : getMailingListMeta("f04a9b3e-…")
+sh_mail --> app : { stream: "Finance", date: "21.07.2026" }
 
 app -> sp_camp : POST /oauth/access_token
 sp_camp --> app : { access_token }
@@ -463,9 +464,9 @@ employer -> app : GET /list/f04a9b3e-…?e=8f3a1c…
 app -> sh_emp : getEmployerByToken("8f3a1c…")
 sh_emp --> app : { name, company, country, … }
 app -> sh_mail : getMailingList("f04a9b3e-…")
-sh_mail --> app : { stream, date, candidate_ids: [UUID, UUID] }
-app -> sh_cands : getProfiles() → фильтр по candidate_ids
-sh_cands --> app : профили кандидатов
+sh_mail -> sh_cands : getProfiles() → джойн по candidateId\n(кандидаты остаются в Sheets, не переехали в TASK-DB-5)
+sh_cands --> sh_mail : профили кандидатов
+sh_mail --> app : { stream, date, entries: [{ profile, mailingStream }, …] }
 app -> app : filterCandidatesForEmployer(candidates, employer)\n(in-memory: excludedCompanies, excludedIndustries,\nгео: countryPrimary/countryDesired ∩ employer.country+additionalCountries;\n«Любая» → без гео-фильтра; нет данных о стране → скрыть)
 app -> neonStreams : getStreamsDetailed() — типы стримов для тегов (TASK-27)
 neonStreams --> app : [{ name, type }, …]
@@ -473,9 +474,9 @@ app --> employer : Страница выпуска: анонимные карт�
 else ?secret=[EDITOR_SECRET] — доступ редактора (все кандидаты)
 editor -> app : GET /list/f04a9b3e-…?secret=…
 app -> sh_mail : getMailingList("f04a9b3e-…")
-sh_mail --> app : { stream, date, candidate_ids: [UUID, UUID] }
-app -> sh_cands : getProfiles() → фильтр по candidate_ids
-sh_cands --> app : все профили (без фильтрации)
+sh_mail -> sh_cands : getProfiles() → джойн по candidateId
+sh_cands --> sh_mail : все профили (без фильтрации)
+sh_mail --> app : { stream, date, entries: [{ profile, mailingStream }, …] }
 app --> editor : Страница выпуска: все кандидаты без исключений
 else без параметров — 404
 employer -> app : GET /list/f04a9b3e-… (без токена)
@@ -493,8 +494,8 @@ employer -> app : Нажимает «Хочу связаться» под кар
 app -> app : submitContactRequest(candidateId, listId, employerToken)
 app -> sh_emp : getEmployerByToken(employerToken)\n(только проверка, что токен существует)
 sh_emp --> app : employer | null
-app -> sh_mail : getMailingLists() → имя стрима для listId
-sh_mail --> app : { stream: "Finance", … }
+app -> sh_mail : getMailingListMeta(listId) → имя стрима
+sh_mail --> app : { stream: "Finance", date: "21.07.2026" }
 app -> neonStreams : getStreamIdByName("Finance")
 neonStreams --> app : streamId
 app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, streamId,\n  candidateId, employerToken, status: "Новый запрос" }
@@ -525,8 +526,8 @@ employer -> app : Нажимает «Связаться с нами»
 app -> app : submitGeneralInquiry(listId, employerToken)
 app -> sh_emp : getEmployerByToken(employerToken)\n(только проверка, что токен существует)
 sh_emp --> app : employer | null
-app -> sh_mail : getMailingLists() → имя стрима для listId
-sh_mail --> app : { stream: "Finance", … }
+app -> sh_mail : getMailingListMeta(listId) → имя стрима
+sh_mail --> app : { stream: "Finance", date: "21.07.2026" }
 app -> neonStreams : getStreamIdByName("Finance")
 neonStreams --> app : streamId
 app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, streamId,\n  candidateId: "", employerToken, status: "Новый запрос" }

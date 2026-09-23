@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
-import { appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateCandidateStatus, updateCandidateFields, createMailingListRows, deleteMailingListRows, type CandidateStatus } from "@/lib/sheets"
+import { appendCandidateRow, deleteCandidateRow, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
+import { getMailingListMeta, createMailingListRows, deleteMailingListRows } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
@@ -151,7 +152,7 @@ export async function createMailingList(data: {
  * since a sent release is already out in a SendPulse campaign and deleting it here
  * would desync the site from what employers actually received. */
 export async function deleteMailingList(listId: string): Promise<void> {
-  const list = await getMailingList(listId)
+  const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
 
   const campaignTitle = `${list.stream} — ${list.date}`
@@ -311,7 +312,7 @@ async function createCampaign(
 }
 
 export async function publishMailingList(listId: string): Promise<PublishResult> {
-  const list = await getMailingList(listId)
+  const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
 
   const token = await getToken()
@@ -677,8 +678,7 @@ export async function submitGeneralInquiry(listId: string, employerToken: string
   const employer = await getEmployerByToken(employerToken)
   if (!employer) throw new Error("Работодатель не найден")
 
-  const lists = await getMailingLists()
-  const list = lists.find((l) => l.listId === listId)
+  const list = await getMailingListMeta(listId)
   const streamId = await getStreamIdByName(list?.stream ?? "")
 
   await appendContactRequest({
@@ -699,8 +699,7 @@ export async function submitContactRequest(
   const employer = await getEmployerByToken(employerToken)
   if (!employer) throw new Error("Работодатель не найден")
 
-  const lists = await getMailingLists()
-  const list = lists.find((l) => l.listId === listId)
+  const list = await getMailingListMeta(listId)
   const streamId = await getStreamIdByName(list?.stream ?? "")
 
   await appendContactRequest({

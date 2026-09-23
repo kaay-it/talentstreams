@@ -115,7 +115,7 @@ export function ReleaseCreateModal({
     try {
       const result = await createMailingList({
         stream,
-        date: toRuDate(date),
+        date,
         candidateIds: [...selectedIds],
       })
       setCreatedListId(result.listId)

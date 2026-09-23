@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation"
 import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle, ExternalLink } from "lucide-react"
-import { getMailingLists, getProfiles, getEligibleCandidatesForRelease, isSheetsConfigured } from "@/lib/sheets"
+import { getProfiles, getEligibleCandidatesForRelease, isSheetsConfigured } from "@/lib/sheets"
+import { getMailingLists } from "@/lib/db/mailing-lists"
 import { getStreams } from "@/lib/db/streams"
 import { getEmployers, confirmedEmployersForStream } from "@/lib/db/employers"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
