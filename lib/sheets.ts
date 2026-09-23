@@ -892,6 +892,66 @@ export async function createMailingListRows(data: {
   return { listId }
 }
 
+/**
+ * Permanently deletes every row of a mailing list ("release") from the
+ * "Mailing lists" sheet. Callers must check the release was never sent
+ * (app/actions.ts checks SendPulse campaigns) — deleting a sent release
+ * would desync it from a campaign already delivered to employers.
+ */
+export async function deleteMailingListRows(listId: string): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const metaRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!metaRes.ok) throw new Error(`Failed to load sheet metadata (${metaRes.status}): ${await metaRes.text()}`)
+  const meta = (await metaRes.json()) as { sheets: { properties: { sheetId: number; title: string } }[] }
+  const sheet = meta.sheets.find((s) => s.properties.title === "Mailing lists")
+  if (!sheet) throw new Error("Лист «Mailing lists» не найден")
+
+  const values = await fetchSheetValues(sheetId, MAILING_LIST_RANGE)
+  if (!values.length) throw new Error(`Подборка не найдена: ${listId}`)
+  const rawHeaders = values[0].map((h) => (h ?? "").trim())
+  const mappedHeaders = rawHeaders.map((h) => MAILING_LIST_COL_ALIASES[h.toLowerCase()] ?? h.toLowerCase())
+  const listIdIdx = mappedHeaders.indexOf("list_id")
+  if (listIdIdx < 0) throw new Error("Лист «Mailing lists» не найден")
+
+  const sheetRows = values
+    .slice(1)
+    .map((row, i) => ({ row, sheetRow: i + 2 })) // +1 for the header row, +1 for 1-indexing
+    .filter(({ row }) => (row[listIdIdx] ?? "").trim() === listId)
+    .map(({ sheetRow }) => sheetRow)
+
+  if (!sheetRows.length) throw new Error(`Подборка не найдена: ${listId}`)
+
+  // Delete from the bottom up within one batch — otherwise deleting an earlier row
+  // shifts the indices of the rows still queued for deletion below it.
+  const requests = sheetRows
+    .sort((a, b) => b - a)
+    .map((sheetRow) => ({
+      deleteDimension: {
+        range: {
+          sheetId: sheet.properties.sheetId,
+          dimension: "ROWS",
+          startIndex: sheetRow - 1,
+          endIndex: sheetRow,
+        },
+      },
+    }))
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ requests }),
+    },
+  )
+  if (!res.ok) throw new Error(`Failed to delete mailing list rows (${res.status}): ${await res.text()}`)
+}
+
 /** Whether Google Sheets credentials are configured AND the key looks valid. */
 export function isSheetsConfigured(): boolean {
   const sheetId = process.env.GOOGLE_SHEET_ID

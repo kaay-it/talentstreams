@@ -2,13 +2,13 @@
 
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
-import { appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateCandidateStatus, updateCandidateFields, createMailingListRows, type CandidateStatus } from "@/lib/sheets"
+import { appendCandidateRow, deleteCandidateRow, getMailingList, getMailingLists, updateCandidateStatus, updateCandidateFields, createMailingListRows, deleteMailingListRows, type CandidateStatus } from "@/lib/sheets"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId } from "@/lib/sendpulse"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, getCampaigns } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -145,6 +145,23 @@ export async function createMailingList(data: {
   const result = await createMailingListRows(data)
   revalidatePath("/editor")
   return result
+}
+
+/** Deletes a release ("Mailing lists" rows) — only allowed before it has ever been sent,
+ * since a sent release is already out in a SendPulse campaign and deleting it here
+ * would desync the site from what employers actually received. */
+export async function deleteMailingList(listId: string): Promise<void> {
+  const list = await getMailingList(listId)
+  if (!list) throw new Error(`Подборка не найдена: ${listId}`)
+
+  const campaignTitle = `${list.stream} — ${list.date}`
+  const campaigns = await getCampaigns()
+  if (campaigns.some((c) => c.name === campaignTitle)) {
+    throw new Error("Эта рассылка уже отправлена — удалить её нельзя")
+  }
+
+  await deleteMailingListRows(listId)
+  revalidatePath("/editor")
 }
 
 export type PublishResult = {

@@ -5,6 +5,7 @@ import { getStreams } from "@/lib/db/streams"
 import { getEmployers, confirmedEmployersForStream } from "@/lib/db/employers"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
+import { ReleaseDeleteButton } from "@/components/release-delete-button"
 import { CampaignHistory } from "@/components/campaign-history"
 import { ReleaseCreateModal, type EligibleCandidate } from "@/components/release-create-modal"
 
@@ -142,7 +143,10 @@ export default async function ReleasesPage({
                     </div>
                   </div>
 
-                  <PublishButton listId={list.listId} alreadySent={alreadySent} bookEmpty={bookEmpty} />
+                  <div className="flex items-center gap-1">
+                    <PublishButton listId={list.listId} alreadySent={alreadySent} bookEmpty={bookEmpty} />
+                    {!alreadySent && <ReleaseDeleteButton listId={list.listId} />}
+                  </div>
                 </div>
 
                 <CampaignHistory campaigns={matchedCampaigns} />

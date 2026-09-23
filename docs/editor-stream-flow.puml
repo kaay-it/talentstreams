@@ -402,6 +402,29 @@ note right of sh_mail
   в строках одного выпуска (частая ошибка при вставке пачкой).
 end note
 
+== 4а. Редактор удаляет ещё не отправленный выпуск ==
+
+editor -> app : Нажимает корзину у карточки выпуска\n(видна только пока выпуск ни разу не отправлялся),\nподтверждает «Да, удалить»
+app -> app : deleteMailingList("f04a9b3e-…")
+app -> sh_mail : getMailingList("f04a9b3e-…")
+sh_mail --> app : { stream: "Finance", date: "21.07.2026", … }
+app -> sp_camp : getCampaigns()\n(проверка: нет ли уже кампании с именем "Finance — 21.07.2026")
+sp_camp --> app : список кампаний
+
+alt кампания с таким именем уже есть
+  app --> editor : Ошибка «Эта рассылка уже отправлена — удалить её нельзя»
+else кампании ещё нет
+  app -> sh_mail : deleteMailingListRows("f04a9b3e-…")\nbatchUpdate: deleteDimension на каждую строку выпуска,\nпо убыванию номера строки в одном запросе
+  sh_mail --> app : OK
+  app --> editor : Карточка выпуска пропадает из списка
+end
+
+note right of sh_mail
+  UI прячет корзину для уже отправленных выпусков (alreadySent),
+  но серверный deleteMailingList() перепроверяет это сам через
+  SendPulse — на случай прямого вызова action в обход интерфейса.
+end note
+
 == 5. Редактор запускает рассылку ==
 
 note over editor, app
