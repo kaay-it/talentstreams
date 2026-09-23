@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation"
 import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle, ExternalLink } from "lucide-react"
-import { getMailingLists, getProfiles, getEligibleCandidatesForRelease, isSheetsConfigured } from "@/lib/sheets"
+import { getProfiles, getEligibleCandidatesForRelease, isSheetsConfigured } from "@/lib/sheets"
+import { getMailingLists } from "@/lib/db/mailing-lists"
 import { getStreams } from "@/lib/db/streams"
 import { getEmployers, confirmedEmployersForStream } from "@/lib/db/employers"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
@@ -84,7 +85,7 @@ export default async function ReleasesPage({
       <div className="mb-6 flex items-start gap-2 rounded-xl border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
         <p>
-          Кнопка «Создать рассылку» собирает выпуск сама — активные кандидаты стрима с уже наступившей датой «Активен с», список можно поправить перед созданием. Так же можно добавить строки вручную в Google Sheets (лист «Mailing lists»).
+          Кнопка «Создать рассылку» собирает выпуск сама — активные кандидаты стрима с уже наступившей датой «Активен с», список можно поправить перед созданием. Это единственный способ создать выпуск — данные хранятся в базе, лист «Mailing lists» в Google Sheets остался архивом и больше не читается.
           Кнопка «Отправить» создаёт кампанию в SendPulse и рассылает письмо всем работодателям стрима.
           Убедитесь, что заданы переменные окружения <code>APP_URL</code>, <code>SENDPULSE_FROM_EMAIL</code> и <code>SENDPULSE_FROM_NAME</code>.
         </p>
@@ -92,7 +93,7 @@ export default async function ReleasesPage({
 
       {lists.length === 0 ? (
         <div className="rounded-xl border border-dashed p-12 text-center text-muted-foreground">
-          Подборок пока нет. Добавьте строки в лист «Mailing lists» в Google Sheets.
+          Подборок пока нет. Нажмите «Создать рассылку», чтобы собрать первый выпуск.
         </div>
       ) : (
         <div className="space-y-3">

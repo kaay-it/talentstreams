@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, text, timestamp, date } from "drizzle-orm/pg-core"
 
 export const streams = pgTable("streams", {
   id:          serial("id").primaryKey(),
@@ -30,6 +30,14 @@ export const employers = pgTable("employers", {
   country:             text("country").notNull().default(""),
   additionalCountries: text("additionalCountries").array().notNull().default([]),
   timestamp:           timestamp("timestamp").defaultNow().notNull(),
+})
+
+export const mailingListEntries = pgTable("mailingListEntries", {
+  id:          text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  listId:      text("listId").notNull(),
+  stream:      text("stream").notNull().default(""),
+  targetDate:  date("targetDate", { mode: "string" }).notNull(),
+  candidateId: text("candidateId").notNull().default(""),
 })
 
 export const contactRequests = pgTable("contactRequests", {
