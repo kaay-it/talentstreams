@@ -12,7 +12,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     # ── Внешние системы ──────────────────────────────────────────────────────
 
-    googleSheets = softwareSystem "Google Sheets" "Хранилище данных: профили кандидатов, подборки рассылок. Стримы, работодатели и Contact Requests перенесены в Neon." "External"
+    googleSheets = softwareSystem "Google Sheets" "Хранилище данных: профили кандидатов. Стримы, работодатели, Contact Requests и подборки рассылок (Mailing Lists, TASK-DB-5) перенесены в Neon — лист Mailing Lists удалён из таблицы полностью." "External"
 
     neon = softwareSystem "Neon (PostgreSQL)" "Serverless PostgreSQL через Vercel Marketplace. Таблицы: contactRequests (FK на employers/streams), streams, candidateResumes (TASK-32 — история версий резюме кандидата), employers (TASK-DB-3). Подключение через neon-http driver (HTTP, без WebSocket)." "External"
 
@@ -102,7 +102,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     employer -> talentStreams "Просматривает подборки, подписывается на рассылку, запрашивает контакт с кандидатом"
     candidate -> talentStreams "Регистрируется как кандидат"
-    editor -> googleSheets "Заполняет лист Candidates. Mailing lists — архив прошлых выпусков, больше не читается и не заполняется приложением"
+    editor -> googleSheets "Заполняет лист Candidates. Лист Mailing lists удалён (TASK-DB-5) — выпуски хранятся в Neon"
     editor -> talentStreams "Подтверждает работодателей, запускает рассылки через /editor"
 
     talentStreams -> googleSheets "Читает профили; пишет заявки и статусы кандидатов. Стримы, работодатели и подборки перенесены в Neon." "HTTPS, Sheets API v4"
