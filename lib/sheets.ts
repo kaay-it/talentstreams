@@ -790,12 +790,14 @@ export async function getMailingLists(): Promise<MailingListSummary[]> {
     if (candidateId) entry.candidateIds.add(candidateId)
   }
 
-  return Array.from(byListId.entries()).map(([listId, { stream, date, candidateIds }]) => ({
-    listId,
-    stream,
-    date,
-    candidateCount: candidateIds.size,
-  }))
+  return Array.from(byListId.entries())
+    .map(([listId, { stream, date, candidateIds }]) => ({
+      listId,
+      stream,
+      date,
+      candidateCount: candidateIds.size,
+    }))
+    .sort((a, b) => (parseRuDate(b.date) ?? -Infinity) - (parseRuDate(a.date) ?? -Infinity))
 }
 
 /**
