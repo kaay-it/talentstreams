@@ -116,9 +116,14 @@ async function removeEmployerFromSendPulse(employer: { email: string; streams: s
   )
 }
 
-export async function approveCandidate(rowIndex: number): Promise<void> {
-  const today = new Date().toLocaleDateString("ru-RU")
-  await updateCandidateStatus(rowIndex, "Активный" as CandidateStatus, today)
+/**
+ * currentActiveSince is the value already shown in the editor for this candidate — if it's
+ * already set (e.g. re-approving a previously disabled candidate), it's left untouched;
+ * "Активен с" only gets today's date when the field was empty.
+ */
+export async function approveCandidate(rowIndex: number, currentActiveSince?: string): Promise<void> {
+  const activeSince = currentActiveSince?.trim() ? undefined : new Date().toLocaleDateString("ru-RU")
+  await updateCandidateStatus(rowIndex, "Активный" as CandidateStatus, activeSince)
   revalidatePath("/editor/candidates")
 }
 
