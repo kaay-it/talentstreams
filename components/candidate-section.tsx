@@ -125,7 +125,7 @@ function CandidateRow({
   function handleApprove() {
     startTransition(async () => {
       setLocalStatus("approved")
-      await approveCandidate(candidate.rowIndex)
+      await approveCandidate(candidate.rowIndex, candidate.activeSince)
     })
   }
 
