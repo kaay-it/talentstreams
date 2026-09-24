@@ -134,3 +134,26 @@ export async function createMailingListRows(data: {
 export async function deleteMailingListRows(listId: string): Promise<void> {
   await db.delete(mailingListEntries).where(eq(mailingListEntries.listId, listId))
 }
+
+export type CandidateMailingHistoryEntry = { listId: string; stream: string; date: string }
+
+/** Every release a candidate has ever been included in, newest first (TASK-05 groundwork —
+ * visibility into publication history before any pause-rule enforcement is built on top of it). */
+export async function getMailingListsForCandidate(candidateId: string): Promise<CandidateMailingHistoryEntry[]> {
+  if (!candidateId) return []
+
+  const rows = await db
+    .select({ listId: mailingListEntries.listId, stream: mailingListEntries.stream, targetDate: mailingListEntries.targetDate })
+    .from(mailingListEntries)
+    .where(eq(mailingListEntries.candidateId, candidateId))
+
+  const byListId = new Map<string, { stream: string; targetDate: string }>()
+  for (const row of rows) {
+    if (!byListId.has(row.listId)) byListId.set(row.listId, { stream: row.stream, targetDate: row.targetDate })
+  }
+
+  return Array.from(byListId.entries())
+    .map(([listId, { stream, targetDate }]) => ({ listId, stream, targetDate }))
+    .sort((a, b) => b.targetDate.localeCompare(a.targetDate))
+    .map(({ listId, stream, targetDate }) => ({ listId, stream, date: isoToRu(targetDate) }))
+}
