@@ -1,0 +1,1 @@
+ALTER TABLE "mailingListEntries" DROP COLUMN "stream";

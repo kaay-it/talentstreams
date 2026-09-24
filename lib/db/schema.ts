@@ -5,6 +5,7 @@ export const streams = pgTable("streams", {
   name:        text("name").notNull().unique(),
   type:        text("type").notNull().default(""),
   description: text("description").notNull().default(""),
+  status:      text("status").notNull().default("Активный"),
 })
 
 export const candidateResumes = pgTable("candidateResumes", {
@@ -35,7 +36,7 @@ export const employers = pgTable("employers", {
 export const mailingListEntries = pgTable("mailingListEntries", {
   id:          text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   listId:      text("listId").notNull(),
-  stream:      text("stream").notNull().default(""),
+  streamId:    integer("streamId").references(() => streams.id, { onDelete: "set null" }),
   targetDate:  date("targetDate", { mode: "string" }).notNull(),
   candidateId: text("candidateId").notNull().default(""),
 })
