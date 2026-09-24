@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
 import { appendCandidateRow, deleteCandidateRow, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
-import { getMailingListMeta, createMailingListRows, deleteMailingListRows } from "@/lib/db/mailing-lists"
+import { getMailingListMeta, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
@@ -486,6 +486,21 @@ export async function updateCandidate(
 /** Resume version history for a candidate (editor only — keyed by the Sheets `id` column). */
 export async function getCandidateResumeHistory(candidateId: string): Promise<ResumeVersion[]> {
   return getResumeVersions(candidateId)
+}
+
+export type CandidateMailingHistoryEntry = { listId: string; stream: string; date: string; sent: boolean }
+
+/**
+ * Every release a candidate has ever been included in, newest first — visibility groundwork for
+ * TASK-05 (publication pause rules, §13 ТЗ), before any automatic pause enforcement exists.
+ * `sent` cross-references SendPulse campaigns (a release can be created and never actually sent,
+ * or deleted before sending) by the same `${stream} — ${date}` name publishMailingList() uses.
+ */
+export async function getCandidateMailingHistory(candidateId: string): Promise<CandidateMailingHistoryEntry[]> {
+  if (!candidateId) return []
+  const [entries, campaigns] = await Promise.all([getMailingListsForCandidate(candidateId), getCampaigns()])
+  const campaignNames = new Set(campaigns.map((c) => c.name))
+  return entries.map((e) => ({ ...e, sent: campaignNames.has(`${e.stream} — ${e.date}`) }))
 }
 
 /**

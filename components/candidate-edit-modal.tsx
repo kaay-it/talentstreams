@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useTransition } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Plus, Trash2 } from "lucide-react"
-import { updateCandidate, getCandidateResumeHistory, deleteCandidateResumeVersion, type ResumeVersion } from "@/app/actions"
+import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Plus, Trash2, CheckCircle2 } from "lucide-react"
+import { updateCandidate, getCandidateResumeHistory, deleteCandidateResumeVersion, getCandidateMailingHistory, type ResumeVersion, type CandidateMailingHistoryEntry } from "@/app/actions"
 import { ADDITIONAL_COUNTRIES } from "@/components/employer-registration-modal"
 import { withDownloadFilename } from "@/lib/blob"
 import type { Candidate } from "@/lib/sheets"
@@ -198,6 +198,18 @@ export function CandidateEditModal({
       .then(setResumeHistory)
       .catch(() => setResumeHistory([]))
       .finally(() => setHistoryLoading(false))
+  }, [candidate.id])
+
+  const [mailingHistory, setMailingHistory] = useState<CandidateMailingHistoryEntry[]>([])
+  const [mailingHistoryLoading, setMailingHistoryLoading] = useState(false)
+
+  useEffect(() => {
+    if (!candidate.id) return
+    setMailingHistoryLoading(true)
+    getCandidateMailingHistory(candidate.id)
+      .then(setMailingHistory)
+      .catch(() => setMailingHistory([]))
+      .finally(() => setMailingHistoryLoading(false))
   }, [candidate.id])
 
   function toggleStream(s: string) {
@@ -423,6 +435,35 @@ export function CandidateEditModal({
                     <p className="text-sm text-muted-foreground">Стримы не настроены</p>
                   )}
                 </Field>
+
+                {candidate.id && (
+                  <Field label="История рассылок" full>
+                    {mailingHistoryLoading ? (
+                      <p className="text-xs text-muted-foreground">Загрузка истории рассылок…</p>
+                    ) : mailingHistory.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Кандидат ещё не попадал ни в один выпуск.
+                      </p>
+                    ) : (
+                      <ul className="divide-y rounded-lg border">
+                        {mailingHistory.map((entry) => (
+                          <li key={entry.listId} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                            <span className="shrink-0 text-muted-foreground">{entry.date}</span>
+                            <span className="min-w-0 flex-1 truncate text-foreground">{entry.stream}</span>
+                            {entry.sent ? (
+                              <span className="inline-flex shrink-0 items-center gap-1 text-emerald-600">
+                                <CheckCircle2 className="size-3.5" />
+                                Отправлено
+                              </span>
+                            ) : (
+                              <span className="shrink-0 text-muted-foreground">Не отправлено</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </Field>
+                )}
 
                 <Field label="Summary" full>
                   <textarea
