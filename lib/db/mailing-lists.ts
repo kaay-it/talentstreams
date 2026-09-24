@@ -1,7 +1,8 @@
 import "server-only"
 import { eq } from "drizzle-orm"
 import { db } from "./index"
-import { mailingListEntries } from "./schema"
+import { mailingListEntries, streams } from "./schema"
+import { getStreamIdByName } from "./streams"
 import { getProfiles, type Profile } from "../sheets"
 
 export type MailingListEntry = {
@@ -20,6 +21,7 @@ export type MailingList = {
 
 export type MailingListSummary = {
   listId: string
+  streamId: number | null
   stream: string
   date: string
   candidateCount: number
@@ -37,10 +39,18 @@ function isoToRu(iso: string): string {
  * Returns null if the list does not exist or contains no candidates.
  */
 export async function getMailingList(listId: string): Promise<MailingList | null> {
-  const rows = await db.select().from(mailingListEntries).where(eq(mailingListEntries.listId, listId))
+  const rows = await db
+    .select({
+      candidateId: mailingListEntries.candidateId,
+      targetDate: mailingListEntries.targetDate,
+      streamName: streams.name,
+    })
+    .from(mailingListEntries)
+    .leftJoin(streams, eq(mailingListEntries.streamId, streams.id))
+    .where(eq(mailingListEntries.listId, listId))
   if (!rows.length) return null
 
-  const stream = rows[0].stream
+  const stream = rows[0].streamName ?? ""
   const date = isoToRu(rows[0].targetDate)
 
   const candidateIds = new Set<string>()
@@ -63,37 +73,54 @@ export async function getMailingListMeta(
   listId: string,
 ): Promise<{ listId: string; stream: string; date: string } | null> {
   const rows = await db
-    .select({ stream: mailingListEntries.stream, targetDate: mailingListEntries.targetDate })
+    .select({ streamName: streams.name, targetDate: mailingListEntries.targetDate })
     .from(mailingListEntries)
+    .leftJoin(streams, eq(mailingListEntries.streamId, streams.id))
     .where(eq(mailingListEntries.listId, listId))
     .limit(1)
   const row = rows[0]
-  return row ? { listId, stream: row.stream, date: isoToRu(row.targetDate) } : null
+  return row ? { listId, stream: row.streamName ?? "", date: isoToRu(row.targetDate) } : null
 }
 
 /** Fetch all mailing lists grouped by List ID (no profile data, fast), newest date first. */
 export async function getMailingLists(): Promise<MailingListSummary[]> {
   try {
-    const rows = await db.select().from(mailingListEntries)
+    const rows = await db
+      .select({
+        listId: mailingListEntries.listId,
+        streamId: mailingListEntries.streamId,
+        streamName: streams.name,
+        targetDate: mailingListEntries.targetDate,
+        candidateId: mailingListEntries.candidateId,
+      })
+      .from(mailingListEntries)
+      .leftJoin(streams, eq(mailingListEntries.streamId, streams.id))
 
-    const byListId = new Map<string, { stream: string; targetDate: string; candidateIds: Set<string> }>()
+    const byListId = new Map<string, { streamId: number | null; stream: string; targetDate: string; candidateIds: Set<string> }>()
     for (const row of rows) {
       if (!byListId.has(row.listId)) {
-        byListId.set(row.listId, { stream: row.stream, targetDate: row.targetDate, candidateIds: new Set() })
+        byListId.set(row.listId, {
+          streamId: row.streamId,
+          stream: row.streamName ?? "",
+          targetDate: row.targetDate,
+          candidateIds: new Set(),
+        })
       }
       if (row.candidateId) byListId.get(row.listId)!.candidateIds.add(row.candidateId)
     }
 
     return Array.from(byListId.entries())
-      .map(([listId, { stream, targetDate, candidateIds }]) => ({
+      .map(([listId, { streamId, stream, targetDate, candidateIds }]) => ({
         listId,
+        streamId,
         stream,
         targetDate,
         candidateCount: candidateIds.size,
       }))
       .sort((a, b) => b.targetDate.localeCompare(a.targetDate))
-      .map(({ listId, stream, targetDate, candidateCount }) => ({
+      .map(({ listId, streamId, stream, targetDate, candidateCount }) => ({
         listId,
+        streamId,
         stream,
         date: isoToRu(targetDate),
         candidateCount,
@@ -115,11 +142,14 @@ export async function createMailingListRows(data: {
 }): Promise<{ listId: string }> {
   if (!data.candidateIds.length) throw new Error("Выберите хотя бы одного кандидата")
 
+  const streamId = await getStreamIdByName(data.stream)
+  if (streamId === null) throw new Error(`Стрим не найден: ${data.stream}`)
+
   const listId = crypto.randomUUID()
   await db.insert(mailingListEntries).values(
     data.candidateIds.map((candidateId) => ({
       listId,
-      stream: data.stream,
+      streamId,
       targetDate: data.date,
       candidateId,
     })),
@@ -143,13 +173,14 @@ export async function getMailingListsForCandidate(candidateId: string): Promise<
   if (!candidateId) return []
 
   const rows = await db
-    .select({ listId: mailingListEntries.listId, stream: mailingListEntries.stream, targetDate: mailingListEntries.targetDate })
+    .select({ listId: mailingListEntries.listId, streamName: streams.name, targetDate: mailingListEntries.targetDate })
     .from(mailingListEntries)
+    .leftJoin(streams, eq(mailingListEntries.streamId, streams.id))
     .where(eq(mailingListEntries.candidateId, candidateId))
 
   const byListId = new Map<string, { stream: string; targetDate: string }>()
   for (const row of rows) {
-    if (!byListId.has(row.listId)) byListId.set(row.listId, { stream: row.stream, targetDate: row.targetDate })
+    if (!byListId.has(row.listId)) byListId.set(row.listId, { stream: row.streamName ?? "", targetDate: row.targetDate })
   }
 
   return Array.from(byListId.entries())

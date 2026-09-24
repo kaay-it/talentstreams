@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
 import { appendCandidateRow, deleteCandidateRow, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
-import { getMailingListMeta, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate } from "@/lib/db/mailing-lists"
+import { getMailingLists, getMailingListMeta, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
-import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName } from "@/lib/db/streams"
+import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, getCampaigns } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
@@ -725,10 +725,25 @@ export async function submitContactRequest(
   })
 }
 
+/** True if a stream has at least one release that was actually sent as a SendPulse campaign —
+ * not just created. A stream in this state has its name baked into a permanent campaign title
+ * and (via mailingListEntries.streamId) into real send history, so renaming/deleting it would
+ * silently desync that history. Archiving is always safe instead — it doesn't touch the name. */
+async function streamHasSentReleases(streamId: number): Promise<boolean> {
+  const [lists, campaigns] = await Promise.all([getMailingLists(), getCampaigns()])
+  const campaignNames = new Set(campaigns.map((c) => c.name))
+  return lists.some((l) => l.streamId === streamId && campaignNames.has(`${l.stream} — ${l.date}`))
+}
+
 export async function updateStream(
   id: number,
   data: { name: string; type: string; description: string },
 ): Promise<void> {
+  const existing = await getStreamById(id)
+  if (!existing) throw new Error("Стрим не найден")
+  if (data.name !== existing.name && (await streamHasSentReleases(id))) {
+    throw new Error("У стрима уже есть отправленные рассылки — переименование недоступно, можно только архивировать")
+  }
   await updateStreamRecord(id, data)
   revalidatePath("/editor/streams")
 }
@@ -743,6 +758,19 @@ export async function createStream(data: {
 }
 
 export async function deleteStream(id: number): Promise<void> {
+  if (await streamHasSentReleases(id)) {
+    throw new Error("У стрима уже есть отправленные рассылки — удаление недоступно, можно только архивировать")
+  }
   await deleteStreamRecord(id)
+  revalidatePath("/editor/streams")
+}
+
+export async function archiveStream(id: number): Promise<void> {
+  await updateStreamRecord(id, { status: "Архивный" })
+  revalidatePath("/editor/streams")
+}
+
+export async function unarchiveStream(id: number): Promise<void> {
+  await updateStreamRecord(id, { status: "Активный" })
   revalidatePath("/editor/streams")
 }

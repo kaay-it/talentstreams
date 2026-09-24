@@ -35,32 +35,66 @@ participant "SendPulse\nCampaigns"  as sp_camp     #fce8cc
 
 editor -> app : GET /editor/streams?secret=…
 app -> neonStreams : getStreamsDetailed()
-neonStreams --> app : [{ id, name, type, description }, …]
-app --> editor : Таблица стримов с inline-редактированием\n(компонент StreamsTable)
+neonStreams --> app : [{ id, name, type, description, status }, …]
+app -> sh_mail : getMailingLists() + getCampaigns()\n(история рассылок на стрим, sent-пометка)
+sh_mail --> app : выпуски, сгруппированные по streamId
+app --> editor : Активные стримы — таблица с inline-редактированием\n(StreamsTable) + раскрываемая история рассылок;\nархивные — схлопнутая секция ArchivedStreamsSection
 
 alt Добавить стрим
   editor -> app : createStream({ name, type, description })
-  app -> neonStreams : INSERT INTO streams
+  app -> neonStreams : INSERT INTO streams (status по умолчанию «Активный»)
   neonStreams --> app : { id, name, … }
   app --> editor : Страница обновлена (revalidatePath)
-else Изменить стрим
+else Изменить стрим (имя/тип/описание)
   editor -> app : updateStream(id, { name, type, description })
-  app -> neonStreams : UPDATE streams SET … WHERE id=…
-  neonStreams --> app : OK
-  app --> editor : Страница обновлена
+  app -> neonStreams : getStreamById(id) — текущее имя для сравнения
+  neonStreams --> app : { id, name, … }
+  app -> sh_mail : getMailingLists() — выпуски этого стрима
+  sh_mail --> app : список выпусков (streamId, дата)
+  app -> sp_camp : getCampaigns() — какие реально отправлены
+  sp_camp --> app : список кампаний
+  alt имя не меняется, или у стрима нет отправленных рассылок
+    app -> neonStreams : UPDATE streams SET … WHERE id=…\n(type/description — всегда без ограничений)
+    neonStreams --> app : OK
+    app --> editor : Страница обновлена
+  else имя меняется, и есть отправленная рассылка
+    app --> editor : Ошибка «переименование недоступно —\nможно только архивировать»
+  end
 else Удалить стрим
   editor -> app : deleteStream(id)
-  app -> neonStreams : DELETE FROM streams WHERE id=…
+  app -> sh_mail : getMailingLists() — выпуски этого стрима
+  sh_mail --> app : список выпусков
+  app -> sp_camp : getCampaigns()
+  sp_camp --> app : список кампаний
+  alt нет отправленных рассылок
+    app -> neonStreams : DELETE FROM streams WHERE id=…
+    neonStreams --> app : OK
+    app --> editor : Страница обновлена
+  else есть отправленная рассылка
+    app --> editor : Ошибка «удаление недоступно —\nможно только архивировать»
+  end
+else Архивировать стрим
+  editor -> app : archiveStream(id)\n(доступно всегда, без проверок)
+  app -> neonStreams : UPDATE streams SET status = 'Архивный' WHERE id=…
   neonStreams --> app : OK
-  app --> editor : Страница обновлена
+  app --> editor : Стрим уходит в схлопнутую секцию «Архивные стримы»;\nбольше не предлагается в getStreams()\n(форма регистрации, ReleaseCreateModal, фильтры)
+else Восстановить стрим (из архивной секции)
+  editor -> app : unarchiveStream(id)
+  app -> neonStreams : UPDATE streams SET status = 'Активный' WHERE id=…
+  neonStreams --> app : OK
+  app --> editor : Стрим снова в основной таблице и в getStreams()
 end
 
 note right of neonStreams
   Таблица streams (Neon / PostgreSQL):
-  ──────────────────────────────────
-  id | name        | type        | description
-  1  | Finance     | Industry    | …
-  2  | Tech        | Functional  | …
+  ─────────────────────────────────────────────
+  id | name        | type        | description | status
+  1  | Finance     | Industry    | …           | Активный
+  2  | Tech        | Functional  | …           | Активный
+  status: «Активный» (дефолт) | «Архивный».
+  Переименование/удаление заблокированы, только пока
+  у стрима есть отправленная рассылка (см. alt выше) —
+  архивирование доступно всегда и снимает эту дилемму.
 end note
 
 note over app, sh_cands
@@ -406,15 +440,21 @@ app --> editor : «Выпуск создан» + ссылка на подбор�
 
 note right of sh_mail
   Таблица mailingListEntries (Neon / PostgreSQL, TASK-DB-5):
-  ──────────────────────────────────────────────────────────────────────
-  id (UUID)  | listId (UUID) | stream  | targetDate | candidateId (UUID)
-  9c1b2e3f-… | f04a9b3e-…    | Finance | 2026-07-21 | a3f8e2c1-…
-  4d5e6a7b-… | f04a9b3e-…    | Finance | 2026-07-21 | 7c1d4f82-…
+  ──────────────────────────────────────────────────────────────────────────
+  id (UUID)  | listId (UUID) | streamId | targetDate | candidateId (UUID)
+  9c1b2e3f-… | f04a9b3e-…    | 1        | 2026-07-21 | a3f8e2c1-…
+  4d5e6a7b-… | f04a9b3e-…    | 1        | 2026-07-21 | 7c1d4f82-…
   targetDate — нативная Postgres date-колонка (не текст); наружу
   (кампании SendPulse, письмо, UI) отдаётся как ru-RU текст через
   isoToRu(). Одинаковый listId на всех строках выпуска гарантирован
   одним batch INSERT — единственный способ создать выпуск теперь и
   есть эта кнопка: лист «Mailing lists» в Sheets удалён полностью.
+  streamId — FK на streams.id (ON DELETE SET NULL), не текстовое
+  имя стрима — имя резолвится через JOIN на streams при чтении
+  (стримы: статус Активный/Архивный, см. раздел 1 выше). Раньше
+  здесь был денормализованный text-столбец stream — заменён на FK
+  вместе с правилом «нельзя переименовать/удалить стрим, у которого
+  уже есть отправленная рассылка», снявшим риск дрейфа имени.
 end note
 
 == 4а. Редактор удаляет ещё не отправленный выпуск ==
