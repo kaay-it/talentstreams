@@ -54,6 +54,8 @@ export default async function ReleasesPage({
     campaignsByTitle.set(c.name, arr)
   }
 
+  const candidateById = new Map(candidates.map((c) => [c.id, c]))
+
   const token = await getToken()
   const streamBookCounts = new Map<string, number>()
   if (token) {
@@ -87,7 +89,6 @@ export default async function ReleasesPage({
         <p>
           Кнопка «Создать рассылку» собирает выпуск сама — активные кандидаты стрима с уже наступившей датой «Активен с», список можно поправить перед созданием.
           Кнопка «Отправить» создаёт кампанию в SendPulse и рассылает письмо всем работодателям стрима.
-          Убедитесь, что заданы переменные окружения <code>APP_URL</code>, <code>SENDPULSE_FROM_EMAIL</code> и <code>SENDPULSE_FROM_NAME</code>.
         </p>
       </div>
 
@@ -102,6 +103,10 @@ export default async function ReleasesPage({
             const matchedCampaigns = campaignsByTitle.get(campaignTitle) ?? []
             const alreadySent = matchedCampaigns.length > 0
             const bookEmpty = (streamBookCounts.get(list.stream) ?? 0) === 0
+            const candidateNames = list.candidateIds
+              .map((id) => candidateById.get(id)?.name)
+              .filter((name): name is string => Boolean(name))
+              .sort((a, b) => a.localeCompare(b))
             return (
               <div key={list.listId} className="rounded-xl border bg-card overflow-hidden">
                 <div className="flex items-center gap-4 px-5 py-4">
@@ -150,7 +155,7 @@ export default async function ReleasesPage({
                   </div>
                 </div>
 
-                <CampaignHistory campaigns={matchedCampaigns} />
+                <CampaignHistory campaigns={matchedCampaigns} candidateNames={candidateNames} />
               </div>
             )
           })}
