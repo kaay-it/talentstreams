@@ -25,6 +25,7 @@ export type MailingListSummary = {
   stream: string
   date: string
   candidateCount: number
+  candidateIds: string[]
 }
 
 /** Formats an ISO "YYYY-MM-DD" date as ru-RU text ("21.07.2026") — the display format everywhere
@@ -116,14 +117,16 @@ export async function getMailingLists(): Promise<MailingListSummary[]> {
         stream,
         targetDate,
         candidateCount: candidateIds.size,
+        candidateIds: Array.from(candidateIds),
       }))
       .sort((a, b) => b.targetDate.localeCompare(a.targetDate))
-      .map(({ listId, streamId, stream, targetDate, candidateCount }) => ({
+      .map(({ listId, streamId, stream, targetDate, candidateCount, candidateIds }) => ({
         listId,
         streamId,
         stream,
         date: isoToRu(targetDate),
         candidateCount,
+        candidateIds,
       }))
   } catch {
     return []

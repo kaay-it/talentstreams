@@ -26,7 +26,13 @@ const STATUS_COLOR: Record<string, string> = {
   failed: "text-destructive",
 }
 
-export function CampaignHistory({ campaigns }: { campaigns: Campaign[] }) {
+export function CampaignHistory({
+  campaigns,
+  candidateNames = [],
+}: {
+  campaigns: Campaign[]
+  candidateNames?: string[]
+}) {
   const [open, setOpen] = useState(false)
 
   if (!campaigns.length) return null
@@ -42,15 +48,22 @@ export function CampaignHistory({ campaigns }: { campaigns: Campaign[] }) {
       </button>
 
       {open && (
-        <ul className="mt-2 space-y-1.5">
+        <ul className="mt-2 space-y-2">
           {campaigns.map((c) => (
-            <li key={c.id} className="flex items-center gap-2 text-xs">
-              <span className={`font-medium ${STATUS_COLOR[c.status] ?? "text-muted-foreground"}`}>
-                {STATUS_LABEL[c.status] ?? c.status}
-              </span>
-              <span className="text-muted-foreground">{c.name}</span>
-              {c.created && (
-                <span className="ml-auto text-muted-foreground/60">{c.created}</span>
+            <li key={c.id} className="text-xs">
+              <div className="flex items-center gap-2">
+                <span className={`font-medium ${STATUS_COLOR[c.status] ?? "text-muted-foreground"}`}>
+                  {STATUS_LABEL[c.status] ?? c.status}
+                </span>
+                <span className="text-muted-foreground">{c.name}</span>
+                {c.created && (
+                  <span className="ml-auto text-muted-foreground/60">{c.created}</span>
+                )}
+              </div>
+              {candidateNames.length > 0 && (
+                <p className="mt-1 pl-1 text-muted-foreground/80">
+                  Кандидаты: {candidateNames.join(", ")}
+                </p>
               )}
             </li>
           ))}
