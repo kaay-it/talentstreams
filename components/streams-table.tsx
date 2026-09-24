@@ -220,14 +220,14 @@ export function StreamsTable({
                             <button onClick={() => startEdit(stream)} title="Редактировать" className="rounded-md p-1.5 text-muted-foreground/30 hover:text-muted-foreground hover:bg-muted transition-colors">
                               <Pencil className="size-3.5" />
                             </button>
+                            <button onClick={() => handleArchive(stream.id)} disabled={isPending} title="Архивировать" className="rounded-md p-1.5 text-muted-foreground/30 hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40">
+                              <Archive className="size-3.5" />
+                            </button>
                             {!locked && (
                               <button onClick={() => handleDelete(stream.id)} disabled={isPending} title="Удалить" className="rounded-md p-1.5 text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40">
                                 <Trash2 className="size-3.5" />
                               </button>
                             )}
-                            <button onClick={() => handleArchive(stream.id)} disabled={isPending} title="Архивировать" className="rounded-md p-1.5 text-muted-foreground/30 hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40">
-                              <Archive className="size-3.5" />
-                            </button>
                           </div>
                         </td>
                       </>
