@@ -29,7 +29,7 @@ export type MailingListSummary = {
 
 /** Formats an ISO "YYYY-MM-DD" date as ru-RU text ("21.07.2026") — the display format everywhere
  * this app already shows a mailing-list date (SendPulse campaign names, email body, editor UI). */
-function isoToRu(iso: string): string {
+export function isoToRu(iso: string): string {
   const [y, m, d] = iso.split("-")
   return `${d}.${m}.${y}`
 }
@@ -156,6 +156,15 @@ export async function createMailingListRows(data: {
   )
 
   return { listId }
+}
+
+/** Updates the target date of every row of a mailing list ("release") — used by publishMailingList()
+ * to snap a release's planned date to the actual send date the first time it goes out, since the
+ * planned date is just a plan and the manager may end up sending on a different day. Callers must
+ * only call this before the first send (app/actions.ts checks SendPulse campaigns) — the date must
+ * stay frozen once a campaign has actually gone out under it. `date` is ISO "YYYY-MM-DD". */
+export async function updateMailingListDate(listId: string, date: string): Promise<void> {
+  await db.update(mailingListEntries).set({ targetDate: date }).where(eq(mailingListEntries.listId, listId))
 }
 
 /** Permanently deletes every row of a mailing list ("release"). Callers must ensure the release

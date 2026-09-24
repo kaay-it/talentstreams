@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
 import { appendCandidateRow, deleteCandidateRow, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
-import { getMailingLists, getMailingListMeta, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate } from "@/lib/db/mailing-lists"
+import { getMailingLists, getMailingListMeta, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate, updateMailingListDate, isoToRu } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
@@ -311,9 +311,29 @@ async function createCampaign(
   return JSON.parse(text) as { id: number }
 }
 
+function todayIso(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
 export async function publishMailingList(listId: string): Promise<PublishResult> {
   const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
+
+  const campaigns = await getCampaigns()
+  const alreadySent = campaigns.some((c) => c.name === `${list.stream} — ${list.date}`)
+
+  // Date is just a plan — the manager can end up sending on a different day. Snap it to the actual
+  // send date the first time this release goes out; leave it alone on every resend, so the campaign
+  // name/subject stay consistent with the one already delivered to employers.
+  let date = list.date
+  if (!alreadySent) {
+    const todayRu = isoToRu(todayIso())
+    if (todayRu !== list.date) {
+      await updateMailingListDate(listId, todayIso())
+      date = todayRu
+    }
+  }
 
   const token = await getToken()
   if (!token) throw new Error("Не удалось получить токен SendPulse")
@@ -321,11 +341,12 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   const bookId = await getOrCreateBook(list.stream, token)
   const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
   const listUrl = `${appUrl}/list/${listId}?e={{employer_token}}`
-  const subject = `Talent Stream: ${list.stream} — выпуск ${list.date}`
-  const campaignName = `${list.stream} — ${list.date}`
-  const html = buildEmailHtml(list.stream, list.date, listUrl)
+  const subject = `Talent Stream: ${list.stream} — выпуск ${date}`
+  const campaignName = `${list.stream} — ${date}`
+  const html = buildEmailHtml(list.stream, date, listUrl)
 
   const campaign = await createCampaign(bookId, subject, html, campaignName)
+  revalidatePath("/editor")
   return { listId, stream: list.stream, campaignId: campaign.id }
 }
 

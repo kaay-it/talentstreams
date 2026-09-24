@@ -492,13 +492,31 @@ editor -> app : publishMailingList("f04a9b3e-…")\n(Server Action или API-р
 app -> sh_mail : getMailingListMeta("f04a9b3e-…")
 sh_mail --> app : { stream: "Finance", date: "21.07.2026" }
 
+app -> sp_camp : getCampaigns()\n(первая ли это отправка — та же проверка,\nчто у deleteMailingList()/streamHasSentReleases())
+sp_camp --> app : список кампаний
+
+alt первая отправка, и сегодняшняя дата разошлась с плановой
+  app -> sh_mail : updateMailingListDate("f04a9b3e-…", today)\n(дата — план, не обязательство: менеджер мог\nотправить не в тот день, что планировал)
+  sh_mail --> app : OK
+  note right of sh_mail
+    Дата в выпуске фиксируется по факту первой реальной
+    отправки, а не остаётся плановой. Повторная отправка
+    того же выпуска дату уже не трогает — тема и имя
+    кампании должны совпадать с тем, что уже отправлено.
+  end note
+else повторная отправка, или дата и так совпадает
+  note over app
+    Дата не меняется — используется как есть
+  end note
+end
+
 app -> sp_camp : POST /oauth/access_token
 sp_camp --> app : { access_token }
 
 app -> sp_camp : POST /campaigns\n{ list_id: FINANCE_BOOK_ID,\n  subject: "Talent Stream: Finance — 21.07.2026",\n  body: html с {{Имя}},\n  sender_name, sender_email }
 sp_camp --> app : { id: 12345 }
 
-app --> editor : «Кампания #12345 запущена»
+app --> editor : «Кампания #12345 запущена»\n(revalidatePath /editor — карточка выпуска\nпоказывает актуальную дату)
 
 == 5а. SendPulse доставляет письма подписчикам ==
 
