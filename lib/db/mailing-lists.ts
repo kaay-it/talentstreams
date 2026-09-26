@@ -83,6 +83,17 @@ export async function getMailingListMeta(
   return row ? { listId, stream: row.streamName ?? "", date: isoToRu(row.targetDate) } : null
 }
 
+/** Candidate IDs of a single release, no join/date formatting — used by publishMailingList() to
+ * apply the publication-pause rule (TASK-05) to exactly the candidates just sent, without pulling
+ * every release's candidates via getMailingLists(). */
+export async function getMailingListCandidateIds(listId: string): Promise<string[]> {
+  const rows = await db
+    .select({ candidateId: mailingListEntries.candidateId })
+    .from(mailingListEntries)
+    .where(eq(mailingListEntries.listId, listId))
+  return [...new Set(rows.map((r) => r.candidateId).filter(Boolean))]
+}
+
 /** Fetch all mailing lists grouped by List ID (no profile data, fast), newest date first. */
 export async function getMailingLists(): Promise<MailingListSummary[]> {
   try {

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle, ExternalLink } from "lucide-react"
-import { getProfiles, getEligibleCandidatesForRelease, isSheetsConfigured } from "@/lib/sheets"
+import { getProfiles, getEligibleCandidatesForRelease, getPausedCandidatesForRelease, isSheetsConfigured } from "@/lib/sheets"
 import { getMailingLists } from "@/lib/db/mailing-lists"
 import { getStreams } from "@/lib/db/streams"
 import { getEmployers, confirmedEmployersForStream } from "@/lib/db/employers"
@@ -40,6 +40,19 @@ export default async function ReleasesPage({
         name: c.name,
         title: c.title,
         level: c.level,
+        activeSince: c.activeSince,
+      })),
+    ]),
+  )
+  const pausedByStream: Record<string, EligibleCandidate[]> = Object.fromEntries(
+    streams.map((name) => [
+      name,
+      getPausedCandidatesForRelease(candidates, { name }).map((c) => ({
+        id: c.id,
+        name: c.name,
+        title: c.title,
+        level: c.level,
+        activeSince: c.activeSince,
       })),
     ]),
   )
@@ -78,6 +91,7 @@ export default async function ReleasesPage({
           <ReleaseCreateModal
             streams={streams}
             eligibleByStream={eligibleByStream}
+            pausedByStream={pausedByStream}
             subscriberCountByStream={subscriberCountByStream}
             editorSecret={editorSecret}
           />

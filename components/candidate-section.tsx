@@ -16,6 +16,7 @@ const STATUS_OPTIONS: { value: CandidateStatus | ""; label: string }[] = [
   { value: "На проверке", label: "На проверке" },
   { value: "Активный", label: "Активные" },
   { value: "Отклонён", label: "Отклонённые" },
+  { value: "Не публиковать", label: "Не публиковать" },
 ]
 
 const MAX_CHIPS = 3
@@ -163,7 +164,9 @@ function CandidateRow({
                   ? "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
                   : candidate.status === "Активный"
                     ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                    : "bg-muted text-muted-foreground"
+                    : candidate.status === "Не публиковать"
+                      ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
+                      : "bg-muted text-muted-foreground"
               }`}
             >
               {candidate.status}
@@ -277,10 +280,15 @@ function CandidateRow({
                 </button>
               )}
 
-              {candidate.status === "Отклонён" && !done && (
+              {(candidate.status === "Отклонён" || candidate.status === "Не публиковать") && !done && (
                 <button
                   onClick={handleApprove}
                   disabled={isPending}
+                  title={
+                    candidate.status === "Не публиковать"
+                      ? "Кандидат отправлен в 3 выпусках подряд и автоматически исключён из рассылок — эта кнопка вернёт его в «Активный», дату «Активен с» затем поправьте в редактировании"
+                      : undefined
+                  }
                   className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
                 >
                   {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}

@@ -2,8 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
-import { appendCandidateRow, deleteCandidateRow, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
-import { getMailingLists, getMailingListMeta, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate, updateMailingListDate, isoToRu } from "@/lib/db/mailing-lists"
+import { appendCandidateRow, deleteCandidateRow, getCandidates, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
+import { getMailingLists, getMailingListMeta, getMailingListCandidateIds, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate, updateMailingListDate, isoToRu } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
@@ -312,8 +312,55 @@ async function createCampaign(
 }
 
 function todayIso(): string {
+  return offsetIso({})
+}
+
+/** Today's date, ISO "YYYY-MM-DD", shifted by a calendar amount — used to compute the next
+ * allowed publication date for the TASK-05 pause rule (setMonth/setFullYear so "3 months"/"10
+ * years" land on the right calendar date, not a fixed day count). */
+function offsetIso(delta: { days?: number; months?: number; years?: number }): string {
   const d = new Date()
+  if (delta.days) d.setDate(d.getDate() + delta.days)
+  if (delta.months) d.setMonth(d.getMonth() + delta.months)
+  if (delta.years) d.setFullYear(d.getFullYear() + delta.years)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+/**
+ * TASK-05 publication-pause rule, applied to exactly the candidates of a release right after its
+ * first real send (never on a resend — see the `!alreadySent` guard at the call site). `sentBefore`
+ * for each candidate is counted from their real mailing history using `campaignNames`, a SendPulse
+ * snapshot taken *before* this send, so this send itself isn't double-counted:
+ * 1st real send → 2-week pause, 2nd → 3-month pause, 3rd → retired for good ("Не публиковать").
+ * The 3rd-send cutoff is a deliberate simplification beyond §13 of the spec (which only defines
+ * the pause after the 2nd send) — decided with the user rather than left open. Pushing `activeSince`
+ * 10 years out on retirement is belt-and-suspenders: getProfiles() already excludes "Не публиковать"
+ * candidates from every release, this just keeps the date field consistent if that ever changes.
+ */
+async function applyPublicationPauseRules(candidateIds: string[], campaignNames: Set<string>): Promise<void> {
+  if (!candidateIds.length) return
+
+  const allCandidates = await getCandidates()
+  const candidateById = new Map(allCandidates.map((c) => [c.id, c]))
+
+  await Promise.all(
+    candidateIds.map(async (id) => {
+      const candidate = candidateById.get(id)
+      if (!candidate) return // candidate row deleted since the release was created
+
+      const history = await getMailingListsForCandidate(id)
+      const sentBefore = history.filter((e) => campaignNames.has(`${e.stream} — ${e.date}`)).length
+      const sendNumber = sentBefore + 1
+
+      if (sendNumber === 1) {
+        await updateCandidateStatus(candidate.rowIndex, "Активный", isoToRu(offsetIso({ days: 14 })))
+      } else if (sendNumber === 2) {
+        await updateCandidateStatus(candidate.rowIndex, "Активный", isoToRu(offsetIso({ months: 3 })))
+      } else {
+        await updateCandidateStatus(candidate.rowIndex, "Не публиковать", isoToRu(offsetIso({ years: 10 })))
+      }
+    }),
+  )
 }
 
 export async function publishMailingList(listId: string): Promise<PublishResult> {
@@ -321,7 +368,8 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
 
   const campaigns = await getCampaigns()
-  const alreadySent = campaigns.some((c) => c.name === `${list.stream} — ${list.date}`)
+  const campaignNames = new Set(campaigns.map((c) => c.name))
+  const alreadySent = campaignNames.has(`${list.stream} — ${list.date}`)
 
   // Date is just a plan — the manager can end up sending on a different day. Snap it to the actual
   // send date the first time this release goes out; leave it alone on every resend, so the campaign
@@ -346,6 +394,13 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   const html = buildEmailHtml(list.stream, date, listUrl)
 
   const campaign = await createCampaign(bookId, subject, html, campaignName)
+
+  // Only on a genuine first send — a resend must not advance any candidate's pause window again.
+  if (!alreadySent) {
+    const candidateIds = await getMailingListCandidateIds(listId)
+    await applyPublicationPauseRules(candidateIds, campaignNames)
+  }
+
   revalidatePath("/editor")
   return { listId, stream: list.stream, campaignId: campaign.id }
 }

@@ -431,8 +431,10 @@ end note
 editor -> app : Открывает ReleaseCreateModal, выбирает стрим и дату
 app -> sh_cands : getEligibleCandidatesForRelease(candidates, stream)\n(уже загружены постранично при рендере /editor —\nстатус «Активный» через getProfiles(), плюс Active Since\nпустой или уже наступил)
 sh_cands --> app : подходящие кандидаты + число подтверждённых\nподписчиков (confirmedEmployersForStream)
-app --> editor : Предзаполненный чекбокс-список\n(предупреждение, если < 6 / > 10 или 0 подписчиков)
-editor -> app : Снимает/оставляет кандидатов, жмёт «Создать рассылку»
+app -> sh_cands : getPausedCandidatesForRelease(candidates, stream)\n(TASK-05 — зеркало с обратным условием: Active Since ещё не наступил)
+sh_cands --> app : кандидаты на паузе
+app --> editor : Предзаполненный чекбокс-список\n(предупреждение, если < 6 / > 10 или 0 подписчиков),\nрядом — схлопнутый список «на паузе» с датой Active Since\nу каждого кандидата в обоих списках
+editor -> app : Снимает/оставляет кандидатов (при нехватке — разворачивает\nсписок «на паузе» и включает кого-то вручную), жмёт «Создать рассылку»
 app -> app : createMailingList({ stream, date, candidateIds })\n(date уже ISO — берётся прямо из <input type="date">)
 app -> sh_mail : createMailingListRows(...)\nlistId = crypto.randomUUID(), один batch INSERT —\nпо строке на кандидата, listId гарантированно одинаковый
 sh_mail --> app : { listId }
@@ -515,6 +517,41 @@ sp_camp --> app : { access_token }
 
 app -> sp_camp : POST /campaigns\n{ list_id: FINANCE_BOOK_ID,\n  subject: "Talent Stream: Finance — 21.07.2026",\n  body: html с {{Имя}},\n  sender_name, sender_email }
 sp_camp --> app : { id: 12345 }
+
+alt первая отправка (та же проверка, что определила дату выше)
+  app -> sh_mail : getMailingListCandidateIds("f04a9b3e-…")
+  sh_mail --> app : [a3f8e2c1-…, 7c1d4f82-…]
+  app -> sh_cands : getCandidates()\n(резолвит rowIndex по каждому id — нужен для\nзаписи, getProfiles() его не отдаёт)
+  sh_cands --> app : все кандидаты (все статусы) + rowIndex
+
+  loop по каждому кандидату выпуска
+    app -> sh_mail : getMailingListsForCandidate(id)\n(вся история выпусков кандидата)
+    sh_mail --> app : выпуски кандидата
+    app -> app : sentBefore = сколько из них уже реально\nотправлялось (сверка с campaignNames,\nснимок getCampaigns() ДО этой отправки)
+    alt sentBefore + 1 == 1 (первая реальная отправка кандидата)
+      app -> sh_cands : updateCandidateStatus(rowIndex,\n"Активный", today + 2 недели)
+    else sentBefore + 1 == 2
+      app -> sh_cands : updateCandidateStatus(rowIndex,\n"Активный", today + 3 месяца)
+    else sentBefore + 1 >= 3
+      app -> sh_cands : updateCandidateStatus(rowIndex,\n"Не публиковать", today + 10 лет)
+      note right of sh_cands
+        Терминальный статус — кандидат отправлен уже
+        3 раза, дальше getProfiles() исключает его из
+        всех подборок насовсем. Сознательное отклонение
+        от буквального ТЗ (там пауза только после 2-й
+        отправки, про 3-ю не сказано) — согласовано с
+        пользователем. Редактор может вручную вернуть
+        статус «Активный» кнопкой «Подтвердить» на
+        странице «Кандидаты».
+      end note
+    end
+  end
+else повторная отправка
+  note over app
+    Счётчик отправок кандидатов не трогаем — иначе
+    пауза сдвигалась бы заново при каждом ресенде
+  end note
+end
 
 app --> editor : «Кампания #12345 запущена»\n(revalidatePath /editor — карточка выпуска\nпоказывает актуальную дату)
 

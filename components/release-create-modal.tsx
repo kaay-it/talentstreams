@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, AlertCircle, AlertTriangle, Plus, Users, ExternalLink } from "lucide-react"
+import { X, Check, AlertCircle, AlertTriangle, Plus, Users, ExternalLink, ChevronDown, ChevronUp } from "lucide-react"
 import { createMailingList } from "@/app/actions"
 
 export type EligibleCandidate = {
@@ -10,6 +10,8 @@ export type EligibleCandidate = {
   name: string
   title: string
   level: string
+  /** ru-RU text ("21.07.2026") or "" if never set (always eligible). */
+  activeSince: string
 }
 
 const inputCls =
@@ -53,6 +55,39 @@ function candidatePlural(n: number): string {
   return "кандидатов"
 }
 
+function CandidateRow({
+  candidate,
+  checked,
+  onToggle,
+}: {
+  candidate: EligibleCandidate
+  checked: boolean
+  onToggle: () => void
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted/40">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onToggle}
+        className="size-4 shrink-0 accent-primary"
+      />
+      <span className="min-w-0 flex-1 truncate">
+        <span className="font-medium text-foreground">{candidate.name || candidate.id}</span>
+        {candidate.title && <span className="text-muted-foreground"> · {candidate.title}</span>}
+      </span>
+      {candidate.level && (
+        <span className="shrink-0 rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:bg-teal-900/20 dark:text-teal-400">
+          {candidate.level}
+        </span>
+      )}
+      {candidate.activeSince && (
+        <span className="shrink-0 text-[11px] text-muted-foreground">Активен с {candidate.activeSince}</span>
+      )}
+    </label>
+  )
+}
+
 function subscriberPlural(n: number): string {
   const mod10 = n % 10
   const mod100 = n % 100
@@ -64,11 +99,13 @@ function subscriberPlural(n: number): string {
 export function ReleaseCreateModal({
   streams,
   eligibleByStream,
+  pausedByStream,
   subscriberCountByStream,
   editorSecret,
 }: {
   streams: string[]
   eligibleByStream: Record<string, EligibleCandidate[]>
+  pausedByStream: Record<string, EligibleCandidate[]>
   subscriberCountByStream: Record<string, number>
   editorSecret?: string
 }) {
@@ -80,13 +117,16 @@ export function ReleaseCreateModal({
   const [stream, setStream] = useState("")
   const [date, setDate] = useState(todayISO())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [pausedOpen, setPausedOpen] = useState(false)
 
   const eligible = stream ? eligibleByStream[stream] ?? [] : []
+  const paused = stream ? pausedByStream[stream] ?? [] : []
   const subscriberCount = stream ? subscriberCountByStream[stream] ?? 0 : 0
 
   function handleStreamChange(next: string) {
     setStream(next)
     setSelectedIds(new Set((eligibleByStream[next] ?? []).map((c) => c.id)))
+    setPausedOpen(false)
   }
 
   function toggleCandidate(id: string) {
@@ -106,6 +146,7 @@ export function ReleaseCreateModal({
     setStream("")
     setDate(todayISO())
     setSelectedIds(new Set())
+    setPausedOpen(false)
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -242,41 +283,59 @@ export function ReleaseCreateModal({
                     )}
 
                     {stream && (
-                      eligible.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">
-                          Нет подходящих кандидатов — активных, с уже наступившей датой «Активен с», по стриму «{stream}».
-                        </p>
-                      ) : (
-                        <div className="space-y-1.5">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            Кандидаты в выпуске ({selectedIds.size} из {eligible.length})
+                      <div className="space-y-3">
+                        {eligible.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            Нет подходящих кандидатов — активных, с уже наступившей датой «Активен с», по стриму «{stream}».
                           </p>
-                          <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                            {eligible.map((c) => (
-                              <label
-                                key={c.id}
-                                className="flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted/40"
-                              >
-                                <input
-                                  type="checkbox"
+                        ) : (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-medium text-muted-foreground">
+                              Кандидаты в выпуске ({selectedIds.size} из {eligible.length})
+                            </p>
+                            <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
+                              {eligible.map((c) => (
+                                <CandidateRow
+                                  key={c.id}
+                                  candidate={c}
                                   checked={selectedIds.has(c.id)}
-                                  onChange={() => toggleCandidate(c.id)}
-                                  className="size-4 shrink-0 accent-primary"
+                                  onToggle={() => toggleCandidate(c.id)}
                                 />
-                                <span className="min-w-0 flex-1 truncate">
-                                  <span className="font-medium text-foreground">{c.name || c.id}</span>
-                                  {c.title && <span className="text-muted-foreground"> · {c.title}</span>}
-                                </span>
-                                {c.level && (
-                                  <span className="shrink-0 rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:bg-teal-900/20 dark:text-teal-400">
-                                    {c.level}
-                                  </span>
-                                )}
-                              </label>
-                            ))}
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )
+                        )}
+
+                        {paused.length > 0 && (
+                          <div className="space-y-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setPausedOpen((v) => !v)}
+                              className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                            >
+                              {pausedOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                              {pausedOpen ? "Скрыть кандидатов на паузе" : `Кандидаты на паузе, дата не наступила (${paused.length})`}
+                            </button>
+                            {pausedOpen && (
+                              <>
+                                <p className="text-xs text-muted-foreground">
+                                  Дата «Активен с» ещё не наступила — можно включить вручную, если подходящих кандидатов не хватает.
+                                </p>
+                                <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
+                                  {paused.map((c) => (
+                                    <CandidateRow
+                                      key={c.id}
+                                      candidate={c}
+                                      checked={selectedIds.has(c.id)}
+                                      onToggle={() => toggleCandidate(c.id)}
+                                    />
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
 
