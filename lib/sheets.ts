@@ -1,8 +1,10 @@
 import "server-only"
 import { createSign } from "crypto"
 
-/** Moderation status of a candidate. Empty string = legacy row without this column (treated as "Активный"). */
-export type CandidateStatus = "На проверке" | "Активный" | "Отклонён"
+/** Moderation status of a candidate. Empty string = legacy row without this column (treated as "Активный").
+ * "Не публиковать" is set automatically once a candidate has been sent in 3 real releases
+ * (TASK-05 publication-pause rule) — a terminal state, not manually chosen at registration. */
+export type CandidateStatus = "На проверке" | "Активный" | "Отклонён" | "Не публиковать"
 
 /**
  * A single profile/visiting-card record from the main Candidates Database sheet.
@@ -730,6 +732,21 @@ export function getEligibleCandidatesForRelease(candidates: Profile[], stream: {
   return getCandidatesForStream(candidates, stream).filter((c) => {
     const t = parseRuDate(c.activeSince)
     return t === null || t <= todayEnd.getTime()
+  })
+}
+
+/**
+ * Candidates tagged into the stream whose "Активен с" pause hasn't ended yet — the complement of
+ * getEligibleCandidatesForRelease(). Shown collapsed in the release-creation UI so the editor can
+ * still pull one in by hand if the eligible pool runs short; "Не публиковать" candidates never
+ * appear here (or anywhere else in this list) since getProfiles() already excludes that status.
+ */
+export function getPausedCandidatesForRelease(candidates: Profile[], stream: { name: string }): Profile[] {
+  const todayEnd = new Date()
+  todayEnd.setHours(23, 59, 59, 999)
+  return getCandidatesForStream(candidates, stream).filter((c) => {
+    const t = parseRuDate(c.activeSince)
+    return t !== null && t > todayEnd.getTime()
   })
 }
 
