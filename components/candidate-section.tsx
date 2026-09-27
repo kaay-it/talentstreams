@@ -157,7 +157,14 @@ function CandidateRow({
       <tr className={`border-b last:border-b-0 align-top transition-opacity ${done ? "opacity-50" : ""}`}>
         <td className="px-4 py-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-sm text-card-foreground">{candidate.name}</span>
+            <a
+              href={`/profile/${candidate.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-sm text-card-foreground hover:text-primary hover:underline"
+            >
+              {candidate.name}
+            </a>
             <span
               className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
                 candidate.status === "На проверке"

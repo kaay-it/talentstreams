@@ -39,7 +39,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         mailingListPage = component "MailingListPage (/list/[listId])" "Страница подборки: анонимные карточки кандидатов (без имён и контактов), теги, summary, disclaimer. Noindex. Доступ: ?e=[token] → персонализированная подборка с фильтрацией; ?secret=[EDITOR_SECRET] → все кандидаты; без параметров → 404." "Next.js Server Component" "Page"
 
-        profilePage = component "ProfilePage (/profile/[id])" "Полный профиль кандидата. Недоступна со страниц подборок. Noindex." "Next.js Server Component" "Page"
+        profilePage = component "ProfilePage (/profile/[id])" "Полный профиль кандидата. Недоступна со страниц подборок (работодателю не показывается) и не запрашивает EDITOR_SECRET — доступна всем, у кого есть id (getProfile(id) не фильтрует по статусу). Единственная точка входа — имя кандидата в /editor/candidates, ссылка ведёт сюда. Noindex." "Next.js Server Component" "Page"
 
         editorLayout = component "EditorLayout (/editor/*)" "Общий макет редактора: боковое меню с разделами. Каждый подмаршрут независимо защищён EDITOR_SECRET." "Next.js Layout" "Page"
 
@@ -154,6 +154,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
     talentStreams.webApp.candidatesPage -> talentStreams.webApp.candidateSection "Рендерит"
     talentStreams.webApp.candidateSection -> talentStreams.webApp.serverActions "approveCandidate() / rejectCandidate()"
     talentStreams.webApp.candidateSection -> talentStreams.webApp.candidateEditModal "Открывает при клике на Pencil"
+    talentStreams.webApp.candidateSection -> talentStreams.webApp.profilePage "Имя кандидата — ссылка (новая вкладка)"
     talentStreams.webApp.candidateEditModal -> talentStreams.webApp.uploadApi "POST /api/upload (при выборе файла)"
     talentStreams.webApp.candidateEditModal -> talentStreams.webApp.serverActions "updateCandidate(rowIndex, data) / getCandidateResumeHistory(candidate.id) / getCandidateMailingHistory(candidate.id)"
     editor -> talentStreams.webApp.candidatesPage "Модерирует, фильтрует и редактирует данные кандидатов"
