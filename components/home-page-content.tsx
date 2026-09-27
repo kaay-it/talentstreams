@@ -28,7 +28,7 @@ export function HomePageContent({ configured, streams }: { configured: boolean; 
     <main className="min-h-svh bg-background">
       {/* Sticky header */}
       <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-sm">
-        <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-3">
+        <div className="flex w-full items-center justify-between px-4 py-3 md:px-6">
           <div className="flex items-center gap-2 text-sm font-medium text-primary">
             <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Zap className="size-4" />
