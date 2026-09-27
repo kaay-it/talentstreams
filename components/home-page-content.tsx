@@ -36,9 +36,9 @@ export function HomePageContent({ configured, streams }: { configured: boolean; 
             TalentStreams
           </div>
           <div className="flex items-center gap-2">
-            <LanguageToggle />
             <CandidateRegistrationModal />
             <EmployerRegistrationModal streams={streams} />
+            <LanguageToggle />
           </div>
         </div>
       </header>
