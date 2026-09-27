@@ -56,9 +56,6 @@ async function syncEmployerToSendPulse(
     name: string
     email: string
     phone: string
-    telegram?: string
-    linkedin?: string
-    primaryContact: string
     streams: string[]
     token?: string
   },
@@ -89,9 +86,6 @@ async function syncEmployerToSendPulse(
   const variables: Record<string, string> = {
     "Имя": employer.name,
     phone: employer.phone,
-    ...(employer.telegram && { Telegram: employer.telegram }),
-    ...(employer.linkedin && { LinkedIn: employer.linkedin }),
-    "Primary Contact": employer.primaryContact,
     Streams: employer.streams.join(", "),
     ...(employer.token && { employer_token: employer.token }),
   }
@@ -744,9 +738,6 @@ export async function updateEmployer(
         name: data.name,
         email: data.email,
         phone: data.phone,
-        telegram: data.telegram,
-        linkedin: data.linkedin,
-        primaryContact: data.primaryContact,
         streams: data.streams,
         token: existing.token,
       },
@@ -758,7 +749,7 @@ export async function updateEmployer(
   return { ok: true }
 }
 
-export async function confirmEmployer(token: string, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "telegram" | "linkedin" | "primaryContact" | "streams">): Promise<void> {
+export async function confirmEmployer(token: string, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "streams">): Promise<void> {
   await syncEmployerToSendPulse(employer)
   await updateEmployerFields(token, { status: "Подтверждён" })
   // Only reaches employers who already subscribed to the bot; the rest get the link in the welcome email.

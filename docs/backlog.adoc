@@ -418,6 +418,8 @@ NOTE: ℹ️ Три фильтра `filterCandidatesForEmployer()` (`lib/db/empl
 
 Переменные `{{Telegram}}` и `{{LinkedIn}}` доступны как мёрж-теги в шаблонах SendPulse.
 
+NOTE: Отменено в TASK-35: `Telegram`, `LinkedIn` и `Primary Contact` больше не передаются в адресные книги — ни один шаблон их не использовал, данные и так лежат в Neon, а Telegram-бот находит работодателя по `employer_token`, а не по username. В книги уходят только `Имя`, `phone`, `Streams`, `employer_token`.
+
 ---
 
 ==== ✅ TASK-26: Нейтральная формулировка вместо счётчика кандидатов в письме
@@ -563,6 +565,8 @@ NOTE: ℹ️ Фильтры сознательно не персистятся �
 * `docs/welcome-email-template.html` — блок с кнопкой; ссылка собирается через merge-тег `{{employer_token}}`, который уже передаётся в адресную книгу. Шаблон нужно перезалить в SendPulse.
 * Письмо выпуска (`buildEmailHtml()`) — под кнопкой «Открыть подборку» блок «Подключить Telegram»; ссылка `telegramConnectUrl("{{employer_token}}")` — токен в ссылку вставляется без URL-кодирования именно ради merge-тега.
 * Переменные окружения: `SENDPULSE_TG_BOT_ID`, `SENDPULSE_TG_BOT_NAME`, `SENDPULSE_TG_START_FLOW_ID`.
+
+* В адресные книги SendPulse больше не передаются `Telegram`, `LinkedIn`, `Primary Contact` (см. TASK-SP-1) — остались `Имя`, `phone`, `Streams`, `employer_token`.
 
 *Часть 2 (не сделано):* рассылка выпусков в Telegram — при публикации пройти по подходящим работодателям и каждому отправить персональную ссылку `?e=`. Встроенный `/telegram/campaigns/send` не подходит — шлёт всем подписчикам бота, а теги (для сегментации) на бесплатном тарифе недоступны. Лимит бесплатного тарифа — 10 000 сообщений бота в месяц.
 
