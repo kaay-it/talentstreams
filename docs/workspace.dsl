@@ -27,7 +27,15 @@ workspace "TalentStreams" "Платформа подборки проверен�
       webApp = container "Web Application" "Server-side рендеринг, Server Actions, интеграции с Google Sheets и SendPulse" "Next.js 14, TypeScript" "WebApp" {
 
         # Pages (Server Components)
-        homePage = component "HomePage (/)" "Лендинг: описание сервиса, формы регистрации работодателя и кандидата, список стримов с сервера" "Next.js Server Component" "Page"
+        homePage = component "HomePage (/)" "Тонкая серверная обёртка: загружает configured/streams как раньше, оборачивает HomePageContent в LanguageProvider (RU/EN — только эта страница, редактор не тронут)." "Next.js Server Component" "Page"
+
+        homePageContent = component "HomePageContent" "Вся вёрстка главной страницы (лендинг, формы регистрации работодателя и кандидата, LanguageToggle в шапке) — клиентский компонент: переключение языка без смены URL требует реактивного состояния, серверный компонент для этого не подходит. Текст берёт из lib/i18n/home.ts через useLocale()." "React Client Component" "UI"
+
+        languageProvider = component "LanguageProvider" "React Context для RU/EN на главной странице: useLocale(). По умолчанию RU и на сервере, и при первом клиентском рендере (совпадает с сервером — без этого гидратация конфликтует); сохранённое значение (localStorage, ключ ts-locale) подхватывается в useEffect сразу после монтирования. Не затрагивает /editor/*." "React Client Component" "UI"
+
+        languageToggle = component "LanguageToggle" "Кнопка-переключатель RU/EN в шапке главной страницы." "React Client Component" "UI"
+
+        i18nLib = component "i18n Dictionaries (lib/i18n/)" "Типизированные словари Record<Locale, ...> для главной страницы: home.ts (лендинг), candidate-form.ts / employer-form.ts (формы регистрации). Без внешней i18n-библиотеки (next-intl и подобные заточены на URL-роутинг по языку — здесь переключение без смены URL). Переводится только статичный текст интерфейса — данные, которые вводят кандидаты/работодатели, не переводятся." "TypeScript" "Integration"
 
         mailingListPage = component "MailingListPage (/list/[listId])" "Страница подборки: анонимные карточки кандидатов (без имён и контактов), теги, summary, disclaimer. Noindex. Доступ: ?e=[token] → персонализированная подборка с фильтрацией; ?secret=[EDITOR_SECRET] → все кандидаты; без параметров → 404." "Next.js Server Component" "Page"
 
@@ -124,8 +132,14 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
     # ── Отношения: компонентный уровень ──────────────────────────────────────
 
-    talentStreams.webApp.homePage -> talentStreams.webApp.employerModal "Рендерит"
-    talentStreams.webApp.homePage -> talentStreams.webApp.candidateModal "Рендерит"
+    talentStreams.webApp.homePage -> talentStreams.webApp.languageProvider "Оборачивает HomePageContent"
+    talentStreams.webApp.homePage -> talentStreams.webApp.homePageContent "Рендерит (configured, streams)"
+    talentStreams.webApp.homePageContent -> talentStreams.webApp.languageToggle "Рендерит в шапке"
+    talentStreams.webApp.homePageContent -> talentStreams.webApp.employerModal "Рендерит"
+    talentStreams.webApp.homePageContent -> talentStreams.webApp.candidateModal "Рендерит"
+    talentStreams.webApp.homePageContent -> talentStreams.webApp.i18nLib "useLocale() + homeDict"
+    talentStreams.webApp.employerModal -> talentStreams.webApp.i18nLib "useLocale() + employerFormDict"
+    talentStreams.webApp.candidateModal -> talentStreams.webApp.i18nLib "useLocale() + candidateFormDict"
     talentStreams.webApp.profilePage -> talentStreams.webApp.profileView "Рендерит"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.contactButton "Рендерит (по одной на карточку)"
     talentStreams.webApp.releasesPage -> talentStreams.webApp.publishButton "Рендерит (по одной на выпуск)"
@@ -144,7 +158,8 @@ workspace "TalentStreams" "Платформа подборки проверен�
     talentStreams.webApp.candidateEditModal -> talentStreams.webApp.serverActions "updateCandidate(rowIndex, data) / getCandidateResumeHistory(candidate.id) / getCandidateMailingHistory(candidate.id)"
     editor -> talentStreams.webApp.candidatesPage "Модерирует, фильтрует и редактирует данные кандидатов"
 
-    talentStreams.webApp.homePage -> talentStreams.webApp.sheetsLib "getStreams()"
+    talentStreams.webApp.homePage -> talentStreams.webApp.sheetsLib "isSheetsConfigured()"
+    talentStreams.webApp.homePage -> talentStreams.webApp.dbLib "getStreams()"
     talentStreams.webApp.profilePage -> talentStreams.webApp.sheetsLib "getProfile(id)"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.dbLib "getMailingList(listId) — джойн с getProfiles() (кандидаты остаются в Sheets)"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.dbLib "getStreamsDetailed() — типы стримов для тегов на карточке (TASK-27)"

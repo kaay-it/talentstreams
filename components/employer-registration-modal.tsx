@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 import { X, Check, AlertCircle } from "lucide-react"
 import { registerEmployer, type EmployerData } from "@/app/actions"
+import { useLocale } from "@/components/language-provider"
+import { employerFormDict } from "@/lib/i18n/employer-form"
 
 export const CONTACT_OPTIONS = [
   { value: "email", label: "Email" },
@@ -67,6 +69,9 @@ function Field({
 }
 
 export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
+  const { locale } = useLocale()
+  const t = employerFormDict[locale]
+
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
   const [errorMsg, setErrorMsg] = useState("")
@@ -149,7 +154,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
       }
     } catch {
       setStatus("error")
-      setErrorMsg("Не удалось отправить заявку. Попробуйте позже.")
+      setErrorMsg(t.errors.submitFailed)
     }
   }
 
@@ -162,10 +167,10 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
 
   const anySelected = additionalCountries.includes(ANY_COUNTRY)
   const additionalHint = anySelected
-    ? "Рассматриваете кандидатов из любой страны"
+    ? t.fields.additionalCountries.anySelectedHint
     : additionalCountries.length
-    ? `Выбрано: ${additionalCountries.length}`
-    : "Необязательно — если рассматриваете кандидатов из нескольких стран"
+    ? t.fields.additionalCountries.countHint(additionalCountries.length)
+    : t.fields.additionalCountries.defaultHint
 
   return (
     <>
@@ -173,7 +178,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
         onClick={() => setOpen(true)}
         className="inline-flex items-center rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-opacity hover:opacity-90"
       >
-        Подписаться на рассылку
+        {t.triggerButton}
       </button>
 
       {open && createPortal(
@@ -189,12 +194,12 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
               {/* Header */}
               <div className="flex items-center justify-between border-b px-6 py-4">
                 <h2 id="reg-modal-title" className="text-base font-semibold text-card-foreground">
-                  Подписаться на рассылку
+                  {t.modalTitle}
                 </h2>
                 <button
                   onClick={handleClose}
                   className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  aria-label="Закрыть"
+                  aria-label={t.close}
                 >
                   <X className="size-4" />
                 </button>
@@ -206,15 +211,13 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                   <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
                     <Check className="size-6" />
                   </span>
-                  <h3 className="mt-4 text-lg font-semibold text-card-foreground">Заявка отправлена</h3>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Мы свяжемся с вами удобным способом в ближайшее время.
-                  </p>
+                  <h3 className="mt-4 text-lg font-semibold text-card-foreground">{t.success.title}</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">{t.success.text}</p>
                   <button
                     onClick={handleClose}
                     className="mt-6 rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
                   >
-                    Закрыть
+                    {t.success.close}
                   </button>
                 </div>
               ) : (
@@ -222,23 +225,23 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
 
                   {/* Имя + Компания */}
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label="Имя" required>
+                    <Field label={t.fields.name.label} required>
                       <input
                         ref={nameRef}
                         type="text"
                         required
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        placeholder="Иван Иванов"
+                        placeholder={t.fields.name.placeholder}
                         className={inputCls}
                       />
                     </Field>
-                    <Field label="Компания">
+                    <Field label={t.fields.company.label}>
                       <input
                         type="text"
                         value={company}
                         onChange={(e) => setCompany(e.target.value)}
-                        placeholder="ООО Пример"
+                        placeholder={t.fields.company.placeholder}
                         className={inputCls}
                       />
                     </Field>
@@ -246,30 +249,30 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
 
                   {/* Email + Телефон */}
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label="Email" required>
+                    <Field label={t.fields.email.label} required>
                       <input
                         type="email"
                         required
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="you@company.com"
+                        placeholder={t.fields.email.placeholder}
                         className={inputCls}
                       />
                     </Field>
-                    <Field label="Телефон" required>
+                    <Field label={t.fields.phone.label} required>
                       <input
                         type="tel"
                         required
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
-                        placeholder="+_ ___ ___ ____"
+                        placeholder={t.fields.phone.placeholder}
                         className={inputCls}
                       />
                     </Field>
                   </div>
 
                   {/* Способ связи */}
-                  <Field label="Предпочтительный способ связи" required>
+                  <Field label={t.fields.contactMethod.label} required>
                     <div className="flex gap-2">
                       {CONTACT_OPTIONS.map((opt) => (
                         <button
@@ -289,7 +292,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                   </Field>
 
                   {primaryContact === "telegram" && (
-                    <Field label="Telegram" required>
+                    <Field label={t.fields.telegram.label} required>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 select-none text-sm text-muted-foreground">
                           @
@@ -299,7 +302,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                           required
                           value={telegram}
                           onChange={(e) => setTelegram(e.target.value.replace(/^@+/, ""))}
-                          placeholder="username"
+                          placeholder={t.fields.telegram.placeholder}
                           className={`${inputCls} pl-7`}
                         />
                       </div>
@@ -307,7 +310,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                   )}
 
                   {primaryContact === "linkedin" && (
-                    <Field label="LinkedIn" required>
+                    <Field label={t.fields.linkedin.label} required>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 select-none text-sm text-muted-foreground">
                           in/
@@ -317,7 +320,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                           required
                           value={linkedin}
                           onChange={(e) => setLinkedin(e.target.value.replace(/^(https?:\/\/)?(www\.)?linkedin\.com\/in\/?/, ""))}
-                          placeholder="username"
+                          placeholder={t.fields.linkedin.placeholder}
                           className={`${inputCls} pl-9`}
                         />
                       </div>
@@ -327,13 +330,13 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                   {/* Стримы + Основная страна */}
                   <div className="grid grid-cols-2 gap-4 items-start">
                     <Field
-                      label="Стримы для рассылки"
+                      label={t.fields.streams.label}
                       required
                       hint={
                         selectedStreams.length === 0
-                          ? `Выберите от 1 до ${MAX_STREAMS}`
+                          ? t.fields.streams.chooseRange(MAX_STREAMS)
                           : selectedStreams.length === MAX_STREAMS
-                          ? `Выбрано максимум (${MAX_STREAMS})`
+                          ? t.fields.streams.maxSelected(MAX_STREAMS)
                           : undefined
                       }
                     >
@@ -362,17 +365,17 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                           })}
                         </div>
                       ) : (
-                        <p className="text-sm text-muted-foreground">Стримы не настроены</p>
+                        <p className="text-sm text-muted-foreground">{t.fields.streams.notConfigured}</p>
                       )}
                     </Field>
 
-                    <Field label="Страна нахождения" hint="Страна, в которой работает ваша компания">
+                    <Field label={t.fields.country.label} hint={t.fields.country.hint}>
                       <select
                         value={country}
                         onChange={(e) => setCountry(e.target.value)}
                         className={inputCls}
                       >
-                        <option value="">— выберите —</option>
+                        <option value="">{t.fields.country.placeholder}</option>
                         {PRIMARY_COUNTRIES.map((c) => (
                           <option key={c} value={c}>{c}</option>
                         ))}
@@ -381,7 +384,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                   </div>
 
                   {/* Дополнительные страны */}
-                  <Field label="Дополнительные страны" hint={additionalHint}>
+                  <Field label={t.fields.additionalCountries.label} hint={additionalHint}>
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -392,7 +395,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                             : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
                         }`}
                       >
-                        Любая
+                        {t.fields.additionalCountries.any}
                       </button>
                       {ADDITIONAL_COUNTRIES.filter((c) => c !== country).map((c) => {
                         const selected = additionalCountries.includes(c)
@@ -425,9 +428,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                       onChange={(e) => setConsent(e.target.checked)}
                       className="mt-0.5 size-4 shrink-0 accent-primary"
                     />
-                    <span className="text-sm leading-snug text-muted-foreground">
-                      Я подтверждаю согласие на обработку персональных данных и получение информационных сообщений сервиса.
-                    </span>
+                    <span className="text-sm leading-snug text-muted-foreground">{t.consent}</span>
                   </label>
 
                   {status === "error" && (
@@ -442,7 +443,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                     disabled={status === "submitting" || !canSubmit}
                     className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {status === "submitting" ? "Отправка…" : "Отправить заявку"}
+                    {status === "submitting" ? t.submitting : t.submit}
                   </button>
                 </form>
               )}

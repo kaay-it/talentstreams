@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 import { X, Check, Paperclip, Loader2 } from "lucide-react"
 import { registerCandidate } from "@/app/actions"
+import { useLocale } from "@/components/language-provider"
+import { candidateFormDict } from "@/lib/i18n/candidate-form"
 
 const inputCls =
   "w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -29,6 +31,9 @@ function Field({
 }
 
 export function CandidateRegistrationModal() {
+  const { locale } = useLocale()
+  const t = candidateFormDict[locale]
+
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
   const [errorMsg, setErrorMsg] = useState("")
@@ -90,7 +95,7 @@ export function CandidateRegistrationModal() {
         fd.append("file", resumeFile)
         const res = await fetch("/api/upload", { method: "POST", body: fd })
         const json = await res.json() as { url?: string; error?: string }
-        if (!res.ok || !json.url) throw new Error(json.error ?? "Ошибка загрузки файла")
+        if (!res.ok || !json.url) throw new Error(json.error ?? t.errors.uploadFailed)
         uploadedUrl = json.url
         uploadedFilename = resumeFile.name
       }
@@ -105,7 +110,7 @@ export function CandidateRegistrationModal() {
       setStatus("success")
     } catch (err) {
       setStatus("error")
-      setErrorMsg(err instanceof Error ? err.message : "Не удалось отправить заявку. Попробуйте позже.")
+      setErrorMsg(err instanceof Error ? err.message : t.errors.submitFailed)
     }
   }
 
@@ -115,7 +120,7 @@ export function CandidateRegistrationModal() {
         onClick={() => setOpen(true)}
         className="inline-flex items-center rounded-full border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
       >
-        Стать кандидатом
+        {t.triggerButton}
       </button>
 
       {open && createPortal(
@@ -130,12 +135,12 @@ export function CandidateRegistrationModal() {
             >
               <div className="flex items-center justify-between border-b px-6 py-4">
                 <h2 id="candidate-modal-title" className="text-base font-semibold text-card-foreground">
-                  Стать кандидатом
+                  {t.modalTitle}
                 </h2>
                 <button
                   onClick={handleClose}
                   className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  aria-label="Закрыть"
+                  aria-label={t.close}
                 >
                   <X className="size-4" />
                 </button>
@@ -146,32 +151,30 @@ export function CandidateRegistrationModal() {
                   <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
                     <Check className="size-6" />
                   </span>
-                  <h3 className="mt-4 text-lg font-semibold text-card-foreground">Заявка отправлена</h3>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Мы рассмотрим вашу заявку и свяжемся с вами в ближайшее время.
-                  </p>
+                  <h3 className="mt-4 text-lg font-semibold text-card-foreground">{t.success.title}</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">{t.success.text}</p>
                   <button
                     onClick={handleClose}
                     className="mt-6 rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
                   >
-                    Закрыть
+                    {t.success.close}
                   </button>
                 </div>
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
-                  <Field label="Имя" required>
+                  <Field label={t.fields.name.label} required>
                     <input
                       ref={nameRef}
                       type="text"
                       required
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="Иван Иванов"
+                      placeholder={t.fields.name.placeholder}
                       className={inputCls}
                     />
                   </Field>
 
-                  <Field label="Email" required>
+                  <Field label={t.fields.email.label} required>
                     <input
                       type="email"
                       required
@@ -182,7 +185,7 @@ export function CandidateRegistrationModal() {
                     />
                   </Field>
 
-                  <Field label="Телефон">
+                  <Field label={t.fields.phone.label}>
                     <input
                       type="tel"
                       value={phone}
@@ -192,7 +195,7 @@ export function CandidateRegistrationModal() {
                     />
                   </Field>
 
-                  <Field label="Резюме">
+                  <Field label={t.fields.resume.label}>
                     <div className="space-y-2">
                       <div className="flex rounded-lg border p-0.5 text-sm">
                         <button
@@ -200,14 +203,14 @@ export function CandidateRegistrationModal() {
                           onClick={() => { setResumeMode("file"); setResumeUrl("") }}
                           className={`flex-1 rounded-md py-1.5 text-center transition-colors ${resumeMode === "file" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                         >
-                          Загрузить файл
+                          {t.fields.resume.uploadTab}
                         </button>
                         <button
                           type="button"
                           onClick={() => { setResumeMode("url"); setResumeFile(null); if (fileInputRef.current) fileInputRef.current.value = "" }}
                           className={`flex-1 rounded-md py-1.5 text-center transition-colors ${resumeMode === "url" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                         >
-                          Указать ссылку
+                          {t.fields.resume.linkTab}
                         </button>
                       </div>
 
@@ -220,7 +223,7 @@ export function CandidateRegistrationModal() {
                               <Paperclip className="size-4 shrink-0 text-muted-foreground" />
                             )}
                             <span className={`min-w-0 truncate ${resumeFile ? "text-foreground" : "text-muted-foreground"}`}>
-                              {resumeFile ? resumeFile.name : "PDF, DOC, DOCX, RTF, ODT · до 5 МБ"}
+                              {resumeFile ? resumeFile.name : t.fields.resume.filePlaceholder}
                             </span>
                             {resumeFile && status !== "submitting" && (
                               <Check className="ml-auto size-4 shrink-0 text-emerald-500" />
@@ -239,18 +242,18 @@ export function CandidateRegistrationModal() {
                           type="url"
                           value={resumeUrl}
                           onChange={(e) => setResumeUrl(e.target.value)}
-                          placeholder="https://..."
+                          placeholder={t.fields.resume.urlPlaceholder}
                           className={inputCls}
                         />
                       )}
                     </div>
                   </Field>
 
-                  <Field label="Сопроводительное письмо">
+                  <Field label={t.fields.coverLetter.label}>
                     <textarea
                       value={coverLetter}
                       onChange={(e) => setCoverLetter(e.target.value)}
-                      placeholder="Расскажите о себе, своём опыте и чем вы можете быть полезны..."
+                      placeholder={t.fields.coverLetter.placeholder}
                       rows={5}
                       className={`${inputCls} resize-none`}
                     />
@@ -263,9 +266,7 @@ export function CandidateRegistrationModal() {
                       onChange={(e) => setConsent(e.target.checked)}
                       className="mt-0.5 size-4 shrink-0 accent-primary"
                     />
-                    <span className="text-sm leading-snug text-muted-foreground">
-                      Я подтверждаю согласие на обработку персональных данных и рассмотрение моей кандидатуры для публикации в рассылках сервиса.
-                    </span>
+                    <span className="text-sm leading-snug text-muted-foreground">{t.consent}</span>
                   </label>
 
                   {status === "error" && (
@@ -279,7 +280,7 @@ export function CandidateRegistrationModal() {
                     disabled={status === "submitting" || !consent}
                     className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {status === "submitting" ? "Отправка…" : "Отправить заявку"}
+                    {status === "submitting" ? t.submitting : t.submit}
                   </button>
                 </form>
               )}

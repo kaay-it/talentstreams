@@ -55,6 +55,8 @@ app/
 lib/
   sheets.ts                         # Google Sheets: типы, чтение, запись
   sendpulse.ts                      # SendPulse: OAuth, книги, кампании
+  i18n/                             # Словари RU/EN для главной страницы (не для редактора)
+    home.ts / candidate-form.ts / employer-form.ts
   db/
     index.ts                        # Drizzle клиент (neon-http)
     schema.ts                       # Схемы: contactRequests, streams, employers, candidateResumes
@@ -65,11 +67,14 @@ lib/
     migrations/                     # SQL-миграции
 
 components/
-  candidate-registration-modal.tsx  # Форма кандидата (публичная)
+  language-provider.tsx             # RU/EN Context для главной страницы (localStorage, без смены URL)
+  language-toggle.tsx                # Переключатель RU/EN в шапке
+  home-page-content.tsx             # Вёрстка главной страницы (клиентский компонент — нужен для переключения языка)
+  candidate-registration-modal.tsx  # Форма кандидата (публичная), мультиязычная (lib/i18n/candidate-form.ts)
   candidate-edit-modal.tsx          # Редактирование кандидата: контакты, резюме, уровень, стримы, страны, дата активности
   candidate-create-modal.tsx        # Быстрое добавление кандидата из редактора (без публичной формы)
   candidate-section.tsx             # Фильтры (поиск/статус/стрим/уровень) + список + Pencil
-  employer-registration-modal.tsx   # Экспортирует константы (страны/стримы/способы связи) для переиспользования
+  employer-registration-modal.tsx   # Экспортирует константы (страны/стримы/способы связи) для переиспользования; мультиязычная (lib/i18n/employer-form.ts), сами значения констант не переводятся
   employer-edit-modal.tsx           # Редактирование работодателя — форма как у регистрации, без чекбокса согласия
   employer-create-modal.tsx         # Быстрое добавление работодателя из редактора (переиспользует registerEmployer)
   employer-section.tsx              # Фильтры (поиск/статус/страна/стрим) + список + Pencil
@@ -147,6 +152,7 @@ docs/
 | Приветственное письмо работодателю | ✅ TASK-10 |
 | Автоподбор кандидатов в выпуск | ✅ TASK-28 |
 | Пауза публикации кандидата (2 недели/3 месяца/статус «Не публиковать» после 3-й отправки) | ✅ TASK-05 |
+| Мультиязычная главная страница (RU/EN, переключатель без смены URL) | ✅ |
 
 ## Активные задачи (приоритет)
 
