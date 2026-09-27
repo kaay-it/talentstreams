@@ -4,7 +4,7 @@ type EmployerFormDict = {
   triggerButton: string
   modalTitle: string
   close: string
-  success: { title: string; text: string; close: string }
+  success: { title: string; text: string; close: string; telegramText: string; telegramButton: string }
   fields: {
     name: { label: string; placeholder: string }
     company: { label: string; placeholder: string }
@@ -42,6 +42,8 @@ const ru: EmployerFormDict = {
     title: "Заявка отправлена",
     text: "Мы свяжемся с вами удобным способом в ближайшее время.",
     close: "Закрыть",
+    telegramText: "Получайте подборки и уведомления в Telegram — подключите нашего бота.",
+    telegramButton: "Подключить Telegram",
   },
   fields: {
     name: { label: "Имя", placeholder: "Иван Иванов" },
@@ -84,6 +86,8 @@ const en: EmployerFormDict = {
     title: "Application submitted",
     text: "We'll reach out via your preferred method soon.",
     close: "Close",
+    telegramText: "Get candidate digests and updates in Telegram — connect our bot.",
+    telegramButton: "Connect Telegram",
   },
   fields: {
     name: { label: "Name", placeholder: "John Smith" },

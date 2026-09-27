@@ -170,3 +170,67 @@ export async function getCampaigns(): Promise<Campaign[]> {
     return []
   }
 }
+
+// ── Telegram chatbot ──────────────────────────────────────────────────────────
+// Employers subscribe to the SendPulse Telegram bot via a personal tg.pulse.is link:
+// SendPulse saves the `employer_token` query param into the contact's bot variable
+// of the same name (the variable must exist in the bot's Audience), so later we can
+// find the employer's bot contact by token and message them.
+
+/**
+ * Personal "connect Telegram" link for an employer, or null if the bot isn't configured.
+ * The token is inserted as-is (UUIDs are URL-safe) so it can also be the `{{employer_token}}`
+ * merge tag in campaign emails — URL-encoding would mangle the braces.
+ */
+export function telegramConnectUrl(employerToken: string): string | null {
+  const botName = process.env.SENDPULSE_TG_BOT_NAME
+  const flowId = process.env.SENDPULSE_TG_START_FLOW_ID
+  if (!botName || !flowId) return null
+  return `https://tg.pulse.is/${botName}?start=${flowId}&employer_token=${employerToken}`
+}
+
+/** Returns the SendPulse bot contact_id of the employer, or null if they haven't subscribed. */
+async function findTelegramContactId(employerToken: string, token: string): Promise<string | null> {
+  const botId = process.env.SENDPULSE_TG_BOT_ID
+  if (!botId) return null
+  const params = new URLSearchParams({
+    bot_id: botId,
+    variable_name: "employer_token",
+    variable_value: employerToken,
+  })
+  const { status, text } = await spGet(
+    `${API}/telegram/contacts/getByVariable?${params}`,
+    { Authorization: `Bearer ${token}` },
+  )
+  if (status < 200 || status >= 300) {
+    console.warn(`[SendPulse] GET /telegram/contacts/getByVariable status=${status}`, text)
+    return null
+  }
+  const data = JSON.parse(text) as { data?: Array<{ id: string; status: number }> }
+  // status 1 = active; a contact who blocked the bot can't receive messages anyway
+  return data.data?.find((c) => c.status === 1)?.id ?? null
+}
+
+/**
+ * Sends a Telegram message to the employer via the SendPulse bot. Best-effort: returns
+ * false (never throws) if the bot isn't configured, the employer hasn't subscribed, or
+ * SendPulse fails — Telegram is an optional channel on top of email.
+ */
+export async function sendTelegramToEmployer(employerToken: string, text: string): Promise<boolean> {
+  try {
+    const token = await getToken()
+    if (!token) return false
+    const contactId = await findTelegramContactId(employerToken, token)
+    if (!contactId) return false
+    const res = await spPost(
+      `${API}/telegram/contacts/sendText`,
+      { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      JSON.stringify({ contact_id: contactId, text }),
+    )
+    console.log(`[SendPulse] telegram sendText status=${res.status}`)
+    return res.status >= 200 && res.status < 300
+  } catch (err) {
+    console.error("[SendPulse] sendTelegramToEmployer failed:", err)
+    return false
+  }
+}

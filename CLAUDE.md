@@ -10,7 +10,7 @@
 - **Google Sheets** — профили кандидатов, подборки (Service Account API v4)
 - **Neon (PostgreSQL)** — `contactRequests`, `streams`, `employers`, `candidateResumes` (Drizzle ORM + neon-http driver)
 - **Vercel Blob** — приватное хранилище файлов резюме
-- **SendPulse** — email-рассылки (адресные книги, кампании, merge-теги)
+- **SendPulse** — email-рассылки (адресные книги, кампании, merge-теги) и Telegram-бот работодателей
 - **Tailwind CSS + lucide-react**
 
 ## Переменные окружения
@@ -24,6 +24,9 @@ SENDPULSE_CLIENT_SECRET=
 SENDPULSE_MASTER_BOOK_NAME=Default
 SENDPULSE_FROM_EMAIL=
 SENDPULSE_FROM_NAME=TalentStreams
+SENDPULSE_TG_BOT_ID=              # Telegram-бот в SendPulse (TASK-35)
+SENDPULSE_TG_BOT_NAME=talentstreams_bot
+SENDPULSE_TG_START_FLOW_ID=       # стартовая цепочка бота
 
 DATABASE_URL=                     # Neon connection string
 BLOB_READ_WRITE_TOKEN=            # Vercel Blob
@@ -118,6 +121,10 @@ docs/
 - `candidateResumes` — история версий резюме кандидата (TASK-32); кандидаты сами остаются в Google Sheets
 - Миграции: `scripts/migrate.mjs`
 
+### Telegram-бот (SendPulse)
+- Работодатель подписывается по ссылке `tg.pulse.is/<бот>?start=<flow_id>&employer_token=<token>` — SendPulse сохраняет токен в переменную контакта бота
+- Контакт ищется по `employer_token` через API (`getByVariable`), в Neon не хранится; отправка — `sendTelegramToEmployer()` в `lib/sendpulse.ts`, best-effort
+
 ### Server Actions
 Все мутации — в `app/actions.ts`. После мутации, меняющей UI редактора, вызывать `revalidatePath(...)`.
 
@@ -153,6 +160,7 @@ docs/
 | Автоподбор кандидатов в выпуск | ✅ TASK-28 |
 | Пауза публикации кандидата (2 недели/3 месяца/статус «Не публиковать» после 3-й отправки) | ✅ TASK-05 |
 | Мультиязычная главная страница (RU/EN, переключатель без смены URL) | ✅ |
+| Подключение работодателя к Telegram-боту SendPulse, уведомление о подтверждении | ✅ TASK-35 (часть 1) |
 
 ## Активные задачи (приоритет)
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, AlertCircle } from "lucide-react"
+import { X, Check, AlertCircle, Send } from "lucide-react"
 import { registerEmployer, type EmployerData } from "@/app/actions"
 import { useLocale } from "@/components/language-provider"
 import { employerFormDict } from "@/lib/i18n/employer-form"
@@ -75,6 +75,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
   const [errorMsg, setErrorMsg] = useState("")
+  const [telegramUrl, setTelegramUrl] = useState<string | null>(null)
 
   const [name, setName] = useState("")
   const [company, setCompany] = useState("")
@@ -108,6 +109,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     setOpen(false)
     setStatus("idle")
     setErrorMsg("")
+    setTelegramUrl(null)
     setName("")
     setCompany("")
     setEmail("")
@@ -147,6 +149,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     try {
       const result = await registerEmployer({ name, company, email, phone, primaryContact, telegram, linkedin, streams: selectedStreams, country, additionalCountries })
       if (result.ok) {
+        setTelegramUrl(result.telegramUrl ?? null)
         setStatus("success")
       } else {
         setStatus("error")
@@ -213,6 +216,20 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                   </span>
                   <h3 className="mt-4 text-lg font-semibold text-card-foreground">{t.success.title}</h3>
                   <p className="mt-2 text-sm text-muted-foreground">{t.success.text}</p>
+                  {telegramUrl && (
+                    <div className="mt-6 w-full max-w-sm rounded-xl border bg-muted/40 px-4 py-4">
+                      <p className="text-sm text-muted-foreground">{t.success.telegramText}</p>
+                      <a
+                        href={telegramUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[#229ED9] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+                      >
+                        <Send className="size-4" />
+                        {t.success.telegramButton}
+                      </a>
+                    </div>
+                  )}
                   <button
                     onClick={handleClose}
                     className="mt-6 rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
