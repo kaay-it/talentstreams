@@ -9,7 +9,7 @@ import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResume
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, getCampaigns } from "@/lib/sendpulse"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, getCampaigns, telegramConnectUrl, sendTelegramToEmployer } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -175,10 +175,31 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
-function buildEmailHtml(stream: string, date: string, url: string): string {
+function buildEmailHtml(stream: string, date: string, url: string, telegramUrl: string | null): string {
   const s = escapeHtml(stream)
   const d = escapeHtml(date)
   const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif"
+  const telegramBlock = telegramUrl
+    ? `
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+            <tr>
+              <td style="padding:16px 20px">
+                <p style="margin:0 0 12px;font-size:13px;color:#475569;line-height:1.6;font-family:${font}">
+                  Хотите получать выпуски в Telegram? Подключите нашего бота.
+                </p>
+                <table role="presentation" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td style="border-radius:8px;background:#229ED9">
+                      <a href="${telegramUrl.replace(/&/g, "&amp;")}" style="display:inline-block;padding:9px 18px;font-size:13px;font-weight:600;color:#fff;text-decoration:none;font-family:${font}">
+                        Подключить Telegram
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>`
+    : ""
 
   return `<!DOCTYPE html>
 <html lang="ru">
@@ -242,6 +263,7 @@ function buildEmailHtml(stream: string, date: string, url: string): string {
               </td>
             </tr>
           </table>
+${telegramBlock}
 
         </td>
       </tr>
@@ -391,7 +413,7 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   const listUrl = `${appUrl}/list/${listId}?e={{employer_token}}`
   const subject = `Talent Stream: ${list.stream} — выпуск ${date}`
   const campaignName = `${list.stream} — ${date}`
-  const html = buildEmailHtml(list.stream, date, listUrl)
+  const html = buildEmailHtml(list.stream, date, listUrl, telegramConnectUrl("{{employer_token}}"))
 
   const campaign = await createCampaign(bookId, subject, html, campaignName)
 
@@ -625,7 +647,9 @@ export async function deleteCandidate(rowIndex: number, candidateId: string): Pr
   revalidatePath("/editor/candidates")
 }
 
-export type RegisterEmployerResult = { ok: true } | { ok: false; error: string }
+export type RegisterEmployerResult =
+  | { ok: true; telegramUrl?: string | null }
+  | { ok: false; error: string }
 
 /** Returns a result object instead of throwing: Next.js redacts thrown Error messages
  * from Server Actions in production builds, so user-facing validation errors (as opposed
@@ -654,7 +678,9 @@ export async function registerEmployer(data: EmployerData): Promise<RegisterEmpl
     return { ok: false, error: "Работодатель с таким номером телефона уже зарегистрирован" }
   }
 
+  const token = crypto.randomUUID()
   await createEmployer({
+    token,
     name: data.name,
     company: data.company,
     email: data.email,
@@ -668,7 +694,7 @@ export async function registerEmployer(data: EmployerData): Promise<RegisterEmpl
     additionalCountries: data.additionalCountries,
   })
   revalidatePath("/editor/employers")
-  return { ok: true }
+  return { ok: true, telegramUrl: telegramConnectUrl(token) }
 }
 
 export async function updateEmployer(
@@ -735,6 +761,11 @@ export async function updateEmployer(
 export async function confirmEmployer(token: string, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "telegram" | "linkedin" | "primaryContact" | "streams">): Promise<void> {
   await syncEmployerToSendPulse(employer)
   await updateEmployerFields(token, { status: "Подтверждён" })
+  // Only reaches employers who already subscribed to the bot; the rest get the link in the welcome email.
+  await sendTelegramToEmployer(
+    employer.token,
+    "Ваша заявка в TalentStreams одобрена! Первая подборка кандидатов придёт на email и сюда.",
+  )
   revalidatePath("/editor")
 }
 

@@ -1,11 +1,12 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, CalendarDays, MapPin } from "lucide-react"
+import { ArrowLeft, CalendarDays, MapPin, Send } from "lucide-react"
 import { isSheetsConfigured } from "@/lib/sheets"
 import { getMailingList, type MailingListEntry } from "@/lib/db/mailing-lists"
 import { getEmployerByToken, filterCandidatesForEmployer } from "@/lib/db/employers"
 import { getStreamsDetailed } from "@/lib/db/streams"
+import { telegramConnectUrl } from "@/lib/sendpulse"
 import { ContactButton } from "@/components/contact-button"
 import { GeneralInquiryButton } from "@/components/general-inquiry-button"
 
@@ -60,6 +61,9 @@ export default async function MailingListPage({
     entries = entries.filter((e) => filteredIds.has(e.profile.id))
   }
 
+  // Shown only to an identified employer — the link binds their bot subscription to their token.
+  const telegramUrl = !isEditor && employerToken ? telegramConnectUrl(employerToken) : null
+
   return (
     <main className="min-h-svh bg-background">
       <div className="mx-auto w-full max-w-3xl px-4 py-8 md:py-12">
@@ -113,6 +117,26 @@ export default async function MailingListPage({
               Оставьте запрос — мы подберём кандидатов специально под ваши требования.
             </p>
             <GeneralInquiryButton listId={listId} employerToken={employerToken} />
+          </div>
+        )}
+
+        {telegramUrl && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl border bg-card p-6">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-card-foreground">Подборки в Telegram</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Подключите нашего бота — будем присылать новые выпуски и уведомления в Telegram.
+              </p>
+            </div>
+            <a
+              href={telegramUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-[#229ED9] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+            >
+              <Send className="size-4" />
+              Подключить Telegram
+            </a>
           </div>
         )}
       </div>
