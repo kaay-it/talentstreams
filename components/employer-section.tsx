@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, Ban, Trash2, Building2, Pencil, Plus, Send, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { CheckCircle2, XCircle, Ban, Trash2, Pencil, Plus, Send, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { confirmEmployer, rejectEmployer, deleteEmployer } from "@/app/actions"
 import { EmployerEditModal } from "@/components/employer-edit-modal"
 import { EmployerCreateModal } from "@/components/employer-create-modal"
@@ -40,32 +40,35 @@ function parseIsoDate(s: string): number | null {
   return Number.isNaN(t) ? null : t
 }
 
-function SortButton({
+function SortableHeader({
   label,
-  active,
-  dir,
-  onClick,
+  field,
+  sortField,
+  sortDir,
+  onSort,
 }: {
   label: string
-  active: boolean
-  dir: "asc" | "desc"
-  onClick: () => void
+  field: SortField
+  sortField: SortField | null
+  sortDir: "asc" | "desc"
+  onSort: (field: SortField) => void
 }) {
+  const active = sortField === field
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:text-foreground ${
-        active ? "border-foreground/30 text-foreground" : "text-muted-foreground"
-      }`}
-    >
-      {label}
-      {active ? (
-        dir === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />
-      ) : (
-        <ArrowUpDown className="size-3.5 opacity-40" />
-      )}
-    </button>
+    <th className="whitespace-nowrap px-4 py-2.5 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-foreground ${active ? "text-foreground" : ""}`}
+      >
+        {label}
+        {active ? (
+          sortDir === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
+        ) : (
+          <ArrowUpDown className="size-3 opacity-40" />
+        )}
+      </button>
+    </th>
   )
 }
 
@@ -170,18 +173,6 @@ export function EmployerSection({
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        <SortButton
-          label="Дата регистрации"
-          active={sortField === "timestamp"}
-          dir={sortDir}
-          onClick={() => handleSort("timestamp")}
-        />
-        <SortButton
-          label="Статус"
-          active={sortField === "status"}
-          dir={sortDir}
-          onClick={() => handleSort("status")}
-        />
         <span className="text-xs text-muted-foreground shrink-0">
           {filtered.length} {employerPlural(filtered.length)}
         </span>
@@ -202,10 +193,25 @@ export function EmployerSection({
         ) : filtered.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">Работодатели не найдены по заданным фильтрам.</p>
         ) : (
-          <div className="divide-y">
-            {sorted.map((e) => (
-              <EmployerRow key={e.token} employer={e} streams={streams} telegramConnected={telegramConnected.has(e.token)} />
-            ))}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1050px] text-left text-sm">
+              <thead>
+                <tr className="border-b bg-muted/30 text-xs font-medium text-muted-foreground">
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Работодатель</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Контакты</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Стримы</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Страна</th>
+                  <SortableHeader label="Статус" field="status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Дата регистрации" field="timestamp" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium text-right">Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((e) => (
+                  <EmployerRow key={e.token} employer={e} streams={streams} telegramConnected={telegramConnected.has(e.token)} />
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -266,19 +272,46 @@ function EmployerRow({
     })
   }
 
+  const done = localStatus !== null
+
   return (
-    <div className="flex flex-col gap-1 px-5 py-3">
+    <>
       {editing && (
         <EmployerEditModal employer={employer} streams={streams} onClose={() => setEditing(false)} />
       )}
-      <div className="flex items-center gap-4">
-        <Building2 className="size-4 shrink-0 text-muted-foreground" />
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-medium truncate">
-              {employer.name}
-              {employer.company ? <span className="font-normal text-muted-foreground"> · {employer.company}</span> : null}
-            </p>
+      <tr className={`border-b last:border-b-0 align-top transition-opacity ${done ? "opacity-50" : ""}`}>
+        <td className="px-4 py-3">
+          <p className="text-sm font-medium text-card-foreground">{employer.name}</p>
+          {employer.company && <p className="mt-0.5 text-xs text-muted-foreground">{employer.company}</p>}
+        </td>
+
+        <td className="px-4 py-3 text-xs text-muted-foreground">
+          <div className="space-y-0.5">
+            {employer.email && <p className="truncate">{employer.email}</p>}
+            {employer.phone && <p className="truncate">{employer.phone}</p>}
+          </div>
+        </td>
+
+        <td className="px-4 py-3">
+          <div className="flex flex-wrap gap-1">
+            {employer.streams.map((s) => (
+              <span
+                key={s}
+                className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+              >
+                {s}
+              </span>
+            ))}
+          </div>
+        </td>
+
+        <td className="px-4 py-3 text-xs text-muted-foreground">
+          {employer.country || "—"}
+          {employer.additionalCountries.length ? ` (+ ${employer.additionalCountries.join(", ")})` : ""}
+        </td>
+
+        <td className="px-4 py-3">
+          <div className="flex flex-wrap items-center gap-1">
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_BADGE[employer.status]}`}>
               {employer.status}
             </span>
@@ -292,125 +325,119 @@ function EmployerRow({
               </span>
             )}
           </div>
-          <p className="text-xs text-muted-foreground truncate">
-            {employer.email}
-            {employer.streams.length ? ` · ${employer.streams.join(", ")}` : ""}
-            {employer.country ? ` · ${employer.country}` : ""}
-            {employer.additionalCountries.length ? ` (+ ${employer.additionalCountries.join(", ")})` : ""}
-            {employer.timestamp ? ` · зарегистрирован ${new Date(employer.timestamp).toLocaleDateString("ru-RU")}` : ""}
-          </p>
-        </div>
+        </td>
 
-        {!confirmingDelete && (
-          <button
-            onClick={() => setEditing(true)}
-            disabled={isPending}
-            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-            aria-label="Редактировать"
-          >
-            <Pencil className="size-3.5" />
-          </button>
-        )}
+        <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+          {employer.timestamp ? new Date(employer.timestamp).toLocaleDateString("ru-RU") : "—"}
+        </td>
 
-        {confirmingDelete ? (
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="text-xs font-medium text-destructive">Вы уверены, что хотите удалить работодателя?</span>
-            <button
-              onClick={handleDelete}
-              disabled={isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-            >
-              <Trash2 className="size-3.5" />
-              Да, удалить
-            </button>
-            <button
-              onClick={() => setConfirmingDelete(false)}
-              disabled={isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
-            >
-              Отмена
-            </button>
-          </div>
-        ) : (
-          <>
-            {employer.status === "На проверке" && !localStatus && (
-              <div className="flex shrink-0 gap-2">
-                <button
-                  onClick={handleConfirm}
-                  disabled={isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  <CheckCircle2 className="size-3.5" />
-                  Подтвердить
-                </button>
-                <button
-                  onClick={() => handleReject("rejected")}
-                  disabled={isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
-                >
-                  <XCircle className="size-3.5" />
-                  Отклонить
-                </button>
-              </div>
-            )}
-
-            {employer.status === "Подтверждён" && !localStatus && (
-              <div className="flex shrink-0 gap-2">
-                <button
-                  onClick={() => handleReject("disabled")}
-                  disabled={isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/10 disabled:opacity-50"
-                >
-                  <Ban className="size-3.5" />
-                  Отключить
-                </button>
-              </div>
-            )}
-
-            {employer.status === "Отклонён" && !localStatus && (
-              <div className="flex shrink-0 gap-2">
-                <button
-                  onClick={handleConfirm}
-                  disabled={isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  <CheckCircle2 className="size-3.5" />
-                  Подтвердить
-                </button>
-              </div>
-            )}
-
-            {localStatus === "confirmed" && (
-              <span className="shrink-0 text-xs text-emerald-600">Подтверждён ✓</span>
-            )}
-            {localStatus === "rejected" && (
-              <span className="shrink-0 text-xs text-muted-foreground">Отклонён</span>
-            )}
-            {localStatus === "disabled" && (
-              <span className="shrink-0 text-xs text-muted-foreground">Отключён — отписан от рассылки</span>
-            )}
-            {localStatus === "deleted" && (
-              <span className="shrink-0 text-xs text-muted-foreground">Удалён</span>
-            )}
-
-            {!localStatus && (
+        <td className="px-4 py-3">
+          {confirmingDelete ? (
+            <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+              <span className="text-xs font-medium text-destructive">Удалить работодателя?</span>
               <button
-                onClick={() => setConfirmingDelete(true)}
+                onClick={handleDelete}
                 disabled={isPending}
-                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
-                aria-label="Удалить"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
               >
                 <Trash2 className="size-3.5" />
+                Да, удалить
               </button>
-            )}
-          </>
-        )}
-      </div>
+              <button
+                onClick={() => setConfirmingDelete(false)}
+                disabled={isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              >
+                Отмена
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                {!done && (
+                  <button
+                    onClick={() => setEditing(true)}
+                    disabled={isPending}
+                    className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                    aria-label="Редактировать"
+                  >
+                    <Pencil className="size-3.5" />
+                  </button>
+                )}
 
-      {error && (
-        <p className="ml-8 text-xs text-destructive">{error}</p>
-      )}
-    </div>
+                {employer.status === "На проверке" && !done && (
+                  <>
+                    <button
+                      onClick={handleConfirm}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="size-3.5" />
+                      Подтвердить
+                    </button>
+                    <button
+                      onClick={() => handleReject("rejected")}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                    >
+                      <XCircle className="size-3.5" />
+                      Отклонить
+                    </button>
+                  </>
+                )}
+
+                {employer.status === "Подтверждён" && !done && (
+                  <button
+                    onClick={() => handleReject("disabled")}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/10 disabled:opacity-50"
+                  >
+                    <Ban className="size-3.5" />
+                    Отключить
+                  </button>
+                )}
+
+                {employer.status === "Отклонён" && !done && (
+                  <button
+                    onClick={handleConfirm}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="size-3.5" />
+                    Подтвердить
+                  </button>
+                )}
+
+                {localStatus === "confirmed" && (
+                  <span className="text-xs text-emerald-600">Подтверждён ✓</span>
+                )}
+                {localStatus === "rejected" && (
+                  <span className="text-xs text-muted-foreground">Отклонён</span>
+                )}
+                {localStatus === "disabled" && (
+                  <span className="text-xs text-muted-foreground">Отключён — отписан от рассылки</span>
+                )}
+                {localStatus === "deleted" && (
+                  <span className="text-xs text-muted-foreground">Удалён</span>
+                )}
+
+                {!done && (
+                  <button
+                    onClick={() => setConfirmingDelete(true)}
+                    disabled={isPending}
+                    className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+                    aria-label="Удалить"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                )}
+              </div>
+              {error && <p className="text-xs text-destructive">{error}</p>}
+            </div>
+          )}
+        </td>
+      </tr>
+    </>
   )
 }
 
