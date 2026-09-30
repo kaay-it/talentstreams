@@ -212,6 +212,30 @@ async function findTelegramContactId(employerToken: string, token: string): Prom
 }
 
 /**
+ * Which of the given employer tokens have an active Telegram bot connection — for the
+ * "подключён к Telegram" badge in /editor/employers. Best-effort: returns an empty set
+ * (never throws) if the bot isn't configured or SendPulse auth fails, same as
+ * sendTelegramToEmployer() — Telegram status is informational, not load-bearing.
+ */
+export async function getTelegramConnectedTokens(employerTokens: string[]): Promise<Set<string>> {
+  if (!employerTokens.length || !process.env.SENDPULSE_TG_BOT_ID) return new Set()
+  try {
+    const token = await getToken()
+    if (!token) return new Set()
+    const results = await Promise.all(
+      employerTokens.map(async (employerToken) => {
+        const contactId = await findTelegramContactId(employerToken, token)
+        return contactId ? employerToken : null
+      }),
+    )
+    return new Set(results.filter((t): t is string => t !== null))
+  } catch (err) {
+    console.error("[SendPulse] getTelegramConnectedTokens failed:", err)
+    return new Set()
+  }
+}
+
+/**
  * Sends a Telegram message to the employer via the SendPulse bot. Best-effort: returns
  * false (never throws) if the bot isn't configured, the employer hasn't subscribed, or
  * SendPulse fails — Telegram is an optional channel on top of email.
