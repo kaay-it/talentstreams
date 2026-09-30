@@ -20,6 +20,9 @@ export type Employer = {
   country: string
   additionalCountries: string[]
   timestamp: string
+  /** Telegram user id (SendPulse contact's telegram_id) — null if never connected, or no
+   * longer found on SendPulse's side. Synced opportunistically, see setEmployerTelegramId(). */
+  telegramId: string | null
 }
 
 function toEmployer(row: typeof employers.$inferSelect): Employer {
@@ -37,6 +40,7 @@ function toEmployer(row: typeof employers.$inferSelect): Employer {
     country: row.country,
     additionalCountries: row.additionalCountries,
     timestamp: row.timestamp.toISOString(),
+    telegramId: row.telegramId,
   }
 }
 
@@ -150,6 +154,7 @@ export async function updateEmployerFields(
     status: EmployerStatus
     country: string
     additionalCountries: string[]
+    telegramId: string | null
   }>,
 ): Promise<void> {
   await db.update(employers).set(data).where(eq(employers.token, token))

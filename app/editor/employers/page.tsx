@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation"
 import { Info } from "lucide-react"
-import { getEmployers } from "@/lib/db/employers"
+import { getEmployers, updateEmployerFields } from "@/lib/db/employers"
 import { getStreams } from "@/lib/db/streams"
-import { getTelegramConnectedTokens } from "@/lib/sendpulse"
+import { getTelegramConnectionInfo } from "@/lib/sendpulse"
 import { EmployerSection } from "@/components/employer-section"
 
 export const dynamic = "force-dynamic"
@@ -20,10 +20,23 @@ export default async function EmployersPage({
   }
 
   const employers = await getEmployers()
-  const [streams, telegramConnected] = await Promise.all([
+  const [streams, telegramInfo] = await Promise.all([
     getStreams(),
-    getTelegramConnectedTokens(employers.map((e) => e.token)),
+    getTelegramConnectionInfo(employers.map((e) => e.token)),
   ])
+
+  // Sync-on-read: keeps employers.telegramId truthful to what SendPulse reports right now —
+  // written when a connection is found, cleared when one we previously stored is gone (deleted
+  // via deleteTelegramContact() on employer deletion, or removed by any other means). This is
+  // the portability groundwork discussed for eventually moving off SendPulse to a self-hosted
+  // bot: telegramId is Telegram's own user id, addressable directly via the Bot API.
+  await Promise.all(
+    employers.map((e) => {
+      const found = telegramInfo.get(e.token) ?? null
+      if (found === e.telegramId) return undefined
+      return updateEmployerFields(e.token, { telegramId: found })
+    }),
+  )
 
   return (
     <div className="px-6 py-8">
@@ -43,7 +56,7 @@ export default async function EmployersPage({
         </p>
       </div>
 
-      <EmployerSection employers={employers} streams={streams} telegramConnectedTokens={[...telegramConnected]} />
+      <EmployerSection employers={employers} streams={streams} telegramConnectedTokens={[...telegramInfo.keys()]} />
     </div>
   )
 }

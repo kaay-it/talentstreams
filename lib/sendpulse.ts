@@ -190,11 +190,13 @@ export function telegramConnectUrl(employerToken: string): string | null {
 }
 
 /** Every SendPulse Telegram contact whose employer_token variable matches — any status.
- * Normally at most one, but nothing guarantees it, so callers decide how to use the list. */
+ * Normally at most one, but nothing guarantees it, so callers decide how to use the list.
+ * telegram_id is Telegram's own numeric user id — portable if we ever move off SendPulse
+ * to a self-hosted bot (same token, same Bot API), unlike SendPulse's own contact `id`. */
 async function getTelegramContactRecords(
   employerToken: string,
   token: string,
-): Promise<Array<{ id: string; status: number }>> {
+): Promise<Array<{ id: string; status: number; telegram_id: number }>> {
   const botId = process.env.SENDPULSE_TG_BOT_ID
   if (!botId) return []
   const params = new URLSearchParams({
@@ -210,7 +212,7 @@ async function getTelegramContactRecords(
     console.warn(`[SendPulse] GET /telegram/contacts/getByVariable status=${status}`, text)
     return []
   }
-  const data = JSON.parse(text) as { data?: Array<{ id: string; status: number }> }
+  const data = JSON.parse(text) as { data?: Array<{ id: string; status: number; telegram_id: number }> }
   return data.data ?? []
 }
 
@@ -222,26 +224,33 @@ async function findTelegramContactId(employerToken: string, token: string): Prom
 }
 
 /**
- * Which of the given employer tokens have an active Telegram bot connection — for the
- * "подключён к Telegram" badge in /editor/employers. Best-effort: returns an empty set
- * (never throws) if the bot isn't configured or SendPulse auth fails, same as
- * sendTelegramToEmployer() — Telegram status is informational, not load-bearing.
+ * Which of the given employer tokens have an active Telegram bot connection, and their
+ * Telegram user id — for the "подключён к Telegram" badge in /editor/employers, and to keep
+ * employers.telegramId in Neon in sync (see app/editor/employers/page.tsx): a token missing
+ * from the returned map means "not connected right now", which the page treats as license to
+ * clear a stale telegramId it finds — this is what actually removes it once SendPulse no
+ * longer reports the contact (deleted via deleteTelegramContact() or by any other means).
+ * Best-effort: returns an empty map (never throws) if the bot isn't configured or SendPulse
+ * auth fails, same as sendTelegramToEmployer() — Telegram status is informational, not
+ * load-bearing for anything else in the app.
  */
-export async function getTelegramConnectedTokens(employerTokens: string[]): Promise<Set<string>> {
-  if (!employerTokens.length || !process.env.SENDPULSE_TG_BOT_ID) return new Set()
+export async function getTelegramConnectionInfo(employerTokens: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>()
+  if (!employerTokens.length || !process.env.SENDPULSE_TG_BOT_ID) return result
   try {
     const token = await getToken()
-    if (!token) return new Set()
-    const results = await Promise.all(
+    if (!token) return result
+    await Promise.all(
       employerTokens.map(async (employerToken) => {
-        const contactId = await findTelegramContactId(employerToken, token)
-        return contactId ? employerToken : null
+        const records = await getTelegramContactRecords(employerToken, token)
+        const active = records.find((c) => c.status === 1)
+        if (active) result.set(employerToken, String(active.telegram_id))
       }),
     )
-    return new Set(results.filter((t): t is string => t !== null))
+    return result
   } catch (err) {
-    console.error("[SendPulse] getTelegramConnectedTokens failed:", err)
-    return new Set()
+    console.error("[SendPulse] getTelegramConnectionInfo failed:", err)
+    return result
   }
 }
 

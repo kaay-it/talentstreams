@@ -31,6 +31,12 @@ export const employers = pgTable("employers", {
   country:             text("country").notNull().default(""),
   additionalCountries: text("additionalCountries").array().notNull().default([]),
   timestamp:           timestamp("timestamp").defaultNow().notNull(),
+  // Telegram user id (SendPulse contact's telegram_id, numeric but stored as text — no
+  // arithmetic done on it) — nullable, synced opportunistically from SendPulse whenever
+  // /editor/employers checks connection status; null if never connected or no longer found.
+  // Portability groundwork: this is what a future self-hosted bot would message directly via
+  // the Telegram Bot API, independent of SendPulse (see lib/sendpulse.ts telegram functions).
+  telegramId:          text("telegramId"),
 })
 
 export const mailingListEntries = pgTable("mailingListEntries", {
