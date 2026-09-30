@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, Ban, Trash2, Building2, Pencil, Plus } from "lucide-react"
+import { CheckCircle2, XCircle, Ban, Trash2, Building2, Pencil, Plus, Send } from "lucide-react"
 import { confirmEmployer, rejectEmployer, deleteEmployer } from "@/app/actions"
 import { EmployerEditModal } from "@/components/employer-edit-modal"
 import { EmployerCreateModal } from "@/components/employer-create-modal"
@@ -23,7 +23,16 @@ const STATUS_BADGE: Record<EmployerStatus, string> = {
   "Отклонён": "bg-muted text-muted-foreground",
 }
 
-export function EmployerSection({ employers, streams }: { employers: Employer[]; streams: string[] }) {
+export function EmployerSection({
+  employers,
+  streams,
+  telegramConnectedTokens,
+}: {
+  employers: Employer[]
+  streams: string[]
+  telegramConnectedTokens: string[]
+}) {
+  const telegramConnected = useMemo(() => new Set(telegramConnectedTokens), [telegramConnectedTokens])
   const [search, setSearch] = useState("")
   const [status, setStatus] = useState<EmployerStatus | "">("")
   const [country, setCountry] = useState("")
@@ -98,7 +107,7 @@ export function EmployerSection({ employers, streams }: { employers: Employer[];
         ) : (
           <div className="divide-y">
             {filtered.map((e) => (
-              <EmployerRow key={e.token} employer={e} streams={streams} />
+              <EmployerRow key={e.token} employer={e} streams={streams} telegramConnected={telegramConnected.has(e.token)} />
             ))}
           </div>
         )}
@@ -107,7 +116,15 @@ export function EmployerSection({ employers, streams }: { employers: Employer[];
   )
 }
 
-function EmployerRow({ employer, streams }: { employer: Employer; streams: string[] }) {
+function EmployerRow({
+  employer,
+  streams,
+  telegramConnected,
+}: {
+  employer: Employer
+  streams: string[]
+  telegramConnected: boolean
+}) {
   const [isPending, startTransition] = useTransition()
   const [localStatus, setLocalStatus] = useState<"confirmed" | "rejected" | "disabled" | "deleted" | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -168,6 +185,15 @@ function EmployerRow({ employer, streams }: { employer: Employer; streams: strin
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_BADGE[employer.status]}`}>
               {employer.status}
             </span>
+            {telegramConnected && (
+              <span
+                title="Подключён к Telegram-боту"
+                className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
+              >
+                <Send className="size-3" />
+                Telegram
+              </span>
+            )}
           </div>
           <p className="text-xs text-muted-foreground truncate">
             {employer.email}

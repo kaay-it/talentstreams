@@ -2,6 +2,7 @@ import { notFound } from "next/navigation"
 import { Info } from "lucide-react"
 import { getEmployers } from "@/lib/db/employers"
 import { getStreams } from "@/lib/db/streams"
+import { getTelegramConnectedTokens } from "@/lib/sendpulse"
 import { EmployerSection } from "@/components/employer-section"
 
 export const dynamic = "force-dynamic"
@@ -18,7 +19,11 @@ export default async function EmployersPage({
     notFound()
   }
 
-  const [employers, streams] = await Promise.all([getEmployers(), getStreams()])
+  const employers = await getEmployers()
+  const [streams, telegramConnected] = await Promise.all([
+    getStreams(),
+    getTelegramConnectedTokens(employers.map((e) => e.token)),
+  ])
 
   return (
     <div className="px-6 py-8">
@@ -38,7 +43,7 @@ export default async function EmployersPage({
         </p>
       </div>
 
-      <EmployerSection employers={employers} streams={streams} />
+      <EmployerSection employers={employers} streams={streams} telegramConnectedTokens={[...telegramConnected]} />
     </div>
   )
 }
