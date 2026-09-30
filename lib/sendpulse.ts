@@ -227,8 +227,10 @@ export async function sendTelegramToEmployer(employerToken: string, text: string
       { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       JSON.stringify({ contact_id: contactId, text }),
     )
-    console.log(`[SendPulse] telegram sendText status=${res.status}`)
-    return res.status >= 200 && res.status < 300
+    const ok = res.status >= 200 && res.status < 300
+    if (ok) console.log(`[SendPulse] telegram sendText status=${res.status}`)
+    else console.warn(`[SendPulse] telegram sendText status=${res.status}`, res.text)
+    return ok
   } catch (err) {
     console.error("[SendPulse] sendTelegramToEmployer failed:", err)
     return false
