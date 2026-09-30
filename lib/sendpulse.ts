@@ -189,10 +189,14 @@ export function telegramConnectUrl(employerToken: string): string | null {
   return `https://tg.pulse.is/${botName}?start=${flowId}&employer_token=${employerToken}`
 }
 
-/** Returns the SendPulse bot contact_id of the employer, or null if they haven't subscribed. */
-async function findTelegramContactId(employerToken: string, token: string): Promise<string | null> {
+/** Every SendPulse Telegram contact whose employer_token variable matches — any status.
+ * Normally at most one, but nothing guarantees it, so callers decide how to use the list. */
+async function getTelegramContactRecords(
+  employerToken: string,
+  token: string,
+): Promise<Array<{ id: string; status: number }>> {
   const botId = process.env.SENDPULSE_TG_BOT_ID
-  if (!botId) return null
+  if (!botId) return []
   const params = new URLSearchParams({
     bot_id: botId,
     variable_name: "employer_token",
@@ -204,11 +208,17 @@ async function findTelegramContactId(employerToken: string, token: string): Prom
   )
   if (status < 200 || status >= 300) {
     console.warn(`[SendPulse] GET /telegram/contacts/getByVariable status=${status}`, text)
-    return null
+    return []
   }
   const data = JSON.parse(text) as { data?: Array<{ id: string; status: number }> }
+  return data.data ?? []
+}
+
+/** Returns the SendPulse bot contact_id of the employer, or null if they haven't subscribed. */
+async function findTelegramContactId(employerToken: string, token: string): Promise<string | null> {
+  const records = await getTelegramContactRecords(employerToken, token)
   // status 1 = active; a contact who blocked the bot can't receive messages anyway
-  return data.data?.find((c) => c.status === 1)?.id ?? null
+  return records.find((c) => c.status === 1)?.id ?? null
 }
 
 /**
@@ -233,6 +243,47 @@ export async function getTelegramConnectedTokens(employerTokens: string[]): Prom
     console.error("[SendPulse] getTelegramConnectedTokens failed:", err)
     return new Set()
   }
+}
+
+/** POSTs the given action (disable/delete) for every SendPulse Telegram contact record
+ * matching the employer's token — regardless of the record's current status, unlike
+ * findTelegramContactId(), since an admin action must still reach an already-disabled
+ * contact. Best-effort: never throws, silently no-ops if the employer never connected. */
+async function setTelegramContactState(employerToken: string, action: "disable" | "delete"): Promise<void> {
+  try {
+    const token = await getToken()
+    if (!token) return
+    const records = await getTelegramContactRecords(employerToken, token)
+    await Promise.all(
+      records.map(async (record) => {
+        const res = await spPost(
+          `${API}/telegram/contacts/${action}`,
+          { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          JSON.stringify({ contact_id: record.id }),
+        )
+        const ok = res.status >= 200 && res.status < 300
+        if (ok) console.log(`[SendPulse] telegram ${action} status=${res.status}`)
+        else console.warn(`[SendPulse] telegram ${action} status=${res.status}`, res.text)
+      }),
+    )
+  } catch (err) {
+    console.error(`[SendPulse] telegram ${action} failed:`, err)
+  }
+}
+
+/** Disables the employer's Telegram bot contact — campaigns/autoflows stop, but the contact
+ * and its employer_token variable stay intact, so re-confirming the employer later can find
+ * the connection again (getTelegramConnectedTokens()/sendTelegramToEmployer() just won't
+ * reach it while disabled). Used when an employer is rejected or disabled, never deleted. */
+export async function disableTelegramContact(employerToken: string): Promise<void> {
+  await setTelegramContactState(employerToken, "disable")
+}
+
+/** Permanently removes the employer's Telegram bot contact from SendPulse's audience — used
+ * only when the employer record itself is deleted, not on reject/disable (see
+ * disableTelegramContact()). */
+export async function deleteTelegramContact(employerToken: string): Promise<void> {
+  await setTelegramContactState(employerToken, "delete")
 }
 
 /**

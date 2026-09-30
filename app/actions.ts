@@ -9,7 +9,7 @@ import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResume
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, getCampaigns, telegramConnectUrl, sendTelegramToEmployer } from "@/lib/sendpulse"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, getCampaigns, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
@@ -765,6 +765,9 @@ export async function rejectEmployer(token: string): Promise<void> {
   if (existing?.status === "Подтверждён") {
     await removeEmployerFromSendPulse(existing)
   }
+  // Telegram can be connected independently of email confirmation (the bot link is shown
+  // right after registration) — disable unconditionally, not just for "Подтверждён".
+  await disableTelegramContact(token)
   await updateEmployerFields(token, { status: "Отклонён" })
   revalidatePath("/editor")
   revalidatePath("/editor/employers")
@@ -775,6 +778,7 @@ export async function deleteEmployer(token: string): Promise<void> {
   if (existing?.status === "Подтверждён") {
     await removeEmployerFromSendPulse(existing)
   }
+  await deleteTelegramContact(token)
   await deleteEmployerRecord(token)
   revalidatePath("/editor")
   revalidatePath("/editor/employers")
