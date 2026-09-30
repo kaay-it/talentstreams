@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, Ban, Trash2, Building2, Pencil, Plus, Send } from "lucide-react"
+import { CheckCircle2, XCircle, Ban, Trash2, Building2, Pencil, Plus, Send, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { confirmEmployer, rejectEmployer, deleteEmployer } from "@/app/actions"
 import { EmployerEditModal } from "@/components/employer-edit-modal"
 import { EmployerCreateModal } from "@/components/employer-create-modal"
@@ -23,6 +23,52 @@ const STATUS_BADGE: Record<EmployerStatus, string> = {
   "Отклонён": "bg-muted text-muted-foreground",
 }
 
+/** Подтверждённые вперёд, остальные статусы равноценны между собой — используется и для
+ * сортировки по статусу, и для дефолтной сортировки (см. EmployerSection). */
+const STATUS_RANK: Record<EmployerStatus, number> = {
+  "Подтверждён": 0,
+  "На проверке": 1,
+  "Отклонён": 1,
+}
+
+type SortField = "timestamp" | "status"
+
+/** employer.timestamp — ISO-строка (row.timestamp.toISOString(), lib/db/employers.ts), всегда заполнена. */
+function parseIsoDate(s: string): number | null {
+  if (!s) return null
+  const t = new Date(s).getTime()
+  return Number.isNaN(t) ? null : t
+}
+
+function SortButton({
+  label,
+  active,
+  dir,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  dir: "asc" | "desc"
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:text-foreground ${
+        active ? "border-foreground/30 text-foreground" : "text-muted-foreground"
+      }`}
+    >
+      {label}
+      {active ? (
+        dir === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />
+      ) : (
+        <ArrowUpDown className="size-3.5 opacity-40" />
+      )}
+    </button>
+  )
+}
+
 export function EmployerSection({
   employers,
   streams,
@@ -38,6 +84,17 @@ export function EmployerSection({
   const [country, setCountry] = useState("")
   const [stream, setStream] = useState("")
   const [creating, setCreating] = useState(false)
+  const [sortField, setSortField] = useState<SortField | null>(null)
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortField(field)
+      setSortDir("asc")
+    }
+  }
 
   const countries = useMemo(
     () => Array.from(new Set(employers.map((e) => e.country).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
@@ -57,6 +114,34 @@ export function EmployerSection({
       return true
     })
   }, [employers, search, status, country, stream])
+
+  const sorted = useMemo(() => {
+    if (!sortField) {
+      // По умолчанию: сначала подтверждённые, внутри группы — по дате регистрации от старых к новым.
+      return [...filtered].sort((a, b) => {
+        const rankDiff = STATUS_RANK[a.status] - STATUS_RANK[b.status]
+        if (rankDiff !== 0) return rankDiff
+        const ta = parseIsoDate(a.timestamp)
+        const tb = parseIsoDate(b.timestamp)
+        if (ta === null && tb === null) return 0
+        if (ta === null) return 1
+        if (tb === null) return -1
+        return ta - tb
+      })
+    }
+    const getValue = sortField === "timestamp"
+      ? (e: Employer) => parseIsoDate(e.timestamp)
+      : (e: Employer) => STATUS_RANK[e.status]
+    return filtered
+      .map((e, i) => ({ e, i, v: getValue(e) }))
+      .sort((a, b) => {
+        if (a.v === null && b.v === null) return a.i - b.i
+        if (a.v === null) return 1
+        if (b.v === null) return -1
+        return sortDir === "asc" ? a.v - b.v : b.v - a.v
+      })
+      .map((x) => x.e)
+  }, [filtered, sortField, sortDir])
 
   return (
     <div className="space-y-3">
@@ -85,6 +170,18 @@ export function EmployerSection({
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
+        <SortButton
+          label="Дата регистрации"
+          active={sortField === "timestamp"}
+          dir={sortDir}
+          onClick={() => handleSort("timestamp")}
+        />
+        <SortButton
+          label="Статус"
+          active={sortField === "status"}
+          dir={sortDir}
+          onClick={() => handleSort("status")}
+        />
         <span className="text-xs text-muted-foreground shrink-0">
           {filtered.length} {employerPlural(filtered.length)}
         </span>
@@ -106,7 +203,7 @@ export function EmployerSection({
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">Работодатели не найдены по заданным фильтрам.</p>
         ) : (
           <div className="divide-y">
-            {filtered.map((e) => (
+            {sorted.map((e) => (
               <EmployerRow key={e.token} employer={e} streams={streams} telegramConnected={telegramConnected.has(e.token)} />
             ))}
           </div>
