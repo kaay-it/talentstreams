@@ -126,6 +126,7 @@ docs/
 - Контакт ищется по `employer_token` через API (`getByVariable`); отправка — `sendTelegramToEmployer()`, отключение/удаление контакта в боте — `disableTelegramContact()`/`deleteTelegramContact()` (вызываются из `rejectEmployer()`/`deleteEmployer()`) — всё в `lib/sendpulse.ts`, best-effort
 - **Токен бота — наш** (создан через @BotFather, вставлен в SendPulse, не наоборот) — при желании можно перейти на self-hosted бота без потери подписчиков (см. `docs/backlog.adoc`)
 - `employers.telegramId` (Neon) — Telegram user id, синхронизируется при каждой загрузке `/editor/employers` из ответа SendPulse (пишется при подключении, чистится, если SendPulse контакт больше не находит); задел на случай перехода на self-hosted бота — этот id адресуется напрямую через Telegram Bot API, независимо от SendPulse
+- Та же синхронизация поправляет и `employers.telegram` (@username) на реальный подключённый аккаунт — работодатель вписывает его вручную при регистрации, но может открыть ссылку-приглашение с другого Telegram-аккаунта; обновляется только при реальном совпадении (никогда не затирается в пустую строку)
 
 ### Server Actions
 Все мутации — в `app/actions.ts`. После мутации, меняющей UI редактора, вызывать `revalidatePath(...)`.

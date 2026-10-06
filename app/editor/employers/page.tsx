@@ -30,11 +30,22 @@ export default async function EmployersPage({
   // via deleteTelegramContact() on employer deletion, or removed by any other means). This is
   // the portability groundwork discussed for eventually moving off SendPulse to a self-hosted
   // bot: telegramId is Telegram's own user id, addressable directly via the Bot API.
+  //
+  // employers.telegram (the @username) is also corrected here, one-directionally: an employer
+  // types a Telegram username at registration, but nothing stops them opening the connect link
+  // from a *different* Telegram account — SendPulse's own report of who actually connected is
+  // the only reliable source. Only overwritten when SendPulse reports a real username (never
+  // cleared to null — a username is optional on Telegram, and the one the employer typed is
+  // still better than nothing if the connected account simply doesn't have one).
   await Promise.all(
     employers.map((e) => {
-      const found = telegramInfo.get(e.token) ?? null
-      if (found === e.telegramId) return undefined
-      return updateEmployerFields(e.token, { telegramId: found })
+      const info = telegramInfo.get(e.token)
+      const foundTelegramId = info?.telegramId ?? null
+      const updates: Partial<{ telegramId: string | null; telegram: string }> = {}
+      if (foundTelegramId !== e.telegramId) updates.telegramId = foundTelegramId
+      if (info?.username && info.username !== e.telegram) updates.telegram = info.username
+      if (Object.keys(updates).length === 0) return undefined
+      return updateEmployerFields(e.token, updates)
     }),
   )
 

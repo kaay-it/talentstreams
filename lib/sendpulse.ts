@@ -192,11 +192,15 @@ export function telegramConnectUrl(employerToken: string): string | null {
 /** Every SendPulse Telegram contact whose employer_token variable matches — any status.
  * Normally at most one, but nothing guarantees it, so callers decide how to use the list.
  * telegram_id is Telegram's own numeric user id — portable if we ever move off SendPulse
- * to a self-hosted bot (same token, same Bot API), unlike SendPulse's own contact `id`. */
+ * to a self-hosted bot (same token, same Bot API), unlike SendPulse's own contact `id`.
+ * channel_data.username is the real connected account's @handle — a employer can type any
+ * Telegram username at registration and then open the connect link from a *different*
+ * account, so this is the only reliable source for "who actually connected" (see
+ * getTelegramConnectionInfo()). Username is optional on Telegram, so it can be absent. */
 async function getTelegramContactRecords(
   employerToken: string,
   token: string,
-): Promise<Array<{ id: string; status: number; telegram_id: number }>> {
+): Promise<Array<{ id: string; status: number; telegram_id: number; channel_data?: { username?: string | null } }>> {
   const botId = process.env.SENDPULSE_TG_BOT_ID
   if (!botId) return []
   const params = new URLSearchParams({
@@ -212,7 +216,9 @@ async function getTelegramContactRecords(
     console.warn(`[SendPulse] GET /telegram/contacts/getByVariable status=${status}`, text)
     return []
   }
-  const data = JSON.parse(text) as { data?: Array<{ id: string; status: number; telegram_id: number }> }
+  const data = JSON.parse(text) as {
+    data?: Array<{ id: string; status: number; telegram_id: number; channel_data?: { username?: string | null } }>
+  }
   return data.data ?? []
 }
 
@@ -223,19 +229,28 @@ async function findTelegramContactId(employerToken: string, token: string): Prom
   return records.find((c) => c.status === 1)?.id ?? null
 }
 
+export type TelegramConnectionInfo = {
+  telegramId: string
+  /** Real @username of the connected account, or null if it has none (optional on Telegram).
+   * Can differ from employers.telegram — the employer types that at registration, but can end
+   * up opening the connect link from a different Telegram account than the one they named. */
+  username: string | null
+}
+
 /**
- * Which of the given employer tokens have an active Telegram bot connection, and their
- * Telegram user id — for the "подключён к Telegram" badge in /editor/employers, and to keep
- * employers.telegramId in Neon in sync (see app/editor/employers/page.tsx): a token missing
- * from the returned map means "not connected right now", which the page treats as license to
- * clear a stale telegramId it finds — this is what actually removes it once SendPulse no
- * longer reports the contact (deleted via deleteTelegramContact() or by any other means).
- * Best-effort: returns an empty map (never throws) if the bot isn't configured or SendPulse
- * auth fails, same as sendTelegramToEmployer() — Telegram status is informational, not
- * load-bearing for anything else in the app.
+ * Which of the given employer tokens have an active Telegram bot connection, their Telegram
+ * user id, and their real @username — for the "подключён к Telegram" badge in
+ * /editor/employers, and to keep employers.telegramId/telegram in Neon in sync (see
+ * app/editor/employers/page.tsx): a token missing from the returned map means "not connected
+ * right now", which the page treats as license to clear a stale telegramId it finds — this is
+ * what actually removes it once SendPulse no longer reports the contact (deleted via
+ * deleteTelegramContact() or by any other means). Best-effort: returns an empty map (never
+ * throws) if the bot isn't configured or SendPulse auth fails, same as
+ * sendTelegramToEmployer() — Telegram status is informational, not load-bearing for anything
+ * else in the app.
  */
-export async function getTelegramConnectionInfo(employerTokens: string[]): Promise<Map<string, string>> {
-  const result = new Map<string, string>()
+export async function getTelegramConnectionInfo(employerTokens: string[]): Promise<Map<string, TelegramConnectionInfo>> {
+  const result = new Map<string, TelegramConnectionInfo>()
   if (!employerTokens.length || !process.env.SENDPULSE_TG_BOT_ID) return result
   try {
     const token = await getToken()
@@ -244,7 +259,12 @@ export async function getTelegramConnectionInfo(employerTokens: string[]): Promi
       employerTokens.map(async (employerToken) => {
         const records = await getTelegramContactRecords(employerToken, token)
         const active = records.find((c) => c.status === 1)
-        if (active) result.set(employerToken, String(active.telegram_id))
+        if (active) {
+          result.set(employerToken, {
+            telegramId: String(active.telegram_id),
+            username: active.channel_data?.username ?? null,
+          })
+        }
       }),
     )
     return result
