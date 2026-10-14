@@ -6,6 +6,7 @@ import { X, Check, AlertCircle, Send } from "lucide-react"
 import { registerEmployer, type EmployerData } from "@/app/actions"
 import { useLocale } from "@/components/language-provider"
 import { employerFormDict } from "@/lib/i18n/employer-form"
+import { CompanyAutocompleteInput } from "@/components/company-autocomplete-input"
 
 export const CONTACT_OPTIONS = [
   { value: "email", label: "Email" },
@@ -163,6 +164,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
 
   const canSubmit =
     name.trim().length > 0 &&
+    company.trim().length > 0 &&
     selectedStreams.length > 0 &&
     (primaryContact !== "telegram" || telegram.trim()) &&
     (primaryContact !== "linkedin" || linkedin.trim()) &&
@@ -253,13 +255,12 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                         className={inputCls}
                       />
                     </Field>
-                    <Field label={t.fields.company.label}>
-                      <input
-                        type="text"
+                    <Field label={t.fields.company.label} required>
+                      <CompanyAutocompleteInput
                         value={company}
-                        onChange={(e) => setCompany(e.target.value)}
+                        onChange={setCompany}
+                        required
                         placeholder={t.fields.company.placeholder}
-                        className={inputCls}
                       />
                     </Field>
                   </div>

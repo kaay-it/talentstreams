@@ -1,7 +1,7 @@
 import "server-only"
 import { eq } from "drizzle-orm"
 import { db } from "./index"
-import { employers } from "./schema"
+import { employers, companies } from "./schema"
 import type { Profile } from "../sheets"
 
 export type EmployerStatus = "На проверке" | "Подтверждён" | "Отклонён"
@@ -9,7 +9,11 @@ export type EmployerStatus = "На проверке" | "Подтверждён" 
 export type Employer = {
   token: string
   name: string
+  /** Resolved company name (joined from companies.name) — "" only if companyId is somehow
+   * null (shouldn't happen post-migration; every employer gets a real company or the
+   * "Не определено" placeholder, see lib/db/companies.ts). */
   company: string
+  companyId: number | null
   email: string
   phone: string
   primaryContact: string
@@ -25,29 +29,35 @@ export type Employer = {
   telegramId: string | null
 }
 
-function toEmployer(row: typeof employers.$inferSelect): Employer {
+function toEmployer(row: { employers: typeof employers.$inferSelect; companies: { id: number; name: string } | null }): Employer {
+  const e = row.employers
   return {
-    token: row.token,
-    name: row.name,
-    company: row.company,
-    email: row.email,
-    phone: row.phone,
-    primaryContact: row.primaryContact,
-    telegram: row.telegram,
-    linkedin: row.linkedin,
-    streams: row.streams,
-    status: row.status as EmployerStatus,
-    country: row.country,
-    additionalCountries: row.additionalCountries,
-    timestamp: row.timestamp.toISOString(),
-    telegramId: row.telegramId,
+    token: e.token,
+    name: e.name,
+    company: row.companies?.name ?? "",
+    companyId: e.companyId,
+    email: e.email,
+    phone: e.phone,
+    primaryContact: e.primaryContact,
+    telegram: e.telegram,
+    linkedin: e.linkedin,
+    streams: e.streams,
+    status: e.status as EmployerStatus,
+    country: e.country,
+    additionalCountries: e.additionalCountries,
+    timestamp: e.timestamp.toISOString(),
+    telegramId: e.telegramId,
   }
+}
+
+function employersWithCompany() {
+  return db.select().from(employers).leftJoin(companies, eq(employers.companyId, companies.id))
 }
 
 /** Fetch all employers. */
 export async function getEmployers(): Promise<Employer[]> {
   try {
-    const rows = await db.select().from(employers)
+    const rows = await employersWithCompany()
     return rows.map(toEmployer)
   } catch {
     return []
@@ -57,7 +67,7 @@ export async function getEmployers(): Promise<Employer[]> {
 /** Find a single employer by their token. Returns undefined if not found. */
 export async function getEmployerByToken(token: string): Promise<Employer | undefined> {
   if (!token) return undefined
-  const rows = await db.select().from(employers).where(eq(employers.token, token)).limit(1)
+  const rows = await employersWithCompany().where(eq(employers.token, token)).limit(1)
   return rows[0] ? toEmployer(rows[0]) : undefined
 }
 
@@ -124,7 +134,7 @@ export function filterCandidatesForEmployer(candidates: Profile[], employer: Emp
 export async function createEmployer(data: {
   token?: string
   name: string
-  company: string
+  companyId: number
   email: string
   phone: string
   primaryContact: string
@@ -144,7 +154,7 @@ export async function updateEmployerFields(
   token: string,
   data: Partial<{
     name: string
-    company: string
+    companyId: number | null
     email: string
     phone: string
     primaryContact: string

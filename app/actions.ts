@@ -9,6 +9,7 @@ import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResume
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
+import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, getCampaigns, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 
@@ -641,6 +642,11 @@ export async function deleteCandidate(rowIndex: number, candidateId: string): Pr
   revalidatePath("/editor/candidates")
 }
 
+/** Autocomplete source for the "Компания" field in registration/edit forms. */
+export async function searchCompanies(query: string) {
+  return searchCompaniesDb(query)
+}
+
 export type RegisterEmployerResult =
   | { ok: true; telegramUrl?: string | null }
   | { ok: false; error: string }
@@ -650,6 +656,7 @@ export type RegisterEmployerResult =
  * to unexpected failures) must travel back as data, not as an exception. */
 export async function registerEmployer(data: EmployerData): Promise<RegisterEmployerResult> {
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
+  if (!data.company.trim()) return { ok: false, error: "Укажите компанию" }
   if (!data.email || !data.phone) return { ok: false, error: "Email и телефон обязательны" }
   if (!data.streams.length) return { ok: false, error: "Выберите хотя бы один стрим" }
   if (data.primaryContact === "telegram" && !data.telegram.trim()) {
@@ -673,10 +680,11 @@ export async function registerEmployer(data: EmployerData): Promise<RegisterEmpl
   }
 
   const token = crypto.randomUUID()
+  const companyId = await findOrCreateCompanyByName(data.company)
   await createEmployer({
     token,
     name: data.name,
-    company: data.company,
+    companyId,
     email: data.email,
     phone: data.phone,
     primaryContact: data.primaryContact,
@@ -707,6 +715,7 @@ export async function updateEmployer(
   },
 ): Promise<RegisterEmployerResult> {
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
+  if (!data.company.trim()) return { ok: false, error: "Укажите компанию" }
   if (!data.email.trim()) return { ok: false, error: "Укажите email" }
   if (!data.phone.trim()) return { ok: false, error: "Укажите телефон" }
   if (!data.streams.length) return { ok: false, error: "Выберите хотя бы один стрим" }
@@ -718,10 +727,11 @@ export async function updateEmployer(
   }
 
   const existing = await getEmployerByToken(token)
+  const companyId = await findOrCreateCompanyByName(data.company)
 
   await updateEmployerFields(token, {
     name: data.name,
-    company: data.company,
+    companyId,
     email: data.email,
     phone: data.phone,
     primaryContact: data.primaryContact,

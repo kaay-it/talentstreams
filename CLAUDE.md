@@ -46,6 +46,7 @@ app/
   editor/
     layout.tsx / page.tsx           # Выпуски (Releases)
     employers/page.tsx
+    companies/page.tsx              # Список компаний с раскрытием — кто из людей в какой компании (TASK-36)
     candidates/page.tsx
     requests/page.tsx
     streams/page.tsx                # CRUD стримов (Neon)
@@ -62,10 +63,11 @@ lib/
     home.ts / candidate-form.ts / employer-form.ts
   db/
     index.ts                        # Drizzle клиент (neon-http)
-    schema.ts                       # Схемы: contactRequests, streams, employers, candidateResumes
+    schema.ts                       # Схемы: contactRequests, streams, employers, candidateResumes, companies
     contact-requests.ts             # CRUD запросов (FK на employers/streams)
     streams.ts                      # CRUD стримов
-    employers.ts                    # CRUD работодателей (TASK-DB-3)
+    employers.ts                    # CRUD работодателей (TASK-DB-3); employer.company — резолвленное имя через join на companies
+    companies.ts                    # CRUD компаний, поиск для автодополнения, find-or-create (TASK-36)
     resumes.ts                      # История версий резюме кандидата (TASK-32)
     migrations/                     # SQL-миграции
 
@@ -81,9 +83,11 @@ components/
   employer-edit-modal.tsx           # Редактирование работодателя — форма как у регистрации, без чекбокса согласия
   employer-create-modal.tsx         # Быстрое добавление работодателя из редактора (переиспользует registerEmployer)
   employer-section.tsx              # Фильтры (поиск/статус/страна/стрим) + список + Pencil
+  company-autocomplete-input.tsx    # Поле «Компания» с автодополнением (searchCompanies); используется во всех 3 формах работодателя (TASK-36)
+  companies-section.tsx             # Список компаний с раскрытием по клику — показывает людей внутри компании (TASK-36)
   streams-table.tsx                 # Inline-редактор стримов + счётчик подходящих кандидатов (TASK-27)
   contact-requests-section.tsx
-  editor-nav.tsx                    # Разделы: Выпуски/Работодатели/Кандидаты/Запросы/Стримы/Настройки
+  editor-nav.tsx                    # Разделы: Выпуски/Работодатели/Компании/Кандидаты/Запросы/Стримы/Настройки
   publish-button.tsx
   contact-button.tsx
   general-inquiry-button.tsx
@@ -117,7 +121,8 @@ docs/
 ### Neon — таблицы
 - `contactRequests` — запросы работодателей на контакт с кандидатами; `employerToken` (FK на `employers.token`, `ON DELETE CASCADE` — запрос без работодателя не имеет смысла) и `streamId` (FK на `streams.id`, `ON DELETE SET NULL`)
 - `streams` — стримы (Industry/Functional), полный CRUD через `/editor/streams`
-- `employers` — работодатели (TASK-DB-3); `token` — тот же UUID, что `employer_token` в SendPulse и `?e=` в публичной ссылке; `streams`/`additionalCountries` — нативные Postgres `text[]`
+- `employers` — работодатели (TASK-DB-3); `token` — тот же UUID, что `employer_token` в SendPulse и `?e=` в публичной ссылке; `streams`/`additionalCountries` — нативные Postgres `text[]`; `companyId` — FK на `companies.id` (`ON DELETE SET NULL`)
+- `companies` — компании работодателей (TASK-36), отдельная сущность — одна компания может иметь несколько работодателей (людей); `name` — `unique()`. Поле «Компания» обязательно при регистрации, с автодополнением по существующим названиям (`findOrCreateCompanyByName()`, case-insensitive через `ilike`); записи без компании получают реальную строку-плейсхолдер «Не определено» (не NULL), управляемую как любая другая компания
 - `candidateResumes` — история версий резюме кандидата (TASK-32); кандидаты сами остаются в Google Sheets
 - Миграции: `scripts/migrate.mjs`
 
@@ -164,6 +169,7 @@ docs/
 | Пауза публикации кандидата (2 недели/3 месяца/статус «Не публиковать» после 3-й отправки) | ✅ TASK-05 |
 | Мультиязычная главная страница (RU/EN, переключатель без смены URL) | ✅ |
 | Подключение работодателя к Telegram-боту SendPulse, уведомление о подтверждении | ✅ TASK-35 (часть 1) |
+| Компания работодателя — обязательное поле, отдельная сущность с FK, автодополнение, раздел «Компании» | ✅ TASK-36 |
 
 ## Активные задачи (приоритет)
 

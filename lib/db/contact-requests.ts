@@ -1,7 +1,7 @@
 import "server-only"
 import { desc, eq } from "drizzle-orm"
 import { db } from "./index"
-import { contactRequests, employers, streams } from "./schema"
+import { contactRequests, employers, companies, streams } from "./schema"
 
 export type ContactRequestStatus =
   | "Новый запрос"
@@ -52,11 +52,12 @@ export async function getContactRequests(): Promise<ContactRequest[]> {
       status: contactRequests.status,
       streamName: streams.name,
       employerName: employers.name,
-      employerCompany: employers.company,
+      employerCompany: companies.name,
       employerEmail: employers.email,
     })
     .from(contactRequests)
     .innerJoin(employers, eq(contactRequests.employerToken, employers.token))
+    .leftJoin(companies, eq(employers.companyId, companies.id))
     .leftJoin(streams, eq(contactRequests.streamId, streams.id))
     .orderBy(desc(contactRequests.timestamp))
 
@@ -68,7 +69,7 @@ export async function getContactRequests(): Promise<ContactRequest[]> {
     candidateId: r.candidateId,
     employerToken: r.employerToken,
     employerName: r.employerName,
-    company: r.employerCompany,
+    company: r.employerCompany ?? "",
     employerEmail: r.employerEmail,
     status: r.status as ContactRequestStatus,
   }))

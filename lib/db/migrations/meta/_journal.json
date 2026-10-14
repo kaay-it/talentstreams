@@ -78,6 +78,20 @@
       "when": 1790757605633,
       "tag": "0010_glamorous_shen",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791998354559,
+      "tag": "0011_cold_brother_voodoo",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791998948128,
+      "tag": "0012_fresh_shooting_star",
+      "breakpoints": true
     }
   ]
 }
