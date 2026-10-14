@@ -132,6 +132,7 @@ export function EmployerEditModal({
   const canSubmit =
     name.trim().length > 0 &&
     company.trim().length > 0 &&
+    country.trim().length > 0 &&
     selectedStreams.length > 0 &&
     (primaryContact !== "telegram" || telegram.trim()) &&
     (primaryContact !== "linkedin" || linkedin.trim())
@@ -141,7 +142,7 @@ export function EmployerEditModal({
     ? "Рассматривает кандидатов из любой страны"
     : additionalCountries.length
     ? `Выбрано: ${additionalCountries.length}`
-    : "Необязательно — если рассматривает кандидатов из нескольких стран"
+    : "Если не выбрать ни одной — будет считаться «Любая»"
 
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -319,8 +320,9 @@ export function EmployerEditModal({
                   )}
                 </Field>
 
-                <Field label="Страна нахождения" hint="Страна, в которой работает компания">
+                <Field label="Страна нахождения" required hint="Страна, в которой работает компания">
                   <select
+                    required
                     value={country}
                     onChange={(e) => setCountry(e.target.value)}
                     className={inputCls}
