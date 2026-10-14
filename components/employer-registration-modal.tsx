@@ -22,6 +22,7 @@ export const PRIMARY_COUNTRIES = [
   "Казахстан",
   "Кыргызстан",
   "Таджикистан",
+  "Другая",
 ]
 
 export const ADDITIONAL_COUNTRIES = [
@@ -165,6 +166,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
   const canSubmit =
     name.trim().length > 0 &&
     company.trim().length > 0 &&
+    country.trim().length > 0 &&
     selectedStreams.length > 0 &&
     (primaryContact !== "telegram" || telegram.trim()) &&
     (primaryContact !== "linkedin" || linkedin.trim()) &&
@@ -387,8 +389,9 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                       )}
                     </Field>
 
-                    <Field label={t.fields.country.label} hint={t.fields.country.hint}>
+                    <Field label={t.fields.country.label} required hint={t.fields.country.hint}>
                       <select
+                        required
                         value={country}
                         onChange={(e) => setCountry(e.target.value)}
                         className={inputCls}

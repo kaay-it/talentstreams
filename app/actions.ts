@@ -657,6 +657,7 @@ export type RegisterEmployerResult =
 export async function registerEmployer(data: EmployerData): Promise<RegisterEmployerResult> {
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
   if (!data.company.trim()) return { ok: false, error: "Укажите компанию" }
+  if (!data.country.trim()) return { ok: false, error: "Укажите страну" }
   if (!data.email || !data.phone) return { ok: false, error: "Email и телефон обязательны" }
   if (!data.streams.length) return { ok: false, error: "Выберите хотя бы один стрим" }
   if (data.primaryContact === "telegram" && !data.telegram.trim()) {
@@ -693,7 +694,7 @@ export async function registerEmployer(data: EmployerData): Promise<RegisterEmpl
     streams: data.streams,
     status: "На проверке",
     country: data.country,
-    additionalCountries: data.additionalCountries,
+    additionalCountries: data.additionalCountries.length ? data.additionalCountries : ["Любая"],
   })
   revalidatePath("/editor/employers")
   return { ok: true, telegramUrl: telegramConnectUrl(token) }
@@ -716,6 +717,7 @@ export async function updateEmployer(
 ): Promise<RegisterEmployerResult> {
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
   if (!data.company.trim()) return { ok: false, error: "Укажите компанию" }
+  if (!data.country.trim()) return { ok: false, error: "Укажите страну" }
   if (!data.email.trim()) return { ok: false, error: "Укажите email" }
   if (!data.phone.trim()) return { ok: false, error: "Укажите телефон" }
   if (!data.streams.length) return { ok: false, error: "Выберите хотя бы один стрим" }
@@ -739,7 +741,7 @@ export async function updateEmployer(
     linkedin: data.linkedin,
     streams: data.streams,
     country: data.country,
-    additionalCountries: data.additionalCountries,
+    additionalCountries: data.additionalCountries.length ? data.additionalCountries : ["Любая"],
   })
 
   if (existing?.status === "Подтверждён") {
