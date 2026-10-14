@@ -186,12 +186,13 @@ async function getAccessToken(
   return data.access_token
 }
 
-async function fetchSheetValues(sheetId: string, range: string): Promise<string[][]> {
+async function fetchSheetValues(sheetId: string, range: string, valueRenderOption?: "FORMULA"): Promise<string[][]> {
   const { email, privateKey } = getEnv()
   const token = await getAccessToken(email, privateKey)
+  const query = valueRenderOption ? `?valueRenderOption=${valueRenderOption}` : ""
   const url =
     `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/` +
-    encodeURIComponent(range)
+    encodeURIComponent(range) + query
 
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -260,6 +261,51 @@ function mapHeader(header: string): string {
 function getIdColumnIndex(headers: string[]): number {
   const idx = headers.findIndex((h) => h.trim().toLowerCase() === "id")
   return idx >= 0 ? idx : 0
+}
+
+function columnIndexToLetter(index: number): string {
+  let n = index + 1
+  let letter = ""
+  while (n > 0) {
+    const rem = (n - 1) % 26
+    letter = String.fromCharCode(65 + rem) + letter
+    n = Math.floor((n - 1) / 26)
+  }
+  return letter
+}
+
+/**
+ * Google Sheets auto-converts a cell starting with +, -, or = into a formula — typing the phone
+ * number "+998901234567" turns the cell into "=+998901234567" under the hood. The default
+ * FORMATTED_VALUE render then shows either the computed number (silently dropping the leading +)
+ * or #ERROR! (if the rest isn't valid arithmetic, e.g. "+998 90 123 45 67" with spaces). FORMULA
+ * render mode returns the literal formula source instead — stripping a leading "=" recovers
+ * exactly what was typed, whether the row was written by this app or by hand in the sheet.
+ * Fetches only the phone column (not the whole sheet) in a second request; degrades to the
+ * original values on any failure rather than breaking the whole read.
+ */
+async function recoverPhoneColumn(sheetId: string, values: string[][]): Promise<string[][]> {
+  if (values.length < 2) return values
+  const headers = values[0].map((h) => (h ?? "").trim())
+  const phoneCol = headers.findIndex((h) => mapHeader(h) === "phone")
+  if (phoneCol < 0) return values
+
+  try {
+    const colLetter = columnIndexToLetter(phoneCol)
+    const phoneRange = `${colLetter}2:${colLetter}${values.length}`
+    const formulaValues = await fetchSheetValues(sheetId, phoneRange, "FORMULA")
+    return values.map((row, i) => {
+      if (i === 0) return row
+      const raw = formulaValues[i - 1]?.[0]
+      if (raw === undefined) return row
+      const recovered = raw.startsWith("=") ? raw.slice(1) : raw
+      const patched = [...row]
+      patched[phoneCol] = recovered
+      return patched
+    })
+  } catch {
+    return values
+  }
 }
 
 function rowToRecord(headers: string[], row: string[]): Record<string, string> {
@@ -356,7 +402,7 @@ export type SheetTable = {
  */
 export async function getSheetTable(): Promise<SheetTable> {
   const { sheetId } = getEnv()
-  const values = await fetchSheetValues(sheetId, SHEET_RANGE)
+  const values = await recoverPhoneColumn(sheetId, await fetchSheetValues(sheetId, SHEET_RANGE))
   if (!values.length) return { headers: [], rows: [] }
 
   const headers = values[0].map((h) => (h ?? "").trim())
@@ -371,14 +417,14 @@ export async function getSheetTable(): Promise<SheetTable> {
 /** Fetch every profile row from the sheet. */
 export async function getProfiles(): Promise<Profile[]> {
   const { sheetId } = getEnv()
-  const values = await fetchSheetValues(sheetId, SHEET_RANGE)
+  const values = await recoverPhoneColumn(sheetId, await fetchSheetValues(sheetId, SHEET_RANGE))
   return rowsToProfiles(values)
 }
 
 /** Fetch a single profile by its id. Returns null if not found. */
 export async function getProfile(id: string): Promise<Profile | null> {
   const { sheetId } = getEnv()
-  const values = await fetchSheetValues(sheetId, SHEET_RANGE)
+  const values = await recoverPhoneColumn(sheetId, await fetchSheetValues(sheetId, SHEET_RANGE))
   if (!values.length) return null
 
   const headers = values[0].map((h) => (h ?? "").trim())
@@ -519,7 +565,7 @@ export async function deleteCandidateRow(rowIndex: number): Promise<void> {
 export async function getCandidates(): Promise<Candidate[]> {
   const { sheetId } = getEnv()
   try {
-    const values = await fetchSheetValues(sheetId, SHEET_RANGE)
+    const values = await recoverPhoneColumn(sheetId, await fetchSheetValues(sheetId, SHEET_RANGE))
     if (values.length < 2) return []
     const headers = values[0].map((h) => (h ?? "").trim())
 
