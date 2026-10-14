@@ -22,12 +22,15 @@ export async function getCompanies(): Promise<CompanyRecord[]> {
   }
 }
 
+export const SEARCH_MIN_LENGTH = 3
+
 /** Prefix/substring match for the registration-form autocomplete, newest-typed-first isn't
  * meaningful here — alphabetical, capped so a generic query (e.g. "ООО") doesn't flood the
- * dropdown. */
+ * dropdown. Requires SEARCH_MIN_LENGTH chars — shorter queries match too many unrelated
+ * companies to be useful as suggestions. */
 export async function searchCompanies(query: string): Promise<CompanyRecord[]> {
   const trimmed = query.trim()
-  if (!trimmed) return []
+  if (trimmed.length < SEARCH_MIN_LENGTH) return []
   const rows = await db
     .select({ id: companies.id, name: companies.name })
     .from(companies)

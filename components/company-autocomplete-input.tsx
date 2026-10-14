@@ -6,6 +6,9 @@ import { searchCompanies } from "@/app/actions"
 const inputCls =
   "w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
 
+// Must match SEARCH_MIN_LENGTH in lib/db/companies.ts — searchCompanies() ignores shorter queries anyway.
+const SEARCH_MIN_LENGTH = 3
+
 /** Free-text "Компания" input with a suggestions dropdown backed by searchCompanies() —
  * picking a suggestion or typing a brand-new name are both valid; the server resolves the
  * submitted text to a company via findOrCreateCompanyByName() (case-insensitive). */
@@ -26,7 +29,7 @@ export function CompanyAutocompleteInput({
 
   useEffect(() => {
     const query = value.trim()
-    if (!query) {
+    if (query.length < SEARCH_MIN_LENGTH) {
       setSuggestions([])
       return
     }
