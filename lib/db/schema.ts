@@ -17,10 +17,15 @@ export const candidateResumes = pgTable("candidateResumes", {
   createdAt:   timestamp("createdAt").defaultNow().notNull(),
 })
 
+export const companies = pgTable("companies", {
+  id:   serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+})
+
 export const employers = pgTable("employers", {
   token:               text("token").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name:                text("name").notNull().default(""),
-  company:             text("company").notNull().default(""),
+  companyId:           integer("companyId").references(() => companies.id, { onDelete: "set null" }),
   email:               text("email").notNull().default(""),
   phone:               text("phone").notNull().default(""),
   primaryContact:      text("primaryContact").notNull().default(""),

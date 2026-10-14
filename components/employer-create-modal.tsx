@@ -11,6 +11,7 @@ import {
   ADDITIONAL_COUNTRIES,
   ANY_COUNTRY,
 } from "@/components/employer-registration-modal"
+import { CompanyAutocompleteInput } from "@/components/company-autocomplete-input"
 
 type ContactMethod = EmployerData["primaryContact"]
 
@@ -125,6 +126,7 @@ export function EmployerCreateModal({
 
   const canSubmit =
     name.trim().length > 0 &&
+    company.trim().length > 0 &&
     selectedStreams.length > 0 &&
     (primaryContact !== "telegram" || telegram.trim()) &&
     (primaryContact !== "linkedin" || linkedin.trim())
@@ -190,14 +192,8 @@ export function EmployerCreateModal({
                     className={inputCls}
                   />
                 </Field>
-                <Field label="Компания">
-                  <input
-                    type="text"
-                    value={company}
-                    onChange={(e) => setCompany(e.target.value)}
-                    placeholder="ООО Пример"
-                    className={inputCls}
-                  />
+                <Field label="Компания" required>
+                  <CompanyAutocompleteInput value={company} onChange={setCompany} required placeholder="ООО Пример" />
                 </Field>
               </div>
 

@@ -307,7 +307,9 @@ app --> editor : EmployerEditModal — форма как EmployerRegistrationMod
 editor -> app : updateEmployer(token, { name, company, email, phone,\n  primaryContact, telegram, linkedin, streams,\n  country, additionalCountries })
 app -> sh_emp : getEmployerByToken(token)\n(старые email/стримы/status до записи; прямой WHERE, TASK-DB-3)
 sh_emp --> app : existing
-app -> sh_emp : updateEmployerFields(token, data)\nUPDATE employers SET ... WHERE token = ...
+app -> sh_emp : findOrCreateCompanyByName(company)\n(TASK-36, та же резолюция, что при регистрации)
+sh_emp --> app : companyId
+app -> sh_emp : updateEmployerFields(token, { ..., companyId })\nUPDATE employers SET ... WHERE token = ...
 sh_emp --> app : OK
 
 alt existing.status == "Подтверждён"
@@ -327,18 +329,26 @@ app -> neonStreams : getStreams()
 neonStreams --> app : ["Finance", "Tech", "Operations", "Marketing"]
 app --> employer : Форма с выбором стримов
 
-employer -> app : Заполняет форму\n{ имя, компания, email, телефон,\n  способ связи, Telegram, LinkedIn,\n  streams: ["Finance"] }
+employer -> app : Заполняет форму\n{ имя, компания (обязательно, автодополнение — TASK-36),\n  email, телефон, способ связи, Telegram, LinkedIn,\n  streams: ["Finance"] }
 
-app -> sh_emp : createEmployer({ token: uuid, …, status: "На проверке" })\nINSERT INTO employers (TASK-DB-3 — раньше appendEmployerRow в Sheets)
+app -> sh_emp : findOrCreateCompanyByName("Uzum")\nSELECT id FROM companies WHERE name ILIKE 'Uzum' (TASK-36)\n→ найдена или создана, возвращает companyId
+sh_emp --> app : companyId
+app -> sh_emp : createEmployer({ token: uuid, companyId, …, status: "На проверке" })\nINSERT INTO employers (TASK-DB-3 — раньше appendEmployerRow в Sheets)
 sh_emp --> app : OK
 
 app --> employer : «Заявка отправлена — ожидайте подтверждения»
 
 note over sh_emp
-  Таблица employers (Neon, TASK-DB-3):
+  Таблицы employers + companies (Neon, TASK-DB-3 / TASK-36):
   ───────────────────────────────────────────────────────────────
-  token (UUID) | timestamp | name    | company | … | streams   | status
-  8f3a1c…      | 21.07.26  | Alisher | Uzum    | … | {Finance} | На проверке
+  employers: token (UUID) | timestamp | name    | companyId | … | streams   | status
+             8f3a1c…      | 21.07.26  | Alisher | 7         | … | {Finance} | На проверке
+  companies: id | name
+             7  | Uzum
+  Компания — отдельная сущность (одна компания — несколько работодателей),
+  не текстовая колонка: при чтении employer.company резолвится join'ом.
+  Записи без компании (до TASK-36) получили строку-плейсхолдер «Не определено» —
+  обычная запись в companies, не NULL.
   streams/additionalCountries — нативные Postgres text[], не строка через запятую.
   Лист «Employers» в Google Sheets остаётся как архив, приложение его больше не читает.
 end note
