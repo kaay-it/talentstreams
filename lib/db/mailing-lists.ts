@@ -91,7 +91,7 @@ export async function getMailingListCandidateIds(listId: string): Promise<string
     .select({ candidateId: mailingListEntries.candidateId })
     .from(mailingListEntries)
     .where(eq(mailingListEntries.listId, listId))
-  return [...new Set(rows.map((r) => r.candidateId).filter(Boolean))]
+  return [...new Set(rows.map((r) => r.candidateId).filter((id): id is string => Boolean(id)))]
 }
 
 /** Fetch all mailing lists grouped by List ID (no profile data, fast), newest date first. */
