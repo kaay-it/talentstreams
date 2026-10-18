@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
-import { getProfile, isSheetsConfigured } from "@/lib/sheets"
+import { getCandidateById } from "@/lib/db/candidates"
 import { ProfileView } from "@/components/profile-view"
 
 export const dynamic = "force-dynamic"
@@ -12,7 +12,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { id } = await params
   try {
-    const profile = await getProfile(id)
+    const profile = await getCandidateById(id)
     if (!profile) return { title: "Профиль не найден", robots: { index: false, follow: false } }
     return {
       title: `${profile.name}${profile.title ? ` — ${profile.title}` : ""}`,
@@ -34,11 +34,9 @@ export default async function ProfilePage({
   const { id } = await params
   const { back } = await searchParams
 
-  if (!isSheetsConfigured()) notFound()
-
   let profile = null
   try {
-    profile = await getProfile(id)
+    profile = await getCandidateById(id)
   } catch {
     profile = null
   }

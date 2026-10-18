@@ -1,6 +1,11 @@
 import "server-only"
 import { createSign } from "crypto"
 
+// NOT dead code. Candidates fully migrated to Neon (lib/db/candidates.ts, TASK-DB-4) — nothing
+// in the app reads or writes this file anymore. Kept intentionally as the foundation for a
+// future, separate import feature (bulk-entering candidates via a manually-filled Google Sheet,
+// imported into Neon on demand) — see docs/backlog.adoc. Do not delete.
+
 /** Moderation status of a candidate. Empty string = legacy row without this column (treated as "Активный").
  * "Не публиковать" is set automatically once a candidate has been sent in 3 real releases
  * (TASK-05 publication-pause rule) — a terminal state, not manually chosen at registration. */

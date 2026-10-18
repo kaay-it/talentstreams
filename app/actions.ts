@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
-import { appendCandidateRow, deleteCandidateRow, getCandidates, updateCandidateStatus, updateCandidateFields, type CandidateStatus } from "@/lib/sheets"
+import { getCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
 import { getMailingLists, getMailingListMeta, getMailingListCandidateIds, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate, updateMailingListDate, isoToRu } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
@@ -117,14 +117,14 @@ async function removeEmployerFromSendPulse(employer: { email: string; streams: s
  * already set (e.g. re-approving a previously disabled candidate), it's left untouched;
  * "Активен с" only gets today's date when the field was empty.
  */
-export async function approveCandidate(rowIndex: number, currentActiveSince?: string): Promise<void> {
+export async function approveCandidate(id: string, currentActiveSince?: string): Promise<void> {
   const activeSince = currentActiveSince?.trim() ? undefined : new Date().toLocaleDateString("ru-RU")
-  await updateCandidateStatus(rowIndex, "Активный" as CandidateStatus, activeSince)
+  await updateCandidateStatus(id, "Активный" as CandidateStatus, activeSince)
   revalidatePath("/editor/candidates")
 }
 
-export async function rejectCandidate(rowIndex: number): Promise<void> {
-  await updateCandidateStatus(rowIndex, "Отклонён" as CandidateStatus)
+export async function rejectCandidate(id: string): Promise<void> {
+  await updateCandidateStatus(id, "Отклонён" as CandidateStatus)
   revalidatePath("/editor/candidates")
 }
 
@@ -370,11 +370,11 @@ async function applyPublicationPauseRules(candidateIds: string[], campaignNames:
       const sendNumber = sentBefore + 1
 
       if (sendNumber === 1) {
-        await updateCandidateStatus(candidate.rowIndex, "Активный", isoToRu(offsetIso({ days: 14 })))
+        await updateCandidateStatus(candidate.id, "Активный", isoToRu(offsetIso({ days: 14 })))
       } else if (sendNumber === 2) {
-        await updateCandidateStatus(candidate.rowIndex, "Активный", isoToRu(offsetIso({ months: 3 })))
+        await updateCandidateStatus(candidate.id, "Активный", isoToRu(offsetIso({ months: 3 })))
       } else {
-        await updateCandidateStatus(candidate.rowIndex, "Не публиковать", isoToRu(offsetIso({ years: 10 })))
+        await updateCandidateStatus(candidate.id, "Не публиковать", isoToRu(offsetIso({ years: 10 })))
       }
     }),
   )
@@ -449,15 +449,14 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
   if (!data.email.trim()) throw new Error("Укажите email")
 
   const id = crypto.randomUUID()
-  await appendCandidateRow({
-    "id": id,
-    "timestamp": new Date().toISOString(),
-    "name": data.name,
-    "email": data.email,
-    "phone": data.phone,
-    "resume url": data.resumeUrl,
-    "cover letter": data.coverLetter,
-    "status": "На проверке",
+  await createCandidateRecord({
+    id,
+    name: data.name,
+    email: data.email,
+    phone: data.phone,
+    resumeUrl: data.resumeUrl,
+    coverLetter: data.coverLetter,
+    status: "На проверке",
   })
 
   if (data.resumeUrl) {
@@ -494,22 +493,18 @@ export async function createCandidate(data: NewCandidateData): Promise<void> {
   if (!data.email.trim()) throw new Error("Укажите email")
 
   const id = crypto.randomUUID()
-  const { rowIndex } = await appendCandidateRow({
-    "id": id,
-    "timestamp": new Date().toISOString(),
-    "name": data.name,
-    "email": data.email,
-    "phone": data.phone,
-    "resume url": data.resumeUrl,
-    "cover letter": data.coverLetter,
-    "status": "На проверке",
-  })
-
-  await updateCandidateFields(rowIndex, {
+  await createCandidateRecord({
+    id,
+    name: data.name,
+    email: data.email,
+    phone: data.phone,
+    resumeUrl: data.resumeUrl,
+    coverLetter: data.coverLetter,
+    status: "На проверке",
     title: data.title,
     level: data.level,
     activeSince: data.activeSince,
-    stream: data.stream.join(", "),
+    stream: data.stream,
     countryPrimary: data.countryPrimary,
     countryDesired: data.countryDesired,
     summary: data.summary,
@@ -528,7 +523,7 @@ export async function createCandidate(data: NewCandidateData): Promise<void> {
 }
 
 export async function updateCandidate(
-  rowIndex: number,
+  id: string,
   data: {
     candidateId: string
     name: string
@@ -551,21 +546,21 @@ export async function updateCandidate(
 ): Promise<void> {
   if (!data.name.trim()) throw new Error("Укажите имя")
   if (!data.email.trim()) throw new Error("Укажите email")
-  await updateCandidateFields(rowIndex, {
+  await updateCandidateFields(id, {
     name: data.name,
     email: data.email,
     phone: data.phone,
     resumeUrl: data.resumeUrl,
     coverLetter: data.coverLetter,
-    stream: data.stream.join(", "),
+    stream: data.stream,
     level: data.level,
     countryPrimary: data.countryPrimary,
     countryDesired: data.countryDesired,
     activeSince: data.activeSince,
     title: data.title,
     summary: data.summary,
-    excludedCompanies: data.excludedCompanies.join(", "),
-    excludedIndustries: data.excludedIndustries.join(", "),
+    excludedCompanies: data.excludedCompanies,
+    excludedIndustries: data.excludedIndustries,
   })
 
   if (data.resumeVersionChanged && data.resumeUrl) {
@@ -622,27 +617,24 @@ export async function deleteCandidateResumeVersion(candidateId: string, versionI
 }
 
 /**
- * Permanently deletes a candidate: their resume files from Vercel Blob, their resume
- * history in Neon, and finally the row itself in Sheets. Blob deletion is best-effort —
- * a failed delete (blob already gone, transient error) is logged, not fatal, so the row
- * still gets removed.
+ * Permanently deletes a candidate: their resume files from Vercel Blob, then the candidate row
+ * itself. candidateResumes rows cascade-delete automatically (FK ON DELETE CASCADE) — no need to
+ * call deleteResumeVersions() explicitly. Blob deletion is best-effort — a failed delete (blob
+ * already gone, transient error) is logged, not fatal, so the row still gets removed.
  */
-export async function deleteCandidate(rowIndex: number, candidateId: string): Promise<void> {
-  if (candidateId) {
-    const versions = await getResumeVersions(candidateId)
-    await Promise.all(
-      versions
-        .map((v) => resolveBlobUrl(v.url))
-        .filter((url): url is string => Boolean(url))
-        .map((url) =>
-          del(url, { token: process.env.BLOB_READ_WRITE_TOKEN }).catch((err) => {
-            console.warn("[deleteCandidate] failed to delete blob:", url, err)
-          }),
-        ),
-    )
-    await deleteResumeVersions(candidateId)
-  }
-  await deleteCandidateRow(rowIndex)
+export async function deleteCandidate(id: string): Promise<void> {
+  const versions = await getResumeVersions(id)
+  await Promise.all(
+    versions
+      .map((v) => resolveBlobUrl(v.url))
+      .filter((url): url is string => Boolean(url))
+      .map((url) =>
+        del(url, { token: process.env.BLOB_READ_WRITE_TOKEN }).catch((err) => {
+          console.warn("[deleteCandidate] failed to delete blob:", url, err)
+        }),
+      ),
+  )
+  await deleteCandidateRecord(id)
   revalidatePath("/editor/candidates")
 }
 

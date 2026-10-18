@@ -3,10 +3,10 @@ import { eq } from "drizzle-orm"
 import { db } from "./index"
 import { mailingListEntries, streams } from "./schema"
 import { getStreamIdByName } from "./streams"
-import { getProfiles, type Profile } from "../sheets"
+import { getActiveCandidates, type Candidate } from "./candidates"
 
 export type MailingListEntry = {
-  profile: Profile
+  profile: Candidate
   /** Stream value from the mailing list, same for every entry in one list. */
   mailingStream: string
 }
@@ -60,7 +60,7 @@ export async function getMailingList(listId: string): Promise<MailingList | null
   }
   if (!candidateIds.size) return null
 
-  const allProfiles = await getProfiles()
+  const allProfiles = await getActiveCandidates()
   const entries: MailingListEntry[] = allProfiles
     .filter((p) => candidateIds.has(p.id))
     .map((p) => ({ profile: p, mailingStream: stream }))

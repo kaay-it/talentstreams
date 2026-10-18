@@ -26,12 +26,6 @@ type HomeDict = {
     description: string
     steps: { title: string; text: string }[]
   }
-  setup: {
-    title: string
-    description: string
-    columnsLabel: string
-    recommendedColumnsLabel: string
-  }
 }
 
 const ru: HomeDict = {
@@ -102,12 +96,6 @@ const ru: HomeDict = {
       },
     ],
   },
-  setup: {
-    title: "Подключите Google Sheets, чтобы начать",
-    description: "Добавьте переменные окружения в проект, затем создайте таблицу с заголовками в первой строке.",
-    columnsLabel: "Рекомендуемые колонки:",
-    recommendedColumnsLabel: "id, name, title, email, phone, stream",
-  },
 }
 
 const en: HomeDict = {
@@ -177,12 +165,6 @@ const en: HomeDict = {
         text: "The candidate reviews the offer, and only after confirming interest does the employer get access to their contacts.",
       },
     ],
-  },
-  setup: {
-    title: "Connect Google Sheets to get started",
-    description: "Add the environment variables to the project, then create a spreadsheet with headers in the first row.",
-    columnsLabel: "Recommended columns:",
-    recommendedColumnsLabel: "id, name, title, email, phone, stream",
   },
 }
 

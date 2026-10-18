@@ -2,7 +2,6 @@ import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft, CalendarDays, MapPin, Send } from "lucide-react"
-import { isSheetsConfigured } from "@/lib/sheets"
 import { getMailingList, type MailingListEntry } from "@/lib/db/mailing-lists"
 import { getEmployerByToken, filterCandidatesForEmployer } from "@/lib/db/employers"
 import { getStreamsDetailed } from "@/lib/db/streams"
@@ -38,8 +37,6 @@ export default async function MailingListPage({
   const isEditor = editorSecret && secret === editorSecret
 
   if (!employerToken && !isEditor) notFound()
-
-  if (!isSheetsConfigured()) notFound()
 
   const [streams, mailingList] = await Promise.all([
     getStreamsDetailed(),

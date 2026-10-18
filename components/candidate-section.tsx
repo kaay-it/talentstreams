@@ -7,7 +7,7 @@ import { CandidateEditModal } from "@/components/candidate-edit-modal"
 import { CandidateCreateModal } from "@/components/candidate-create-modal"
 import { PaginationControls, type PageSize } from "@/components/pagination-controls"
 import { withDownloadFilename } from "@/lib/blob"
-import type { Candidate, CandidateStatus } from "@/lib/sheets"
+import type { Candidate, CandidateStatus } from "@/lib/db/candidates"
 
 const SELECT_CLASS =
   "rounded-md border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
@@ -127,21 +127,21 @@ function CandidateRow({
   function handleApprove() {
     startTransition(async () => {
       setLocalStatus("approved")
-      await approveCandidate(candidate.rowIndex, candidate.activeSince)
+      await approveCandidate(candidate.id, candidate.activeSince)
     })
   }
 
   function handleReject(result: "rejected" | "disabled") {
     startTransition(async () => {
       setLocalStatus(result)
-      await rejectCandidate(candidate.rowIndex)
+      await rejectCandidate(candidate.id)
     })
   }
 
   function handleDelete() {
     startTransition(async () => {
       try {
-        await deleteCandidate(candidate.rowIndex, candidate.id)
+        await deleteCandidate(candidate.id)
         setLocalStatus("deleted")
         setConfirmingDelete(false)
       } catch {
@@ -464,7 +464,7 @@ export function CandidateSection({
                   const history = resumeHistory[c.id] ?? []
                   return (
                     <CandidateRow
-                      key={c.rowIndex}
+                      key={c.id}
                       candidate={c}
                       streams={streams}
                       files={history.filter((v) => v.kind === "file")}

@@ -21,7 +21,7 @@ actor       "Работодатель"          as employer
 actor       "Кандидат"              as candidate
 participant "TalentStreams\nWeb App" as app
 participant "Neon · streams"        as neonStreams  #d4f0d4
-participant "Sheets · Candidates"   as sh_cands    #d0e8ff
+participant "Neon · candidates"     as sh_cands    #d4f0d4
 participant "Neon · mailingListEntries" as sh_mail  #d4f0d4
 participant "Neon · employers"      as sh_emp      #d4f0d4
 participant "Vercel Blob\n(private)" as blob       #fff3cd
@@ -103,7 +103,8 @@ note over app, sh_cands
   кандидат попадает в стрим, если его Stream (multi-select
   колонка кандидата) содержит имя стрима — без учёта регистра.
   getCandidatesForStream(candidates, stream) фильтрует уже
-  загруженный getProfiles(), без отдельного запроса на стрим.
+  загруженный getActiveCandidates() (Neon, TASK-DB-4), без
+  отдельного запроса на стрим.
 end note
 
 == 2. Кандидат подаёт анкету ==
@@ -130,7 +131,7 @@ else Кандидат указал URL резюме
 end
 
 app -> app : id = crypto.randomUUID()\n(генерируется здесь же, синхронно — без внешнего скрипта)
-app -> sh_cands : appendCandidateRow({ id, Name, Email, Phone,\n  Resume URL: proxyUrl или введённый URL,\n  Cover Letter, Status: "На проверке" })
+app -> sh_cands : createCandidateRecord({ id, name, email, phone,\n  resumeUrl: proxyUrl или введённый URL,\n  coverLetter, status: "На проверке" })\nINSERT INTO candidates (TASK-DB-4 — один INSERT,\nраньше append+update в два шага в Sheets)
 sh_cands --> app : OK
 
 alt резюме передано (файл или ссылка)
@@ -147,14 +148,18 @@ end
 app --> candidate : «Заявка отправлена — мы рассмотрим и свяжемся»
 
 note over sh_cands
-  Лист «Candidates»:
+  Таблица candidates (Neon / PostgreSQL, TASK-DB-4):
   ────────────────────────────────────────────────────────────────
-  Timestamp  | Name    | Email          | … | Resume URL       | Status       | Active Since
-  2026-08-03 | Иван И. | ivan@mail.com  | … | /api/resume?url= | На проверке  |
+  id (UUID) | registrationTimestamp | name    | email          | … | resumeUrl        | status       | activeSince
+  a3f8e2c1… | 2026-08-03             | Иван И. | ivan@mail.com  | … | /api/resume?url= | На проверке  | NULL
+  activeSince — настоящая date-колонка (ISO, nullable), не текст —
+  было бы в Sheets. NULL = не задано (кандидат всегда проходит
+  фильтр доступности), конвертация в/из ru-RU строки
+  изолирована на границе lib/db/candidates.ts.
 end note
 
 note over app, blob
-  При открытии ссылки на резюме из редактора или Google Sheets:
+  При открытии ссылки на резюме из редактора:
   GET /api/resume?url=<encodedBlobUrl>&filename=<realFilename>
   → проверка hostname (*.blob.vercel-storage.com)
   → fetch(blobUrl, { Authorization: Bearer BLOB_READ_WRITE_TOKEN })
@@ -174,13 +179,13 @@ neonStreams --> app : ["Finance", "Tech", …]
 app --> editor : Раздел «Кандидаты» (TASK-30): панель фильтров сверху\n(поиск, статус — по умолчанию «Все статусы», стрим, уровень),\nплоский список вместо коллапсируемых секций
 
 alt Редактор одобряет кандидата
-  editor -> app : approveCandidate(rowIndex)
-  app -> sh_cands : updateCandidateStatus(rowIndex, "Активный", today)
+  editor -> app : approveCandidate(id)
+  app -> sh_cands : updateCandidateStatus(id, "Активный", today)
   sh_cands --> app : OK
   app --> editor : Страница обновлена (revalidatePath)
 else Редактор отклоняет кандидата
-  editor -> app : rejectCandidate(rowIndex)
-  app -> sh_cands : updateCandidateStatus(rowIndex, "Отклонён")
+  editor -> app : rejectCandidate(id)
+  app -> sh_cands : updateCandidateStatus(id, "Отклонён")
   sh_cands --> app : OK
   app --> editor : Страница обновлена
 end
@@ -232,8 +237,8 @@ else Редактор ничего не трогает («Отмена» или 
   editor -> app : resumeUrl = candidate.resumeUrl (без изменений)
 end
 
-editor -> app : updateCandidate(rowIndex, { candidateId: candidate.id,\n  name, title, email, phone, resumeUrl,\n  resumeVersionChanged (только если resumeUrl реально отличается\n  от исходного), resumeFilename?, coverLetter, summary,\n  stream, level, countryPrimary, countryDesired, activeSince })
-app -> sh_cands : updateCandidateFields(rowIndex, data)\n(параллельные PUT по колонкам через Sheets API)
+editor -> app : updateCandidate(candidate.id, { candidateId: candidate.id,\n  name, title, email, phone, resumeUrl,\n  resumeVersionChanged (только если resumeUrl реально отличается\n  от исходного), resumeFilename?, coverLetter, summary,\n  stream, level, countryPrimary, countryDesired, activeSince })
+app -> sh_cands : updateCandidateFields(id, data)\nUPDATE candidates SET ... WHERE id = ...\n(TASK-DB-4 — один UPDATE, раньше параллельные\nPUT по колонкам через Sheets API)
 sh_cands --> app : OK
 
 alt resumeVersionChanged передан
@@ -250,11 +255,12 @@ end
 app --> editor : Страница обновлена (revalidatePath)
 
 note over app, sh_cands
-  Колонки определяются через mapHeader() — алиасы работают
-  с любым языком заголовков (name / Кандидат, email / Email, и т.д.)
-  activeSince хранится как ru-RU дата ("21.07.2026", как пишет
-  approveCandidate()) — <input type="date"> требует ISO,
-  конвертация происходит на границе CandidateEditModal.
+  activeSince хранится в Neon как настоящая date-колонка (ISO,
+  TASK-DB-4) — наружу (CandidateEditModal, approveCandidate(),
+  фильтры-хелперы) всё ещё отдаётся как ru-RU строка
+  ("21.07.2026"), конвертация изолирована в lib/db/candidates.ts.
+  <input type="date"> требует ISO — вторая, отдельная конвертация
+  на границе самого компонента (toISODate/toRuDate), не менялась.
 end note
 
 == 2г. Редактор отключает / удаляет / добавляет кандидата (TASK-33) ==
@@ -266,32 +272,34 @@ note over editor, app
 end note
 
 editor -> app : «Отключить» (status == "Активный")\nили «Подтвердить» у отклонённого (status == "Отклонён")
-app -> app : rejectCandidate(rowIndex) / approveCandidate(rowIndex)
-app -> sh_cands : updateCandidateStatus(rowIndex, "Отклонён" | "Активный", [today])
+app -> app : rejectCandidate(id) / approveCandidate(id)
+app -> sh_cands : updateCandidateStatus(id, "Отклонён" | "Активный", [today])
 sh_cands --> app : OK
 app --> editor : Статус обновлён в строке
 
 editor -> app : Корзина в строке → отдельный шаг подтверждения\n(«Удалить кандидата?» + «Да, удалить»/«Отмена»)
-app -> app : deleteCandidate(rowIndex, candidate.id)
-app -> neonResumes : getResumeVersions(candidateId)
+app -> app : deleteCandidate(id)
+app -> neonResumes : getResumeVersions(id)
 neonResumes --> app : все версии резюме кандидата
 loop для каждой версии с kind == "file"
   app -> app : resolveBlobUrl(url) — настоящий blob.vercel-storage.com URL\n(напрямую или размотанный из /api/resume?url= прокси)
   app -> blob : del(blobUrl)\n(best-effort — ошибка одного файла не блокирует остальное)
   blob --> app : OK / ошибка (логируется, не бросается)
 end
-app -> neonResumes : deleteResumeVersions(candidateId)
-neonResumes --> app : OK
-app -> sh_cands : deleteCandidateRow(rowIndex)\nbatchUpdate deleteDimension (первый лист таблицы, не по названию)
+app -> sh_cands : deleteCandidateRecord(id)\nDELETE FROM candidates WHERE id = ...
 sh_cands --> app : OK
+note right of sh_cands
+  TASK-DB-4: candidateResumes удаляются автоматически —
+  FK candidateId -> candidates.id ON DELETE CASCADE.
+  Явный deleteResumeVersions() больше не нужен (раньше
+  вызывался здесь отдельным шагом перед удалением строки).
+end note
 app --> editor : Строка удалена из таблицы
 
 editor -> app : «+ Добавить кандидата» в панели фильтров\nCandidateCreateModal — та же форма, что CandidateEditModal,\nно без истории резюме, «Активен с» = сегодня
 editor -> app : createCandidate({ name, title, email, phone, level,\n  activeSince, stream, countryPrimary, countryDesired,\n  summary, resumeUrl, resumeFilename?, coverLetter })
 app -> app : id = crypto.randomUUID()
-app -> sh_cands : appendCandidateRow({ id, timestamp, name, email, phone,\n  "resume url", "cover letter", status: "На проверке" })\n— только проверенный безопасный набор ключей
-sh_cands --> app : { rowIndex } (распарсен из updates.updatedRange)
-app -> sh_cands : updateCandidateFields(rowIndex, { title, level, activeSince,\n  stream, countryPrimary, countryDesired, summary })\n— те же ключи, что и в CandidateEditModal, mapHeader() резолвит\n  колонки независимо от языка заголовков
+app -> sh_cands : createCandidateRecord({ id, name, email, phone,\n  resumeUrl, coverLetter, status: "На проверке",\n  title, level, activeSince, stream, countryPrimary,\n  countryDesired, summary })\nINSERT INTO candidates — один шаг (TASK-DB-4,\nраньше append+update в два шага в Sheets)
 sh_cands --> app : OK
 alt резюме передано
   app -> neonResumes : addResumeVersion({ candidateId: id, kind, filename?, url })
@@ -426,20 +434,20 @@ app --> editor : Работодатель снова «Подтверждён»,
 
 == 4. Редактор готовит выпуск ==
 
-editor -> sh_cands : Обогащает профили одобренных кандидатов\n(title, summary, stream, level, страны — через CandidateEditModal на сайте;\nindustry/func и остальное, не вошедшее в форму, — напрямую в Sheets)
+editor -> sh_cands : Обогащает профили одобренных кандидатов\n(title, summary, stream, level, страны — через CandidateEditModal\nна сайте; все поля редактируются только там, Sheets больше\nне часть боевого пути, TASK-DB-4)
 note right of sh_cands
-  Главный лист «Candidates Database» — единый источник правды.
-  Регистрационная форма и рассылки используют один и тот же лист.
+  Таблица candidates (Neon) — единый источник правды.
+  Регистрационная форма и рассылки используют одну и ту же таблицу.
   ─────────────────────────────────────────────────────────────────────────────
-  id (UUID)  | name     | title | stream  | level  | summary     | Status    | …
+  id (UUID)  | name     | title | stream  | level  | summary     | status    | …
   a3f8e2c1-… | (личное) | PM    | Finance | Senior | Опытный PM… | Активный  |
   7c1d4f82-… | (личное) | CTO   | Finance | Lead   | Руководил…  | Активный  |
   b2e9a3f1-… | (личное) |       |         |        |             | На проверке |  ← ещё не одобрен, в рассылки не попадёт
-  getProfiles() фильтрует: Status = «Активный» или пустой (legacy)
+  getActiveCandidates() фильтрует: status = «Активный»
 end note
 
 editor -> app : Открывает ReleaseCreateModal, выбирает стрим и дату
-app -> sh_cands : getEligibleCandidatesForRelease(candidates, stream)\n(уже загружены постранично при рендере /editor —\nстатус «Активный» через getProfiles(), плюс Active Since\nпустой или уже наступил)
+app -> sh_cands : getEligibleCandidatesForRelease(candidates, stream)\n(уже загружены постранично при рендере /editor —\nстатус «Активный» через getActiveCandidates(), плюс Active Since\nпустой или уже наступил)
 sh_cands --> app : подходящие кандидаты + число подтверждённых\nподписчиков (confirmedEmployersForStream)
 app -> sh_cands : getPausedCandidatesForRelease(candidates, stream)\n(TASK-05 — зеркало с обратным условием: Active Since ещё не наступил)
 sh_cands --> app : кандидаты на паузе
@@ -531,23 +539,23 @@ sp_camp --> app : { id: 12345 }
 alt первая отправка (та же проверка, что определила дату выше)
   app -> sh_mail : getMailingListCandidateIds("f04a9b3e-…")
   sh_mail --> app : [a3f8e2c1-…, 7c1d4f82-…]
-  app -> sh_cands : getCandidates()\n(резолвит rowIndex по каждому id — нужен для\nзаписи, getProfiles() его не отдаёт)
-  sh_cands --> app : все кандидаты (все статусы) + rowIndex
+  app -> sh_cands : getCandidates()\n(резолвит id по каждому кандидату выпуска —\nTASK-DB-4, раньше нужен был rowIndex, getProfiles()\nего не отдавал)
+  sh_cands --> app : все кандидаты (все статусы)
 
   loop по каждому кандидату выпуска
     app -> sh_mail : getMailingListsForCandidate(id)\n(вся история выпусков кандидата)
     sh_mail --> app : выпуски кандидата
     app -> app : sentBefore = сколько из них уже реально\nотправлялось (сверка с campaignNames,\nснимок getCampaigns() ДО этой отправки)
     alt sentBefore + 1 == 1 (первая реальная отправка кандидата)
-      app -> sh_cands : updateCandidateStatus(rowIndex,\n"Активный", today + 2 недели)
+      app -> sh_cands : updateCandidateStatus(id,\n"Активный", today + 2 недели)
     else sentBefore + 1 == 2
-      app -> sh_cands : updateCandidateStatus(rowIndex,\n"Активный", today + 3 месяца)
+      app -> sh_cands : updateCandidateStatus(id,\n"Активный", today + 3 месяца)
     else sentBefore + 1 >= 3
-      app -> sh_cands : updateCandidateStatus(rowIndex,\n"Не публиковать", today + 10 лет)
+      app -> sh_cands : updateCandidateStatus(id,\n"Не публиковать", today + 10 лет)
       note right of sh_cands
         Терминальный статус — кандидат отправлен уже
-        3 раза, дальше getProfiles() исключает его из
-        всех подборок насовсем. Сознательное отклонение
+        3 раза, дальше getActiveCandidates() исключает его
+        из всех подборок насовсем. Сознательное отклонение
         от буквального ТЗ (там пауза только после 2-й
         отправки, про 3-ю не сказано) — согласовано с
         пользователем. Редактор может вручную вернуть
@@ -583,8 +591,8 @@ employer -> app : GET /list/f04a9b3e-…?e=8f3a1c…
 app -> sh_emp : getEmployerByToken("8f3a1c…")
 sh_emp --> app : { name, company, country, … }
 app -> sh_mail : getMailingList("f04a9b3e-…")
-sh_mail -> sh_cands : getProfiles() → джойн по candidateId\n(кандидаты остаются в Sheets, не переехали в TASK-DB-5)
-sh_cands --> sh_mail : профили кандидатов
+sh_mail -> sh_cands : getActiveCandidates() → джойн по candidateId\n(Neon, TASK-DB-4 — раньше getProfiles() из Sheets)
+sh_cands --> sh_mail : кандидаты
 sh_mail --> app : { stream, date, entries: [{ profile, mailingStream }, …] }
 app -> app : filterCandidatesForEmployer(candidates, employer)\n(in-memory: excludedCompanies, excludedIndustries,\nгео: countryPrimary/countryDesired ∩ employer.country+additionalCountries;\n«Любая» → без гео-фильтра; нет данных о стране → скрыть)
 app -> neonStreams : getStreamsDetailed() — типы стримов для тегов (TASK-27)
@@ -593,8 +601,8 @@ app --> employer : Страница выпуска: анонимные карт�
 else ?secret=[EDITOR_SECRET] — доступ редактора (все кандидаты)
 editor -> app : GET /list/f04a9b3e-…?secret=…
 app -> sh_mail : getMailingList("f04a9b3e-…")
-sh_mail -> sh_cands : getProfiles() → джойн по candidateId
-sh_cands --> sh_mail : все профили (без фильтрации)
+sh_mail -> sh_cands : getActiveCandidates() → джойн по candidateId
+sh_cands --> sh_mail : все активные кандидаты (без фильтрации по работодателю)
 sh_mail --> app : { stream, date, entries: [{ profile, mailingStream }, …] }
 app --> editor : Страница выпуска: все кандидаты без исключений
 else без параметров — 404
@@ -649,12 +657,15 @@ app -> sh_mail : getMailingListMeta(listId) → имя стрима
 sh_mail --> app : { stream: "Finance", date: "21.07.2026" }
 app -> neonStreams : getStreamIdByName("Finance")
 neonStreams --> app : streamId
-app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, streamId,\n  candidateId: "", employerToken, status: "Новый запрос" }
+app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, streamId,\n  candidateId: "", employerToken, status: "Новый запрос" }\n(candidateId — appendContactRequest() переводит\n"" в NULL перед записью, FK на candidates.id\nтребует NULL, а не пустую строку, TASK-DB-4)
 neonDb --> app : OK
 app --> employer : «Запрос принят — мы свяжемся с вами»
 
 note over neonDb
-  candidateId = "" — признак «Общего запроса»
+  candidateId = NULL — признак «Общего запроса»
+  (до TASK-DB-4 был сентинел '' — конвертация в NULL
+  изолирована в lib/db/contact-requests.ts, наружу
+  модуль всё ещё отдаёт "" — читающий код не менялся).
   Отображается в редакторе отдельно
   от запросов «По кандидатам»
 end note
@@ -663,9 +674,9 @@ end note
 
 editor -> app : GET /editor/requests?secret=…
 app -> neonDb : SELECT * FROM contactRequests\nORDER BY timestamp DESC
-app -> sh_cands : getProfiles()
+app -> sh_cands : getActiveCandidates()
 neonDb --> app : список запросов
-sh_cands --> app : профили кандидатов
+sh_cands --> app : кандидаты
 app --> editor : Раздел «Запросы»:\n«Общие запросы» (candidateId = "", 3 статуса:\nНовый запрос / Взяли в работу / Завершён)\nи «По кандидатам» (7 статусов:\nНовый запрос, Кандидату написали,\nКандидат не отвечает, Связаться с Аленой,\nКандидату интересно, Кандидату не интересно,\nКонтакты переданы)
 
 editor -> app : Меняет статус через выпадающий список

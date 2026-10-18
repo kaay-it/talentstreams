@@ -6,7 +6,6 @@ import { LanguageToggle } from "@/components/language-toggle"
 import { useLocale } from "@/components/language-provider"
 import { homeDict } from "@/lib/i18n/home"
 import {
-  AlertCircle,
   ArrowRight,
   BadgeCheck,
   CalendarDays,
@@ -20,7 +19,7 @@ import {
   Zap,
 } from "lucide-react"
 
-export function HomePageContent({ configured, streams }: { configured: boolean; streams: string[] }) {
+export function HomePageContent({ streams }: { streams: string[] }) {
   const { locale } = useLocale()
   const t = homeDict[locale]
 
@@ -120,18 +119,6 @@ export function HomePageContent({ configured, streams }: { configured: boolean; 
         </div>
       </section>
 
-      {!configured && (
-        <section className="border-t bg-muted/30">
-          <div className="mx-auto w-full max-w-5xl px-4 py-12 md:py-16">
-            <SetupNotice
-              title={t.setup.title}
-              description={t.setup.description}
-              columnsLabel={t.setup.columnsLabel}
-              recommendedColumnsLabel={t.setup.recommendedColumnsLabel}
-            />
-          </div>
-        </section>
-      )}
     </main>
   )
 }
@@ -232,33 +219,3 @@ function StepCard({
   )
 }
 
-function SetupNotice({
-  title,
-  description,
-  columnsLabel,
-  recommendedColumnsLabel,
-}: {
-  title: string
-  description: string
-  columnsLabel: string
-  recommendedColumnsLabel: string
-}) {
-  return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-sm md:p-8">
-      <div className="flex items-start gap-3">
-        <AlertCircle className="mt-0.5 size-5 shrink-0 text-primary" />
-        <div className="space-y-3 text-sm">
-          <p className="font-medium text-card-foreground">{title}</p>
-          <p className="text-muted-foreground">{description}</p>
-          <ul className="grid gap-1 font-mono text-xs text-muted-foreground">
-            <li>GOOGLE_SERVICE_ACCOUNT_JSON</li>
-            <li>GOOGLE_SHEET_ID</li>
-          </ul>
-          <p className="text-muted-foreground">
-            {columnsLabel} <span className="font-mono text-xs">{recommendedColumnsLabel}</span>
-          </p>
-        </div>
-      </div>
-    </div>
-  )
-}
