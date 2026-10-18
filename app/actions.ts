@@ -454,7 +454,6 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
     name: data.name,
     email: data.email,
     phone: data.phone,
-    resumeUrl: data.resumeUrl,
     coverLetter: data.coverLetter,
     status: "На проверке",
   })
@@ -498,7 +497,6 @@ export async function createCandidate(data: NewCandidateData): Promise<void> {
     name: data.name,
     email: data.email,
     phone: data.phone,
-    resumeUrl: data.resumeUrl,
     coverLetter: data.coverLetter,
     status: "На проверке",
     title: data.title,
@@ -541,7 +539,7 @@ export async function updateCandidate(
     title: string
     summary: string
     excludedCompanies: string[]
-    excludedIndustries: string[]
+    excludedStreams: string[]
   },
 ): Promise<void> {
   if (!data.name.trim()) throw new Error("Укажите имя")
@@ -550,7 +548,6 @@ export async function updateCandidate(
     name: data.name,
     email: data.email,
     phone: data.phone,
-    resumeUrl: data.resumeUrl,
     coverLetter: data.coverLetter,
     stream: data.stream,
     level: data.level,
@@ -560,7 +557,7 @@ export async function updateCandidate(
     title: data.title,
     summary: data.summary,
     excludedCompanies: data.excludedCompanies,
-    excludedIndustries: data.excludedIndustries,
+    excludedStreams: data.excludedStreams,
   })
 
   if (data.resumeVersionChanged && data.resumeUrl) {
@@ -575,7 +572,7 @@ export async function updateCandidate(
   revalidatePath("/editor/candidates")
 }
 
-/** Resume version history for a candidate (editor only — keyed by the Sheets `id` column). */
+/** Resume version history for a candidate (editor only — keyed by candidates.id). */
 export async function getCandidateResumeHistory(candidateId: string): Promise<ResumeVersion[]> {
   return getResumeVersions(candidateId)
 }

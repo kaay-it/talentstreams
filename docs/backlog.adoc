@@ -913,6 +913,20 @@ NOTE: ℹ️ Так и было, пока переименование стри�
 
 ---
 
+==== ✅ TASK-DB-4 (доделка): убрана `candidates.resumeUrl`, `excludedIndustries` → `excludedStreams`
+
+*Почему:* `candidates.resumeUrl` дублировал то, что уже надёжно хранится в `candidateResumes` (TASK-32) — денормализация без реальной необходимости, раз «текущая» версия резюме — это просто самая новая запись в истории. `excludedIndustries` называлось по старой, более не актуальной терминологии («отрасль») — поле по факту всегда сравнивалось со *стримами* работодателя (переименование подписи в UI уже отразило это, TASK-23), а не с произвольным описанием отрасли; `excludedStreams` приводит имя колонки в соответствие с `excludedCompanies` (единый паттерн «что исключено»).
+
+* Перед удалением `resumeUrl` — проверочный скрипт сверил все 154 непустых `candidates.resumeUrl` с `candidateResumes` по паре `(candidateId, url)`: 153 точных совпадения, 1 расхождение оказалось лишним пробелом на конце URL в исторической строке `candidateResumes` (тот же URL, записан на 2 секунды позже строки кандидата) — не реальная потеря данных. Безопасно удалять.
+* Миграция в два шага (оба требуют руки, не обычный `drizzle-kit generate`): `ALTER TABLE candidates DROP COLUMN "resumeUrl"` — тривиально, без прежних конфликтов; переименование колонки сделано через `drizzle-kit generate --custom` (пустой файл миграции) + вручную написанный `ALTER TABLE candidates RENAME COLUMN "excludedIndustries" TO "excludedStreams"` — `drizzle-kit generate` в обычном режиме не умеет понять намерение «переименовать» без интерактивного TTY-промпта (`excludedIndustries` пропадает и `excludedStreams` появляется одновременно — для скрипта это неотличимо от drop+add, что уничтожило бы данные), а Claude Code работает без интерактивного терминала; `meta/0016_snapshot.json` поправлен вручную тем же именем, чтобы `drizzle-kit` не запутался на будущих `generate`.
+* `lib/db/candidates.ts` — `Candidate.resumeUrl` убран из типа и из всех функций (`toCandidate()`, `createCandidateRecord()`, `updateCandidateFields()`); `excludedIndustries` → `excludedStreams` везде. «Текущее» резюме теперь нигде не хранится отдельно — везде, где раньше читался `candidate.resumeUrl`, используется `resumeHistory[0]?.url` (история уже сортируется новыми сверху, `getResumeVersions()`).
+* `CandidateEditModal` — `currentResumeUrl` вычисляется из загруженной истории резюме, а не из пропа кандидата; сравнение «версия реально изменилась» (`resumeVersionChanged`) теперь идёт против этого же значения. Внешний контракт Server Actions (`registerCandidate`/`createCandidate`/`updateCandidate`) не поменялся — `resumeUrl` остаётся обычным полем *входных данных* формы (нужен, чтобы знать, что писать в `candidateResumes`), просто больше не персистится отдельной колонкой на `candidates`.
+* `app/actions.ts` — `createCandidateRecord()` больше не получает `resumeUrl` (пишется только через `addResumeVersion()` сразу после); `updateCandidate()`'s `excludedIndustries` → `excludedStreams`.
+* `lib/db/employers.ts` — `filterCandidatesForEmployer()` сверяется с `c.excludedStreams`.
+* `lib/sheets.ts` не тронут — там колонка по-прежнему называется `Excluded Industries`/`Resume URL`, это нормально: файл не часть боевого пути (см. TASK-DB-4 выше), переименование касалось только Neon.
+
+---
+
 == Активные задачи (требуется сделать)
 
 === 🔴 Критично — гео-сегментация рассылки
@@ -1381,7 +1395,7 @@ NOTE: ℹ️ Это первоначальный проектный наброс
 | Contact Requests | ✅ Только оно | ❌ Никогда | ✅ Перенесено в Neon (TASK-DB-2)
 | Streams | ❌ | ✅ | ✅ Перенесено в Neon + UI готов (TASK-DB-8)
 | Employers | ✅ Полностью через UI | ❌ Никогда (лист остаётся архивом) | ✅ Перенесено в Neon (TASK-DB-3)
-| Candidates | ✅ Регистрация + `CandidateEditModal` (TASK-23, расширена трижды — все поля включая `excludedCompanies`/`excludedIndustries`) | ❌ Никогда (UI покрывает всё, кроме мёртвых `industry`/`func`) | ✅ Перенесено в Neon (TASK-DB-4); Sheets остаётся как опциональный канал массового ввода — см. <<✅ TASK-DB-4: Candidates → Neon (кандидаты переехали в БД)>>
+| Candidates | ✅ Регистрация + `CandidateEditModal` (TASK-23, расширена трижды — все поля включая `excludedCompanies`/`excludedStreams`) | ❌ Никогда (UI покрывает всё, кроме мёртвых `industry`/`func`) | ✅ Перенесено в Neon (TASK-DB-4); Sheets остаётся как опциональный канал массового ввода — см. <<✅ TASK-DB-4: Candidates → Neon (кандидаты переехали в БД)>>
 | Mailing Lists | ✅ Через UI (создание выпуска) | ❌ Лист удалён | ✅ Перенесено в Neon (TASK-DB-5)
 |===
 

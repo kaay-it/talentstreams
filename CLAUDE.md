@@ -113,13 +113,12 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 
 ### Vercel Blob — резюме
 - Загрузка: `POST /api/upload` → `put(filename, file, { access: "private" })`
-- В `candidates.resumeUrl` (Neon) хранится прокси-URL: `APP_URL/api/resume?url=<encodedBlobUrl>`
+- Прокси-URL хранится только в `candidateResumes.url` (Neon) — `candidates` не имеет колонки `resumeUrl` вовсе: `candidateResumes` — единственный источник правды, «текущая» версия — просто самая новая строка (`ORDER BY createdAt DESC`, см. `getResumeVersions()`)
 - Прокси: `GET /api/resume` — читает blob server-side с `Authorization: Bearer BLOB_READ_WRITE_TOKEN`; необязательный `?filename=` задаёт имя скачиваемого файла (`Content-Disposition`, кириллица через `filename*=UTF-8''`) — иначе браузер скачивает файл под именем из blob-пути
 - Защита от open redirect: проверка hostname `*.blob.vercel-storage.com`
-- История версий резюме кандидата хранится в Neon (`candidateResumes`, TASK-32, FK на `candidates.id` `ON DELETE CASCADE`) — `candidates.resumeUrl` держит только URL последней версии
 
 ### Neon — таблицы
-- `candidates` — кандидаты (TASK-DB-4 ✅, было Google Sheets); `stream`/`excludedCompanies`/`excludedIndustries` — нативные Postgres `text[]`; `activeSince` — настоящая `date`-колонка (`mode: "string"`, ISO `YYYY-MM-DD`, nullable = «не задано»), конвертация в/из привычного ru-RU текста («21.07.2026») изолирована на границе `lib/db/candidates.ts` — остальной код работает со строкой как раньше
+- `candidates` — кандидаты (TASK-DB-4 ✅, было Google Sheets); `stream`/`excludedCompanies`/`excludedStreams` — нативные Postgres `text[]`; `activeSince` — настоящая `date`-колонка (`mode: "string"`, ISO `YYYY-MM-DD`, nullable = «не задано»), конвертация в/из привычного ru-RU текста («21.07.2026») изолирована на границе `lib/db/candidates.ts` — остальной код работает со строкой как раньше; нет колонки `resumeUrl` — резюме только в `candidateResumes` (см. выше)
 - `contactRequests` — запросы работодателей на контакт с кандидатами; `employerToken` (FK на `employers.token`, `ON DELETE CASCADE` — запрос без работодателя не имеет смысла), `streamId` и `candidateId` (оба FK, `ON DELETE SET NULL` — запрос может быть «общим», без привязки к конкретному кандидату или стриму, и переживает удаление кандидата)
 - `streams` — стримы (Industry/Functional), полный CRUD через `/editor/streams`
 - `employers` — работодатели (TASK-DB-3); `token` — тот же UUID, что `employer_token` в SendPulse и `?e=` в публичной ссылке; `streams`/`additionalCountries` — нативные Postgres `text[]`; `companyId` — FK на `companies.id` (`ON DELETE SET NULL`)
