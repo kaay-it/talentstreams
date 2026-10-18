@@ -2,14 +2,17 @@
 
 import { useState, useEffect, useRef, useTransition } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Plus, Trash2, CheckCircle2 } from "lucide-react"
-import { updateCandidate, getCandidateResumeHistory, deleteCandidateResumeVersion, getCandidateMailingHistory, type ResumeVersion, type CandidateMailingHistoryEntry } from "@/app/actions"
+import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Plus, Trash2, CheckCircle2, OctagonX } from "lucide-react"
+import { updateCandidate, getCandidateResumeHistory, deleteCandidateResumeVersion, getCandidateMailingHistory, searchCompanies, type ResumeVersion, type CandidateMailingHistoryEntry } from "@/app/actions"
 import { ADDITIONAL_COUNTRIES } from "@/components/employer-registration-modal"
 import { withDownloadFilename } from "@/lib/blob"
 import type { Candidate } from "@/lib/sheets"
 
 const inputCls =
   "w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+
+// Must match SEARCH_MIN_LENGTH in lib/db/companies.ts — searchCompanies() ignores shorter queries anyway.
+const SEARCH_MIN_LENGTH = 3
 
 /** activeSince is stored as ru-RU locale text ("21.07.2026") to match approveCandidate(); <input type="date"> needs ISO. */
 function toISODate(ruDate: string): string {
@@ -137,56 +140,112 @@ function ResumeVersionList({
 /** Free-text multi-value chip input (company/industry names — not a fixed list like streams or
  * countries). Type a value, Enter or comma commits it as a chip; Backspace on an empty draft
  * removes the last chip; blur also commits whatever's left typed, so nothing is silently lost. */
+/** Free-text multi-value chip input — optionally backed by a suggestions dropdown (onSearch,
+ * debounced, SEARCH_MIN_LENGTH floor — same convention as CompanyAutocompleteInput). Picking a
+ * suggestion or typing a brand-new value and pressing Enter/comma are both valid; a suggestion
+ * click uses onMouseDown+preventDefault so it registers before the input's onBlur-commit fires. */
 function TagsInput({
   values,
   onChange,
   placeholder,
+  onSearch,
 }: {
   values: string[]
   onChange: (values: string[]) => void
   placeholder?: string
+  onSearch?: (query: string) => Promise<string[]>
 }) {
   const [draft, setDraft] = useState("")
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
 
-  function commitDraft() {
-    const trimmed = draft.trim()
+  useEffect(() => {
+    if (!onSearch) return
+    const query = draft.trim()
+    if (query.length < SEARCH_MIN_LENGTH) {
+      setSuggestions([])
+      return
+    }
+    let active = true
+    const timer = setTimeout(() => {
+      onSearch(query).then((rows) => {
+        if (active) setSuggestions(rows.filter((r) => !values.includes(r)))
+      })
+    }, 200)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [draft, onSearch, values])
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", onClickOutside)
+    return () => document.removeEventListener("mousedown", onClickOutside)
+  }, [])
+
+  function commitValue(v: string) {
+    const trimmed = v.trim()
     if (trimmed && !values.includes(trimmed)) onChange([...values, trimmed])
     setDraft("")
+    setSuggestions([])
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault()
-      commitDraft()
+      commitValue(draft)
     } else if (e.key === "Backspace" && !draft && values.length) {
       onChange(values.slice(0, -1))
     }
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary/30">
-      {values.map((v, i) => (
-        <span key={v} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">
-          {v}
-          <button
-            type="button"
-            onClick={() => onChange(values.filter((_, idx) => idx !== i))}
-            className="text-muted-foreground transition-colors hover:text-destructive"
-            aria-label={`Удалить «${v}»`}
-          >
-            <X className="size-3" />
-          </button>
-        </span>
-      ))}
-      <input
-        type="text"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onBlur={commitDraft}
-        placeholder={values.length ? undefined : placeholder}
-        className="min-w-[8rem] flex-1 border-0 bg-transparent p-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-      />
+    <div ref={containerRef} className="relative">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary/30">
+        {values.map((v, i) => (
+          <span key={v} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">
+            {v}
+            <button
+              type="button"
+              onClick={() => onChange(values.filter((_, idx) => idx !== i))}
+              className="text-muted-foreground transition-colors hover:text-destructive"
+              aria-label={`Удалить «${v}»`}
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => { setDraft(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={handleKeyDown}
+          onBlur={() => commitValue(draft)}
+          placeholder={values.length ? undefined : placeholder}
+          autoComplete="off"
+          className="min-w-[8rem] flex-1 border-0 bg-transparent p-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+        />
+      </div>
+      {open && suggestions.length > 0 && (
+        <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border bg-card py-1 shadow-lg">
+          {suggestions.map((s) => (
+            <li key={s}>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); commitValue(s) }}
+                className="block w-full px-3 py-1.5 text-left text-sm text-card-foreground hover:bg-muted"
+              >
+                {s}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -195,16 +254,19 @@ function Field({
   label,
   required,
   full,
+  danger,
   children,
 }: {
   label: string
   required?: boolean
   full?: boolean
+  danger?: boolean
   children: React.ReactNode
 }) {
   return (
-    <div className={`space-y-1.5 ${full ? "col-span-2" : ""}`}>
-      <label className="block text-sm font-medium text-card-foreground">
+    <div className={`space-y-1.5 ${full ? "col-span-2" : ""} ${danger ? "rounded-lg border border-destructive/40 bg-destructive/5 p-3" : ""}`}>
+      <label className={`flex items-center gap-1.5 text-sm font-medium ${danger ? "text-destructive" : "text-card-foreground"}`}>
+        {danger && <OctagonX className="size-4 shrink-0" />}
         {label}
         {required && <span className="ml-1 text-primary">*</span>}
       </label>
@@ -497,25 +559,27 @@ export function CandidateEditModal({
                   )}
                 </Field>
 
-                <Field label="Исключённые компании" full>
+                <Field label="Исключённые компании" full danger>
                   <TagsInput
                     values={excludedCompanies}
                     onChange={setExcludedCompanies}
                     placeholder="Например: ООО Пример — Enter чтобы добавить"
+                    onSearch={async (query) => (await searchCompanies(query)).map((c) => c.name)}
                   />
                   <p className="mt-1 text-xs text-muted-foreground">
                     Кандидат не попадёт в подборку работодателю, у которого «Компания» совпадает посимвольно — сверяйтесь с разделом «Компании».
                   </p>
                 </Field>
 
-                <Field label="Исключённые отрасли" full>
+                <Field label="Исключённые стримы" full danger>
                   <TagsInput
                     values={excludedIndustries}
                     onChange={setExcludedIndustries}
                     placeholder="Точное название стрима — Enter чтобы добавить"
+                    onSearch={async (query) => streams.filter((s) => s.toLowerCase().includes(query.toLowerCase()))}
                   />
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Сверяется со стримами работодателя, не со свободным описанием отрасли — впишите точное название стрима.
+                    Сверяется со стримами работодателя — выберите из подсказки или впишите точное название.
                   </p>
                 </Field>
 
