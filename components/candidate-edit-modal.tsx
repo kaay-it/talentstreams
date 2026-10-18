@@ -292,7 +292,7 @@ export function CandidateEditModal({
   const [email, setEmail] = useState(candidate.email)
   const [phone, setPhone] = useState(candidate.phone)
 
-  // "none" = keep candidate.resumeUrl as-is; "file"/"link" = adding a new version to replace it.
+  // "none" = keep the current resume as-is; "file"/"link" = adding a new version to replace it.
   const [resumeAction, setResumeAction] = useState<"none" | "file" | "link">("none")
   const [resumeFile, setResumeFile] = useState<File | null>(null)
   const [newResumeUrl, setNewResumeUrl] = useState("")
@@ -305,12 +305,15 @@ export function CandidateEditModal({
   const [activeSince, setActiveSince] = useState(toISODate(candidate.activeSince))
   const [summary, setSummary] = useState(candidate.summary)
   const [excludedCompanies, setExcludedCompanies] = useState<string[]>(candidate.excludedCompanies)
-  const [excludedIndustries, setExcludedIndustries] = useState<string[]>(candidate.excludedIndustries)
+  const [excludedStreams, setExcludedStreams] = useState<string[]>(candidate.excludedStreams)
 
   const [resumeHistory, setResumeHistory] = useState<ResumeVersion[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const resumeFiles = resumeHistory.filter((v) => v.kind === "file")
   const resumeLinks = resumeHistory.filter((v) => v.kind === "link")
+  // candidates has no resumeUrl column — candidateResumes (newest first) is the only source of
+  // truth, so the current resume is simply its first entry.
+  const currentResumeUrl = resumeHistory[0]?.url ?? ""
 
   useEffect(() => {
     if (!candidate.id) return
@@ -371,7 +374,7 @@ export function CandidateEditModal({
     setStatus("submitting")
     setErrorMsg("")
     try {
-      let finalUrl = candidate.resumeUrl
+      let finalUrl = currentResumeUrl
       let uploadedFilename: string | undefined
 
       if (resumeAction === "file" && resumeFile) {
@@ -386,7 +389,7 @@ export function CandidateEditModal({
         finalUrl = newResumeUrl.trim()
       }
 
-      const resumeVersionChanged = Boolean(finalUrl && finalUrl !== candidate.resumeUrl)
+      const resumeVersionChanged = Boolean(finalUrl && finalUrl !== currentResumeUrl)
       await updateCandidate(candidate.id, {
         candidateId: candidate.id,
         name,
@@ -404,7 +407,7 @@ export function CandidateEditModal({
         title,
         summary,
         excludedCompanies,
-        excludedIndustries,
+        excludedStreams,
       })
       setStatus("success")
     } catch (err) {
@@ -573,8 +576,8 @@ export function CandidateEditModal({
 
                 <Field label="Исключённые стримы" full danger>
                   <TagsInput
-                    values={excludedIndustries}
-                    onChange={setExcludedIndustries}
+                    values={excludedStreams}
+                    onChange={setExcludedStreams}
                     placeholder="Точное название стрима — Enter чтобы добавить"
                     onSearch={async (query) => streams.filter((s) => s.toLowerCase().includes(query.toLowerCase()))}
                   />
@@ -720,7 +723,7 @@ export function CandidateEditModal({
                                 <ResumeVersionList
                                   items={resumeFiles}
                                   candidateId={candidate.id}
-                                  currentResumeUrl={candidate.resumeUrl}
+                                  currentResumeUrl={currentResumeUrl}
                                   onDeleted={handleResumeVersionDeleted}
                                 />
                               </div>
@@ -733,7 +736,7 @@ export function CandidateEditModal({
                                 <ResumeVersionList
                                   items={resumeLinks}
                                   candidateId={candidate.id}
-                                  currentResumeUrl={candidate.resumeUrl}
+                                  currentResumeUrl={currentResumeUrl}
                                   onDeleted={handleResumeVersionDeleted}
                                 />
                               </div>

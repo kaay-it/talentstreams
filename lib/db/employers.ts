@@ -114,7 +114,7 @@ export function filterCandidatesForEmployer(candidates: Candidate[], employer: E
     if (companyLower && c.excludedCompanies.some((ec) => ec.toLowerCase() === companyLower)) {
       return false
     }
-    if (industryLower.length && c.excludedIndustries.some((ei) => industryLower.includes(ei.toLowerCase()))) {
+    if (industryLower.length && c.excludedStreams.some((ei) => industryLower.includes(ei.toLowerCase()))) {
       return false
     }
     if (employerCountries !== null) {

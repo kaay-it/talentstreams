@@ -24,7 +24,7 @@ export type Candidate = {
   countryDesired: string
   summary: string
   excludedCompanies: string[]
-  excludedIndustries: string[]
+  excludedStreams: string[]
   status: CandidateStatus
   /** ru-RU text, e.g. "21.07.2026" — "" means not set (candidate always passes the availability
    * filter). Stored in Postgres as a native nullable date; converted at this module's boundary
@@ -33,7 +33,6 @@ export type Candidate = {
   activeSince: string
   timestamp: string
   coverLetter: string
-  resumeUrl: string
 }
 
 /** ru-RU "21.07.2026" -> ISO "2026-07-21"; "" or unparsable -> null. Inverse of isoToRu(). */
@@ -57,12 +56,11 @@ function toCandidate(row: typeof candidates.$inferSelect): Candidate {
     countryDesired: row.countryDesired,
     summary: row.summary,
     excludedCompanies: row.excludedCompanies,
-    excludedIndustries: row.excludedIndustries,
+    excludedStreams: row.excludedStreams,
     status: row.status as CandidateStatus,
     activeSince: row.activeSince ? isoToRu(row.activeSince) : "",
     timestamp: row.registrationTimestamp.toISOString(),
     coverLetter: row.coverLetter,
-    resumeUrl: row.resumeUrl,
   }
 }
 
@@ -100,7 +98,6 @@ export async function createCandidateRecord(data: {
   name: string
   email: string
   phone: string
-  resumeUrl: string
   coverLetter: string
   status: CandidateStatus
   title?: string
@@ -116,7 +113,6 @@ export async function createCandidateRecord(data: {
     name: data.name,
     email: data.email,
     phone: data.phone,
-    resumeUrl: data.resumeUrl,
     coverLetter: data.coverLetter,
     status: data.status,
     title: data.title ?? "",
@@ -137,7 +133,6 @@ export async function updateCandidateFields(
     name: string
     email: string
     phone: string
-    resumeUrl: string
     coverLetter: string
     stream: string[]
     level: string
@@ -147,7 +142,7 @@ export async function updateCandidateFields(
     title: string
     summary: string
     excludedCompanies: string[]
-    excludedIndustries: string[]
+    excludedStreams: string[]
   }>,
 ): Promise<void> {
   const { activeSince, ...rest } = data

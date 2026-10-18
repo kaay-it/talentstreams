@@ -74,11 +74,12 @@ export const candidates = pgTable("candidates", {
   countryDesired:        text("countryDesired").notNull().default(""),
   summary:               text("summary").notNull().default(""),
   excludedCompanies:     text("excludedCompanies").array().notNull().default([]),
-  excludedIndustries:    text("excludedIndustries").array().notNull().default([]),
+  excludedStreams:       text("excludedStreams").array().notNull().default([]),
   status:                text("status").notNull().default("На проверке"),
   // ISO "YYYY-MM-DD", no time component; null = not set (candidate always passes the availability filter).
   activeSince:           date("activeSince", { mode: "string" }),
   registrationTimestamp: timestamp("registrationTimestamp").defaultNow().notNull(),
   coverLetter:           text("coverLetter").notNull().default(""),
-  resumeUrl:             text("resumeUrl").notNull().default(""),
+  // No resumeUrl column — candidateResumes is the sole source of truth for a candidate's resume;
+  // "current" is simply the newest row (see getResumeVersions()'s ORDER BY createdAt DESC).
 })

@@ -131,7 +131,7 @@ else Кандидат указал URL резюме
 end
 
 app -> app : id = crypto.randomUUID()\n(генерируется здесь же, синхронно — без внешнего скрипта)
-app -> sh_cands : createCandidateRecord({ id, name, email, phone,\n  resumeUrl: proxyUrl или введённый URL,\n  coverLetter, status: "На проверке" })\nINSERT INTO candidates (TASK-DB-4 — один INSERT,\nраньше append+update в два шага в Sheets)
+app -> sh_cands : createCandidateRecord({ id, name, email, phone,\n  coverLetter, status: "На проверке" })\nINSERT INTO candidates (TASK-DB-4 — один INSERT,\nраньше append+update в два шага в Sheets;\nнет колонки resumeUrl — резюме только в candidateResumes ниже)
 sh_cands --> app : OK
 
 alt резюме передано (файл или ссылка)
@@ -150,8 +150,10 @@ app --> candidate : «Заявка отправлена — мы рассмот�
 note over sh_cands
   Таблица candidates (Neon / PostgreSQL, TASK-DB-4):
   ────────────────────────────────────────────────────────────────
-  id (UUID) | registrationTimestamp | name    | email          | … | resumeUrl        | status       | activeSince
-  a3f8e2c1… | 2026-08-03             | Иван И. | ivan@mail.com  | … | /api/resume?url= | На проверке  | NULL
+  id (UUID) | registrationTimestamp | name    | email          | … | status       | activeSince
+  a3f8e2c1… | 2026-08-03             | Иван И. | ivan@mail.com  | … | На проверке  | NULL
+  Нет колонки resumeUrl — резюме только в candidateResumes,
+  «текущая» версия — просто самая новая запись там (см. ниже).
   activeSince — настоящая date-колонка (ISO, nullable), не текст —
   было бы в Sheets. NULL = не задано (кандидат всегда проходит
   фильтр доступности), конвертация в/из ru-RU строки
@@ -220,9 +222,12 @@ note right of sh_mail
 end note
 
 note over editor, app
-  Текущее resumeUrl показывается как read-only чип («Текущее резюме» + «Открыть»),
-  сам сабмит его не трогает. Две независимые кнопки «+ Добавить файл» /
-  «+ Добавить ссылку» (resumeAction) — переключение между ними больше не затирает
+  Текущее резюме (самая новая запись resumeHistory, загруженного
+  при открытии формы — candidates не хранит резюме отдельной
+  колонкой, TASK-DB-4 доделка) показывается как read-only чип
+  («Текущее резюме» + «Открыть»), сам сабмит его не трогает. Две
+  независимые кнопки «+ Добавить файл» / «+ Добавить ссылку»
+  (resumeAction) — переключение между ними больше не затирает
   уже сохранённое значение, в отличие от прежнего toggle-переключателя.
 end note
 
@@ -230,14 +235,14 @@ alt Редактор нажимает «+ Добавить файл» и выб�
   editor -> app : POST /api/upload (новый файл)
   app -> blob : put("resumes/…", file, { access: "private" })
   blob --> app : { url: blobUrl }
-  app --> editor : proxyUrl для поля resumeUrl\n(старый файл НЕ удаляется — остаётся в Blob)
+  app --> editor : proxyUrl как новый resumeUrl\n(старый файл НЕ удаляется — остаётся в Blob)
 else Редактор нажимает «+ Добавить ссылку» и вводит URL
   editor -> app : resumeUrl = введённая ссылка
 else Редактор ничего не трогает («Отмена» или не открывал ни одну кнопку)
-  editor -> app : resumeUrl = candidate.resumeUrl (без изменений)
+  editor -> app : resumeUrl = текущая версия из resumeHistory[0] (без изменений)
 end
 
-editor -> app : updateCandidate(candidate.id, { candidateId: candidate.id,\n  name, title, email, phone, resumeUrl,\n  resumeVersionChanged (только если resumeUrl реально отличается\n  от исходного), resumeFilename?, coverLetter, summary,\n  stream, level, countryPrimary, countryDesired, activeSince })
+editor -> app : updateCandidate(candidate.id, { candidateId: candidate.id,\n  name, title, email, phone, resumeUrl,\n  resumeVersionChanged (только если resumeUrl реально отличается\n  от resumeHistory[0].url), resumeFilename?, coverLetter, summary,\n  stream, level, countryPrimary, countryDesired, activeSince })
 app -> sh_cands : updateCandidateFields(id, data)\nUPDATE candidates SET ... WHERE id = ...\n(TASK-DB-4 — один UPDATE, раньше параллельные\nPUT по колонкам через Sheets API)
 sh_cands --> app : OK
 
@@ -299,7 +304,7 @@ app --> editor : Строка удалена из таблицы
 editor -> app : «+ Добавить кандидата» в панели фильтров\nCandidateCreateModal — та же форма, что CandidateEditModal,\nно без истории резюме, «Активен с» = сегодня
 editor -> app : createCandidate({ name, title, email, phone, level,\n  activeSince, stream, countryPrimary, countryDesired,\n  summary, resumeUrl, resumeFilename?, coverLetter })
 app -> app : id = crypto.randomUUID()
-app -> sh_cands : createCandidateRecord({ id, name, email, phone,\n  resumeUrl, coverLetter, status: "На проверке",\n  title, level, activeSince, stream, countryPrimary,\n  countryDesired, summary })\nINSERT INTO candidates — один шаг (TASK-DB-4,\nраньше append+update в два шага в Sheets)
+app -> sh_cands : createCandidateRecord({ id, name, email, phone,\n  coverLetter, status: "На проверке",\n  title, level, activeSince, stream, countryPrimary,\n  countryDesired, summary })\nINSERT INTO candidates — один шаг (TASK-DB-4,\nраньше append+update в два шага в Sheets; resumeUrl\nсюда не входит — пишется только через addResumeVersion ниже)
 sh_cands --> app : OK
 alt резюме передано
   app -> neonResumes : addResumeVersion({ candidateId: id, kind, filename?, url })
@@ -594,7 +599,7 @@ app -> sh_mail : getMailingList("f04a9b3e-…")
 sh_mail -> sh_cands : getActiveCandidates() → джойн по candidateId\n(Neon, TASK-DB-4 — раньше getProfiles() из Sheets)
 sh_cands --> sh_mail : кандидаты
 sh_mail --> app : { stream, date, entries: [{ profile, mailingStream }, …] }
-app -> app : filterCandidatesForEmployer(candidates, employer)\n(in-memory: excludedCompanies, excludedIndustries,\nгео: countryPrimary/countryDesired ∩ employer.country+additionalCountries;\n«Любая» → без гео-фильтра; нет данных о стране → скрыть)
+app -> app : filterCandidatesForEmployer(candidates, employer)\n(in-memory: excludedCompanies, excludedStreams,\nгео: countryPrimary/countryDesired ∩ employer.country+additionalCountries;\n«Любая» → без гео-фильтра; нет данных о стране → скрыть)
 app -> neonStreams : getStreamsDetailed() — типы стримов для тегов (TASK-27)
 neonStreams --> app : [{ name, type }, …]
 app --> employer : Страница выпуска: анонимные карточки\n(должность, уровень — teal-бейдж рядом с должностью, страна, summary,\nindustry-теги — синие, functional — фиолетовые: выводятся из\nProfile.stream кандидата по type стрима, а не из полей industry/func)\nБез имён и контактов. Кнопка «Хочу связаться».
