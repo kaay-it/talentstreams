@@ -5,6 +5,7 @@ import { CheckCircle2, XCircle, Ban, Trash2, FileText, Link as LinkIcon, Loader2
 import { approveCandidate, rejectCandidate, deleteCandidate, type ResumeVersion } from "@/app/actions"
 import { CandidateEditModal } from "@/components/candidate-edit-modal"
 import { CandidateCreateModal } from "@/components/candidate-create-modal"
+import { PaginationControls, type PageSize } from "@/components/pagination-controls"
 import { withDownloadFilename } from "@/lib/blob"
 import type { Candidate, CandidateStatus } from "@/lib/sheets"
 
@@ -342,6 +343,8 @@ export function CandidateSection({
   const [creating, setCreating] = useState(false)
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<PageSize>(25)
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -388,6 +391,14 @@ export function CandidateSection({
       .map((x) => x.c)
   }, [filtered, sortField, sortDir])
 
+  const totalPages = pageSize === "all" ? 1 : Math.max(1, Math.ceil(sorted.length / pageSize))
+  const currentPage = Math.min(page, totalPages)
+  const paginated = useMemo(() => {
+    if (pageSize === "all") return sorted
+    const start = (currentPage - 1) * pageSize
+    return sorted.slice(start, start + pageSize)
+  }, [sorted, currentPage, pageSize])
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -395,21 +406,21 @@ export function CandidateSection({
           type="search"
           placeholder="Поиск по имени, email, телефону"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setPage(1) }}
           className={`${SELECT_CLASS} flex-1 min-w-[200px]`}
         />
-        <select value={status} onChange={(e) => setStatus(e.target.value as CandidateStatus | "")} className={SELECT_CLASS}>
+        <select value={status} onChange={(e) => { setStatus(e.target.value as CandidateStatus | ""); setPage(1) }} className={SELECT_CLASS}>
           {STATUS_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
-        <select value={stream} onChange={(e) => setStream(e.target.value)} className={SELECT_CLASS}>
+        <select value={stream} onChange={(e) => { setStream(e.target.value); setPage(1) }} className={SELECT_CLASS}>
           <option value="">Все стримы</option>
           {streams.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        <select value={level} onChange={(e) => setLevel(e.target.value)} className={SELECT_CLASS}>
+        <select value={level} onChange={(e) => { setLevel(e.target.value); setPage(1) }} className={SELECT_CLASS}>
           <option value="">Все уровни</option>
           {levels.map((l) => (
             <option key={l} value={l}>{l}</option>
@@ -449,7 +460,7 @@ export function CandidateSection({
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((c) => {
+                {paginated.map((c) => {
                   const history = resumeHistory[c.id] ?? []
                   return (
                     <CandidateRow
@@ -464,6 +475,15 @@ export function CandidateSection({
               </tbody>
             </table>
           </div>
+        )}
+        {filtered.length > 0 && (
+          <PaginationControls
+            page={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
+          />
         )}
       </div>
     </div>
