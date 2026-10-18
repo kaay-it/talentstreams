@@ -486,6 +486,8 @@ export type Candidate = {
   countryDesired: string
   title: string
   summary: string
+  excludedCompanies: string[]
+  excludedIndustries: string[]
 }
 
 /** Append a candidate row to the main profiles sheet (case-insensitive header matching). */
@@ -590,6 +592,8 @@ export async function getCandidates(): Promise<Candidate[]> {
         countryDesired: r.countryDesired || "",
         title: r.title || "",
         summary: r.summary || "",
+        excludedCompanies: parseMultiValue(r.excludedCompanies || ""),
+        excludedIndustries: parseMultiValue(r.excludedIndustries || ""),
       }
     }).filter((c) => c.name || c.email)
   } catch {
@@ -658,6 +662,8 @@ export async function updateCandidateFields(
     activeSince: string
     title: string
     summary: string
+    excludedCompanies: string
+    excludedIndustries: string
   }>,
 ): Promise<void> {
   const { email, privateKey, sheetId } = getEnv()

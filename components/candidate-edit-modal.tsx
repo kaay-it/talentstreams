@@ -134,6 +134,63 @@ function ResumeVersionList({
   )
 }
 
+/** Free-text multi-value chip input (company/industry names — not a fixed list like streams or
+ * countries). Type a value, Enter or comma commits it as a chip; Backspace on an empty draft
+ * removes the last chip; blur also commits whatever's left typed, so nothing is silently lost. */
+function TagsInput({
+  values,
+  onChange,
+  placeholder,
+}: {
+  values: string[]
+  onChange: (values: string[]) => void
+  placeholder?: string
+}) {
+  const [draft, setDraft] = useState("")
+
+  function commitDraft() {
+    const trimmed = draft.trim()
+    if (trimmed && !values.includes(trimmed)) onChange([...values, trimmed])
+    setDraft("")
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault()
+      commitDraft()
+    } else if (e.key === "Backspace" && !draft && values.length) {
+      onChange(values.slice(0, -1))
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary/30">
+      {values.map((v, i) => (
+        <span key={v} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">
+          {v}
+          <button
+            type="button"
+            onClick={() => onChange(values.filter((_, idx) => idx !== i))}
+            className="text-muted-foreground transition-colors hover:text-destructive"
+            aria-label={`Удалить «${v}»`}
+          >
+            <X className="size-3" />
+          </button>
+        </span>
+      ))}
+      <input
+        type="text"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={commitDraft}
+        placeholder={values.length ? undefined : placeholder}
+        className="min-w-[8rem] flex-1 border-0 bg-transparent p-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+      />
+    </div>
+  )
+}
+
 function Field({
   label,
   required,
@@ -185,6 +242,8 @@ export function CandidateEditModal({
   const [countryDesired, setCountryDesired] = useState(candidate.countryDesired)
   const [activeSince, setActiveSince] = useState(toISODate(candidate.activeSince))
   const [summary, setSummary] = useState(candidate.summary)
+  const [excludedCompanies, setExcludedCompanies] = useState<string[]>(candidate.excludedCompanies)
+  const [excludedIndustries, setExcludedIndustries] = useState<string[]>(candidate.excludedIndustries)
 
   const [resumeHistory, setResumeHistory] = useState<ResumeVersion[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -282,6 +341,8 @@ export function CandidateEditModal({
         activeSince: toRuDate(activeSince),
         title,
         summary,
+        excludedCompanies,
+        excludedIndustries,
       })
       setStatus("success")
     } catch (err) {
@@ -434,6 +495,28 @@ export function CandidateEditModal({
                   ) : (
                     <p className="text-sm text-muted-foreground">Стримы не настроены</p>
                   )}
+                </Field>
+
+                <Field label="Исключённые компании" full>
+                  <TagsInput
+                    values={excludedCompanies}
+                    onChange={setExcludedCompanies}
+                    placeholder="Например: ООО Пример — Enter чтобы добавить"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Кандидат не попадёт в подборку работодателю, у которого «Компания» совпадает посимвольно — сверяйтесь с разделом «Компании».
+                  </p>
+                </Field>
+
+                <Field label="Исключённые отрасли" full>
+                  <TagsInput
+                    values={excludedIndustries}
+                    onChange={setExcludedIndustries}
+                    placeholder="Точное название стрима — Enter чтобы добавить"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Сверяется со стримами работодателя, не со свободным описанием отрасли — впишите точное название стрима.
+                  </p>
                 </Field>
 
                 {candidate.id && (
