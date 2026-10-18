@@ -36,7 +36,7 @@ export async function appendContactRequest(data: {
   await db.insert(contactRequests).values({
     listId: data.listId,
     streamId: data.streamId,
-    candidateId: data.candidateId,
+    candidateId: data.candidateId || null,
     employerToken: data.employerToken,
   })
 }
@@ -66,7 +66,7 @@ export async function getContactRequests(): Promise<ContactRequest[]> {
     timestamp: r.timestamp.toISOString(),
     listId: r.listId,
     stream: r.streamName ?? "",
-    candidateId: r.candidateId,
+    candidateId: r.candidateId ?? "",
     employerToken: r.employerToken,
     employerName: r.employerName,
     company: r.employerCompany ?? "",

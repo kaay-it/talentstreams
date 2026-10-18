@@ -10,7 +10,7 @@ export const streams = pgTable("streams", {
 
 export const candidateResumes = pgTable("candidateResumes", {
   id:          text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  candidateId: text("candidateId").notNull(),
+  candidateId: text("candidateId").notNull().references(() => candidates.id, { onDelete: "cascade" }),
   kind:        text("kind").notNull(), // "file" | "link"
   filename:    text("filename").notNull().default(""),
   url:         text("url").notNull(),
@@ -49,7 +49,7 @@ export const mailingListEntries = pgTable("mailingListEntries", {
   listId:      text("listId").notNull(),
   streamId:    integer("streamId").references(() => streams.id, { onDelete: "set null" }),
   targetDate:  date("targetDate", { mode: "string" }).notNull(),
-  candidateId: text("candidateId").notNull().default(""),
+  candidateId: text("candidateId").references(() => candidates.id, { onDelete: "set null" }),
 })
 
 export const contactRequests = pgTable("contactRequests", {
@@ -57,7 +57,28 @@ export const contactRequests = pgTable("contactRequests", {
   timestamp:     timestamp("timestamp").defaultNow().notNull(),
   listId:        text("listId").notNull().default(""),
   streamId:      integer("streamId").references(() => streams.id, { onDelete: "set null" }),
-  candidateId:   text("candidateId").notNull().default(""),
+  candidateId:   text("candidateId").references(() => candidates.id, { onDelete: "set null" }),
   employerToken: text("employerToken").notNull().references(() => employers.token, { onDelete: "cascade" }),
   status:        text("status").notNull().default("Новый запрос"),
+})
+
+export const candidates = pgTable("candidates", {
+  id:                    text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name:                  text("name").notNull().default(""),
+  title:                 text("title").notNull().default(""),
+  email:                 text("email").notNull().default(""),
+  phone:                 text("phone").notNull().default(""),
+  stream:                text("stream").array().notNull().default([]),
+  level:                 text("level").notNull().default(""),
+  countryPrimary:        text("countryPrimary").notNull().default(""),
+  countryDesired:        text("countryDesired").notNull().default(""),
+  summary:               text("summary").notNull().default(""),
+  excludedCompanies:     text("excludedCompanies").array().notNull().default([]),
+  excludedIndustries:    text("excludedIndustries").array().notNull().default([]),
+  status:                text("status").notNull().default("На проверке"),
+  // ISO "YYYY-MM-DD", no time component; null = not set (candidate always passes the availability filter).
+  activeSince:           date("activeSince", { mode: "string" }),
+  registrationTimestamp: timestamp("registrationTimestamp").defaultNow().notNull(),
+  coverLetter:           text("coverLetter").notNull().default(""),
+  resumeUrl:             text("resumeUrl").notNull().default(""),
 })
