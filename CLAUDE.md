@@ -78,11 +78,12 @@ components/
   candidate-registration-modal.tsx  # Форма кандидата (публичная), мультиязычная (lib/i18n/candidate-form.ts)
   candidate-edit-modal.tsx          # Редактирование кандидата: контакты, резюме, уровень, стримы, страны, дата активности
   candidate-create-modal.tsx        # Быстрое добавление кандидата из редактора (без публичной формы)
-  candidate-section.tsx             # Фильтры (поиск/статус/стрим/уровень) + список + Pencil
+  candidate-section.tsx             # Фильтры (поиск/статус/стрим/уровень) + список + Pencil + пагинация
   employer-registration-modal.tsx   # Экспортирует константы (страны/стримы/способы связи) для переиспользования; мультиязычная (lib/i18n/employer-form.ts), сами значения констант не переводятся
   employer-edit-modal.tsx           # Редактирование работодателя — форма как у регистрации, без чекбокса согласия
   employer-create-modal.tsx         # Быстрое добавление работодателя из редактора (переиспользует registerEmployer)
-  employer-section.tsx              # Фильтры (поиск/статус/страна/стрим) + список + Pencil
+  employer-section.tsx              # Фильтры (поиск/статус/страна/стрим) + список + Pencil + пагинация
+  pagination-controls.tsx           # Переиспользуемый футер пагинации (размер страницы 10/25/50/100/Все + prev/next) — используется в candidate-section.tsx и employer-section.tsx
   company-autocomplete-input.tsx    # Поле «Компания» с автодополнением (searchCompanies); используется во всех 3 формах работодателя (TASK-36)
   companies-section.tsx             # Список компаний с раскрытием по клику — показывает людей внутри компании (TASK-36)
   streams-table.tsx                 # Inline-редактор стримов + счётчик подходящих кандидатов (TASK-27)
