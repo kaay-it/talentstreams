@@ -545,6 +545,8 @@ export async function updateCandidate(
     activeSince: string
     title: string
     summary: string
+    excludedCompanies: string[]
+    excludedIndustries: string[]
   },
 ): Promise<void> {
   if (!data.name.trim()) throw new Error("Укажите имя")
@@ -562,6 +564,8 @@ export async function updateCandidate(
     activeSince: data.activeSince,
     title: data.title,
     summary: data.summary,
+    excludedCompanies: data.excludedCompanies.join(", "),
+    excludedIndustries: data.excludedIndustries.join(", "),
   })
 
   if (data.resumeVersionChanged && data.resumeUrl) {
