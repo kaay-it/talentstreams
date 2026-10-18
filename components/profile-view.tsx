@@ -1,12 +1,12 @@
 import Link from "next/link"
-import type { Profile } from "@/lib/sheets"
+import type { Candidate } from "@/lib/db/candidates"
 import {
   ArrowLeft,
   Mail,
   Phone,
 } from "lucide-react"
 
-export function ProfileView({ profile, backUrl = "/" }: { profile: Profile; backUrl?: string }) {
+export function ProfileView({ profile, backUrl = "/" }: { profile: Candidate; backUrl?: string }) {
   const contacts = [
     profile.email && {
       icon: Mail,
@@ -19,8 +19,6 @@ export function ProfileView({ profile, backUrl = "/" }: { profile: Profile; back
       href: `tel:${profile.phone}`,
     },
   ].filter(Boolean) as { icon: typeof Mail; label: string; href: string | null }[]
-
-  const extraEntries = Object.entries(profile.extra)
 
   return (
     <main className="min-h-svh bg-background">
@@ -81,17 +79,6 @@ export function ProfileView({ profile, backUrl = "/" }: { profile: Profile; back
                   )
                 })}
               </div>
-            )}
-
-            {extraEntries.length > 0 && (
-              <dl className="mt-8 grid gap-4 border-t pt-6 sm:grid-cols-2">
-                {extraEntries.map(([key, value]) => (
-                  <div key={key}>
-                    <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{key}</dt>
-                    <dd className="mt-1 text-sm text-card-foreground">{value}</dd>
-                  </div>
-                ))}
-              </dl>
             )}
           </div>
         </article>

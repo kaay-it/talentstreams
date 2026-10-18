@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle, ExternalLink } from "lucide-react"
-import { getProfiles, getEligibleCandidatesForRelease, getPausedCandidatesForRelease, isSheetsConfigured } from "@/lib/sheets"
+import { getActiveCandidates, getEligibleCandidatesForRelease, getPausedCandidatesForRelease } from "@/lib/db/candidates"
 import { getMailingLists } from "@/lib/db/mailing-lists"
 import { getStreams } from "@/lib/db/streams"
 import { getEmployers, confirmedEmployersForStream } from "@/lib/db/employers"
@@ -28,7 +28,7 @@ export default async function ReleasesPage({
     getMailingLists(),
     getCampaigns(),
     getStreams(),
-    isSheetsConfigured() ? getProfiles() : Promise.resolve([]),
+    getActiveCandidates(),
     getEmployers(),
   ])
 

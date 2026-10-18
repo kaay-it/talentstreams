@@ -2,7 +2,7 @@ import "server-only"
 import { eq } from "drizzle-orm"
 import { db } from "./index"
 import { employers, companies } from "./schema"
-import type { Profile } from "../sheets"
+import type { Candidate } from "./candidates"
 
 export type EmployerStatus = "На проверке" | "Подтверждён" | "Отклонён"
 
@@ -94,7 +94,7 @@ export function confirmedEmployersForStream(employers: Employer[], stream: { nam
  * Filter candidates for a specific employer, removing those who have excluded
  * the employer's company or industry from their preferences.
  */
-export function filterCandidatesForEmployer(candidates: Profile[], employer: Employer): Profile[] {
+export function filterCandidatesForEmployer(candidates: Candidate[], employer: Employer): Candidate[] {
   const companyLower = employer.company.trim().toLowerCase()
   const industryLower = employer.streams.map((s) => s.trim().toLowerCase())
 

@@ -6,7 +6,7 @@ import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Plus, Trash2,
 import { updateCandidate, getCandidateResumeHistory, deleteCandidateResumeVersion, getCandidateMailingHistory, searchCompanies, type ResumeVersion, type CandidateMailingHistoryEntry } from "@/app/actions"
 import { ADDITIONAL_COUNTRIES } from "@/components/employer-registration-modal"
 import { withDownloadFilename } from "@/lib/blob"
-import type { Candidate } from "@/lib/sheets"
+import type { Candidate } from "@/lib/db/candidates"
 
 const inputCls =
   "w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -387,7 +387,7 @@ export function CandidateEditModal({
       }
 
       const resumeVersionChanged = Boolean(finalUrl && finalUrl !== candidate.resumeUrl)
-      await updateCandidate(candidate.rowIndex, {
+      await updateCandidate(candidate.id, {
         candidateId: candidate.id,
         name,
         email,

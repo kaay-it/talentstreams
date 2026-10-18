@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import { getStreamsDetailed } from "@/lib/db/streams"
-import { getProfiles, getCandidatesForStream, isSheetsConfigured } from "@/lib/sheets"
+import { getActiveCandidates, getCandidatesForStream } from "@/lib/db/candidates"
 import { getEmployers, confirmedEmployersForStream } from "@/lib/db/employers"
 import { getMailingLists, type MailingListSummary } from "@/lib/db/mailing-lists"
 import { getCampaigns } from "@/lib/sendpulse"
@@ -20,7 +20,7 @@ export default async function StreamsPage({
 
   const [streams, candidates, allEmployers, mailingLists, campaigns] = await Promise.all([
     getStreamsDetailed(),
-    isSheetsConfigured() ? getProfiles() : Promise.resolve([]),
+    getActiveCandidates(),
     getEmployers(),
     getMailingLists(),
     getCampaigns(),

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation"
-import { getCandidates } from "@/lib/sheets"
+import { getCandidates } from "@/lib/db/candidates"
 import { getStreams } from "@/lib/db/streams"
 import { getResumeVersionsForCandidates } from "@/lib/db/resumes"
 import { CandidateSection } from "@/components/candidate-section"

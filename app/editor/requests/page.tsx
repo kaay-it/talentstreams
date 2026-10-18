@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation"
 import { Info } from "lucide-react"
 import { getContactRequests } from "@/lib/db/contact-requests"
-import { getProfiles } from "@/lib/sheets"
+import { getActiveCandidates } from "@/lib/db/candidates"
 import { ContactRequestsSection } from "@/components/contact-requests-section"
 
 export const dynamic = "force-dynamic"
@@ -16,7 +16,7 @@ export default async function RequestsPage({
 
   if (editorSecret && secret !== editorSecret) notFound()
 
-  const [requests, profiles] = await Promise.all([getContactRequests(), getProfiles()])
+  const [requests, profiles] = await Promise.all([getContactRequests(), getActiveCandidates()])
 
   const profileTitles = new Map(profiles.map((p) => [p.id, p.title || p.name || p.id]))
 

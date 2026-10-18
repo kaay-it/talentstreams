@@ -7,8 +7,8 @@
 
 - **Next.js 14** — App Router, Server Components, Server Actions (`"use server"` в `app/actions.ts`)
 - **TypeScript**
-- **Google Sheets** — профили кандидатов, подборки (Service Account API v4)
-- **Neon (PostgreSQL)** — `contactRequests`, `streams`, `employers`, `candidateResumes` (Drizzle ORM + neon-http driver)
+- **Google Sheets** — не часть боевого пути (TASK-DB-4 ✅, кандидаты переехали в Neon); `lib/sheets.ts` остаётся фундаментом для будущего импорта (Service Account API v4)
+- **Neon (PostgreSQL)** — `candidates`, `contactRequests`, `streams`, `employers`, `candidateResumes`, `companies` (Drizzle ORM + neon-http driver)
 - **Vercel Blob** — приватное хранилище файлов резюме
 - **SendPulse** — email-рассылки (адресные книги, кампании, merge-теги) и Telegram-бот работодателей
 - **Tailwind CSS + lucide-react**
@@ -57,18 +57,20 @@ app/
     resume/route.ts                 # GET: прокси приватных blob-файлов
 
 lib/
-  sheets.ts                         # Google Sheets: типы, чтение, запись
+  sheets.ts                         # Google Sheets: типы, чтение, запись — НЕ часть боевого пути (TASK-DB-4 ✅), фундамент будущего импорта
   sendpulse.ts                      # SendPulse: OAuth, книги, кампании
   i18n/                             # Словари RU/EN для главной страницы (не для редактора)
     home.ts / candidate-form.ts / employer-form.ts
   db/
     index.ts                        # Drizzle клиент (neon-http)
-    schema.ts                       # Схемы: contactRequests, streams, employers, candidateResumes, companies
-    contact-requests.ts             # CRUD запросов (FK на employers/streams)
+    schema.ts                       # Схемы: candidates, contactRequests, streams, employers, candidateResumes, companies
+    candidates.ts                   # CRUD кандидатов (TASK-DB-4); объединяет бывшие Profile+Candidate (lib/sheets.ts) в один тип
+    contact-requests.ts             # CRUD запросов (FK на candidates/employers/streams)
     streams.ts                      # CRUD стримов
     employers.ts                    # CRUD работодателей (TASK-DB-3); employer.company — резолвленное имя через join на companies
     companies.ts                    # CRUD компаний, поиск для автодополнения, find-or-create (TASK-36)
-    resumes.ts                      # История версий резюме кандидата (TASK-32)
+    resumes.ts                      # История версий резюме кандидата (TASK-32), FK на candidates (ON DELETE CASCADE)
+    mailing-lists.ts                # CRUD выпусков (TASK-DB-5); candidateId — FK на candidates (ON DELETE SET NULL)
     migrations/                     # SQL-миграции
 
 components/
@@ -104,30 +106,26 @@ docs/
 
 ## Ключевые решения и соглашения
 
-### Google Sheets — маппинг заголовков
-`lib/sheets.ts` содержит `HEADER_ALIASES` — словарь русских и английских синонимов заголовков → канонические ключи.
-Функция `mapHeader(header)` используется везде при чтении/записи. При добавлении нового поля:
-1. Добавить ключ в `KNOWN_KEYS`
-2. Добавить тип в `Profile` или `Candidate`
-3. Добавить алиасы в `HEADER_ALIASES`
-4. Заполнить в `buildProfile()` или `rowToRecord()`
-
-### Google Sheets — телефон кандидата теряет «+»
-Google Sheets автоматически трактует ячейку, начинающуюся с `+`/`-`/`=`, как формулу — номер `+998901234567` превращается в `=+998901234567`, и обычное чтение (`FORMATTED_VALUE`) либо теряет `+` (унарный плюс — просто число), либо (если в номере есть пробелы/дефисы, напр. `+375-29-195-79-3`) выдаёт `#ERROR!` или вовсе другое число (Sheets посчитал как арифметику). `recoverPhoneColumn()` (`lib/sheets.ts`) чинит это на чтении: отдельным запросом тянет колонку «Phone» с `valueRenderOption=FORMULA` (сырой текст формулы, не её результат) и снимает ведущий `=` — работает и для строк, вписанных вручную прямо в таблицу, не только через форму сайта. Используется во всех функциях чтения кандидатов (`getProfiles`, `getProfile`, `getCandidates`, `getSheetTable`); при сбое второго запроса тихо откатывается к исходным (возможно, сломанным) значениям, не валит основное чтение.
+### Google Sheets — `lib/sheets.ts` не часть боевого пути
+TASK-DB-4 ✅ перенесла кандидатов в Neon полностью — ничего в приложении больше не читает и не пишет `lib/sheets.ts`. Файл сохранён нетронутым как фундамент отдельной будущей задачи: импорт дополнительных кандидатов из заполненной вручную Google-таблицы в Neon (механизм дедупа/триггера не спланирован). Если/когда эта задача стартует, актуальны те же технические детали, что и раньше:
+- `HEADER_ALIASES` — словарь русских и английских синонимов заголовков → канонические ключи, через `mapHeader(header)`.
+- `recoverPhoneColumn()` — чинит телефон, теряющий `+` из-за того, что Google Sheets трактует ячейку, начинающуюся с `+`/`-`/`=`, как формулу (`FORMATTED_VALUE` либо теряет `+`, либо отдаёт `#ERROR!`); тянет колонку «Phone» отдельным запросом с `valueRenderOption=FORMULA` и снимает ведущий `=`.
 
 ### Vercel Blob — резюме
 - Загрузка: `POST /api/upload` → `put(filename, file, { access: "private" })`
-- В Sheets хранится прокси-URL: `APP_URL/api/resume?url=<encodedBlobUrl>`
+- В `candidates.resumeUrl` (Neon) хранится прокси-URL: `APP_URL/api/resume?url=<encodedBlobUrl>`
 - Прокси: `GET /api/resume` — читает blob server-side с `Authorization: Bearer BLOB_READ_WRITE_TOKEN`; необязательный `?filename=` задаёт имя скачиваемого файла (`Content-Disposition`, кириллица через `filename*=UTF-8''`) — иначе браузер скачивает файл под именем из blob-пути
 - Защита от open redirect: проверка hostname `*.blob.vercel-storage.com`
-- История версий резюме кандидата хранится в Neon (`candidateResumes`, TASK-32) — Sheets по-прежнему держит только URL последней версии
+- История версий резюме кандидата хранится в Neon (`candidateResumes`, TASK-32, FK на `candidates.id` `ON DELETE CASCADE`) — `candidates.resumeUrl` держит только URL последней версии
 
 ### Neon — таблицы
-- `contactRequests` — запросы работодателей на контакт с кандидатами; `employerToken` (FK на `employers.token`, `ON DELETE CASCADE` — запрос без работодателя не имеет смысла) и `streamId` (FK на `streams.id`, `ON DELETE SET NULL`)
+- `candidates` — кандидаты (TASK-DB-4 ✅, было Google Sheets); `stream`/`excludedCompanies`/`excludedIndustries` — нативные Postgres `text[]`; `activeSince` — настоящая `date`-колонка (`mode: "string"`, ISO `YYYY-MM-DD`, nullable = «не задано»), конвертация в/из привычного ru-RU текста («21.07.2026») изолирована на границе `lib/db/candidates.ts` — остальной код работает со строкой как раньше
+- `contactRequests` — запросы работодателей на контакт с кандидатами; `employerToken` (FK на `employers.token`, `ON DELETE CASCADE` — запрос без работодателя не имеет смысла), `streamId` и `candidateId` (оба FK, `ON DELETE SET NULL` — запрос может быть «общим», без привязки к конкретному кандидату или стриму, и переживает удаление кандидата)
 - `streams` — стримы (Industry/Functional), полный CRUD через `/editor/streams`
 - `employers` — работодатели (TASK-DB-3); `token` — тот же UUID, что `employer_token` в SendPulse и `?e=` в публичной ссылке; `streams`/`additionalCountries` — нативные Postgres `text[]`; `companyId` — FK на `companies.id` (`ON DELETE SET NULL`)
 - `companies` — компании работодателей (TASK-36), отдельная сущность — одна компания может иметь несколько работодателей (людей); `name` — `unique()`. Поле «Компания» обязательно при регистрации, с автодополнением по существующим названиям (`findOrCreateCompanyByName()`, case-insensitive через `ilike`); записи без компании получают реальную строку-плейсхолдер «Не определено» (не NULL), управляемую как любая другая компания
-- `candidateResumes` — история версий резюме кандидата (TASK-32); кандидаты сами остаются в Google Sheets
+- `candidateResumes` — история версий резюме кандидата (TASK-32); `candidateId` — FK на `candidates.id`, `ON DELETE CASCADE` (резюме не живёт без кандидата)
+- `mailingListEntries` — строки выпусков рассылки (TASK-DB-5); `candidateId` — FK на `candidates.id`, `ON DELETE SET NULL` (история рассылок переживает удаление кандидата)
 - Миграции: `scripts/migrate.mjs`
 
 ### Telegram-бот (SendPulse)
@@ -167,6 +165,7 @@ Google Sheets автоматически трактует ячейку, начи
 | Contact Requests → Neon (+ FK на employers/streams) | ✅ TASK-DB-2 |
 | Стримы → Neon + CRUD-редактор | ✅ TASK-DB-8 |
 | Работодатели → Neon (было Sheets) | ✅ TASK-DB-3 |
+| Кандидаты → Neon (было Sheets; Sheets остаётся опциональным каналом массового ввода) | ✅ TASK-DB-4 |
 | История версий резюме кандидата (Neon) | ✅ TASK-32 |
 | Отключение/удаление/быстрое добавление кандидата и работодателя в редакторе | ✅ TASK-33 |
 | Приветственное письмо работодателю | ✅ TASK-10 |
