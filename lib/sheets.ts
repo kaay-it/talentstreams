@@ -1,10 +1,10 @@
 import "server-only"
 import { createSign } from "crypto"
 
-// NOT dead code. Candidates fully migrated to Neon (lib/db/candidates.ts, TASK-DB-4) — nothing
-// in the app reads or writes this file anymore. Kept intentionally as the foundation for a
-// future, separate import feature (bulk-entering candidates via a manually-filled Google Sheet,
-// imported into Neon on demand) — see docs/backlog.adoc. Do not delete.
+// NOT dead code. Candidates fully migrated to Neon (lib/db/candidates.ts, TASK-DB-4) — the app's
+// candidate data lives there, not here. This file is read by lib/sheets-import.ts (TASK-39) to
+// pull manually-entered rows from the Google Sheet into Neon on demand; the one write path left
+// (writeCandidateId) exists only to make that import idempotent, see below.
 
 /** Moderation status of a candidate. Empty string = legacy row without this column (treated as "Активный").
  * "Не публиковать" is set automatically once a candidate has been sent in 3 real releases
@@ -34,7 +34,7 @@ export type Profile = {
   countryDesired: string
   summary: string
   excludedCompanies: string[]
-  excludedIndustries: string[]
+  excludedStreams: string[]
   // ── Registration / moderation fields ──────────────────────────────────────
   /** Empty string = legacy row without status column → treated as "Активный". */
   status: CandidateStatus | ""
@@ -216,7 +216,7 @@ async function fetchSheetValues(sheetId: string, range: string, valueRenderOptio
 const KNOWN_KEYS = [
   "id", "name", "title", "email", "phone", "stream",
   "level", "industry", "func", "countryPrimary", "countryDesired", "summary",
-  "excludedCompanies", "excludedIndustries",
+  "excludedCompanies", "excludedStreams",
   "status", "activeSince", "registrationTimestamp", "coverLetter", "resumeUrl",
 ]
 
@@ -227,7 +227,9 @@ const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   title: "title",
   роль: "title",
   email: "email",
+  почта: "email",
   phone: "phone",
+  телефон: "phone",
   stream: "stream",
   стрим: "stream",
   level: "level",
@@ -246,11 +248,12 @@ const HEADER_ALIASES: Record<string, (typeof KNOWN_KEYS)[number]> = {
   саммари: "summary",
   "excluded companies": "excludedCompanies",
   "исключённые компании": "excludedCompanies",
-  "excluded industries": "excludedIndustries",
-  "исключённые отрасли": "excludedIndustries",
+  "excluded streams": "excludedStreams",
+  "исключённые стримы": "excludedStreams",
   "status": "status",
   "статус": "status",
   "active since": "activeSince",
+  "активен с": "activeSince",
   "timestamp": "registrationTimestamp",
   "cover letter": "coverLetter",
   "сопроводительное письмо": "coverLetter",
@@ -355,7 +358,7 @@ function buildProfile(headers: string[], row: string[]): Profile {
     countryDesired: record.countryDesired || "",
     summary: record.summary || "",
     excludedCompanies: parseMultiValue(record.excludedCompanies || ""),
-    excludedIndustries: parseMultiValue(record.excludedIndustries || ""),
+    excludedStreams: parseMultiValue(record.excludedStreams || ""),
     status: (record.status || "") as CandidateStatus | "",
     activeSince: record.activeSince || "",
     registrationTimestamp: record.registrationTimestamp || "",
@@ -492,7 +495,7 @@ export type Candidate = {
   title: string
   summary: string
   excludedCompanies: string[]
-  excludedIndustries: string[]
+  excludedStreams: string[]
 }
 
 /** Append a candidate row to the main profiles sheet (case-insensitive header matching). */
@@ -568,7 +571,7 @@ export async function deleteCandidateRow(rowIndex: number): Promise<void> {
   if (!res.ok) throw new Error(`Failed to delete candidate row (${res.status}): ${await res.text()}`)
 }
 
-/** Returns all candidates from the main sheet for editor moderation (all statuses). */
+/** Returns all candidates from the main sheet, for the Neon import (lib/sheets-import.ts). */
 export async function getCandidates(): Promise<Candidate[]> {
   const { sheetId } = getEnv()
   try {
@@ -588,8 +591,9 @@ export async function getCandidates(): Promise<Candidate[]> {
         phone: r.phone || "",
         resumeUrl: r.resumeUrl || "",
         coverLetter: r.coverLetter || "",
-        // Legacy rows without a Status column default to Активный
-        status: ((r.status || "").trim() || "Активный") as CandidateStatus,
+        // Blank stays blank here — importCandidatesFromSheet() decides what an empty/unknown
+        // status becomes, not this read-only mapping.
+        status: (r.status || "").trim() as CandidateStatus,
         activeSince: r.activeSince || "",
         stream: parseMultiValue(r.stream || ""),
         level: r.level || "",
@@ -598,7 +602,7 @@ export async function getCandidates(): Promise<Candidate[]> {
         title: r.title || "",
         summary: r.summary || "",
         excludedCompanies: parseMultiValue(r.excludedCompanies || ""),
-        excludedIndustries: parseMultiValue(r.excludedIndustries || ""),
+        excludedStreams: parseMultiValue(r.excludedStreams || ""),
       }
     }).filter((c) => c.name || c.email)
   } catch {
@@ -651,6 +655,37 @@ export async function updateCandidateStatus(
   }
 }
 
+/**
+ * Writes the id generated for a freshly-imported row (one that had no `id` cell) back into the
+ * sheet, so a re-run of the import recognizes the row as already imported (id-based dedup) and
+ * does not insert it again.
+ */
+export async function writeCandidateId(rowIndex: number, id: string): Promise<void> {
+  const { email, privateKey, sheetId } = getEnv()
+  const token = await getAccessToken(email, privateKey, WRITE_SCOPE)
+
+  const headerRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("A1:AZ1")}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  const headerData = (await headerRes.json()) as { values?: string[][] }
+  const headers = (headerData.values?.[0] ?? []).map((h) => h.trim().toLowerCase())
+
+  const idColIdx = headers.indexOf("id")
+  if (idColIdx < 0) throw new Error("id column not found in main sheet")
+
+  const range = encodeURIComponent(`${colLetter(idColIdx + 1)}${rowIndex}`)
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueInputOption=USER_ENTERED`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [[id]] }),
+    },
+  )
+  if (!res.ok) throw new Error(`Failed to write candidate id (${res.status}): ${await res.text()}`)
+}
+
 /** Update specific editable fields of a candidate row by rowIndex. */
 export async function updateCandidateFields(
   rowIndex: number,
@@ -668,7 +703,7 @@ export async function updateCandidateFields(
     title: string
     summary: string
     excludedCompanies: string
-    excludedIndustries: string
+    excludedStreams: string
   }>,
 ): Promise<void> {
   const { email, privateKey, sheetId } = getEnv()
