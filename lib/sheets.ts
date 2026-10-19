@@ -741,8 +741,10 @@ export async function updateCandidateFields(
   )
 }
 
-// Registration and moderation columns added to the main profiles sheet
-const CANDIDATE_EXTRA_COLUMNS = ["id", "Status", "Active Since", "Timestamp", "Email", "Phone", "Cover Letter", "Resume URL"]
+// Registration and moderation columns added to the main profiles sheet. No Timestamp — the
+// import always uses the import time as the registration date (see lib/sheets-import.ts), never
+// a value from the sheet, so the column serves nothing and was deleted from the live sheet.
+const CANDIDATE_EXTRA_COLUMNS = ["id", "Status", "Active Since", "Email", "Phone", "Cover Letter", "Resume URL"]
 
 export async function ensureCandidateColumns(): Promise<{ added: string[] }> {
   const { email, privateKey, sheetId } = getEnv()
