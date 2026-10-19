@@ -24,16 +24,21 @@ export const companies = pgTable("companies", {
 
 export const employers = pgTable("employers", {
   token:               text("token").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  name:                text("name").notNull().default(""),
+  // No default on name/email/phone/primaryContact/country — registerEmployer() always validates
+  // and supplies a real value for all five before the row is ever created, so '' is never a
+  // reachable state for them. A default would just let a future bug silently insert an empty
+  // value instead of Postgres loudly rejecting the missing column. telegram/linkedin keep theirs
+  // below — '' there is a real state (employer picked a different contact method).
+  name:                text("name").notNull(),
   companyId:           integer("companyId").references(() => companies.id, { onDelete: "set null" }),
-  email:               text("email").notNull().default("").unique(),
-  phone:               text("phone").notNull().default("").unique(),
-  primaryContact:      text("primaryContact").notNull().default(""),
+  email:               text("email").notNull().unique(),
+  phone:               text("phone").notNull().unique(),
+  primaryContact:      text("primaryContact").notNull(),
   telegram:            text("telegram").notNull().default(""),
   linkedin:            text("linkedin").notNull().default(""),
   streams:             text("streams").array().notNull().default([]),
   status:              text("status").notNull().default("На проверке"),
-  country:             text("country").notNull().default(""),
+  country:             text("country").notNull(),
   additionalCountries: text("additionalCountries").array().notNull().default([]),
   timestamp:           timestamp("timestamp").defaultNow().notNull(),
   // Telegram user id (SendPulse contact's telegram_id, numeric but stored as text — no
