@@ -24,7 +24,7 @@ export default async function SettingsPage({
 
       <div className="space-y-3">
         <h2 className="text-sm font-semibold text-card-foreground">Импорт кандидатов из Google-таблицы</h2>
-        <p className="max-w-md text-sm text-muted-foreground">
+        <p className="max-w-2xl text-sm text-muted-foreground">
           Заполните таблицу вручную (ссылка — в менеджерской инструкции) и нажмите «Проверить» —
           сайт покажет, кого добавит, прежде чем что-либо записать. Уже существующие в базе
           кандидаты (совпадение по id, email или телефону) пропускаются — таблицу можно проверять

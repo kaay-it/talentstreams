@@ -71,7 +71,7 @@ export function ImportCandidatesButton() {
 
   if (state.phase === "preview") {
     return (
-      <div className="max-w-md space-y-3 rounded-xl border bg-card p-4">
+      <div className="w-full space-y-3 rounded-xl border bg-card p-4">
         <RowList title="Готово к импорту" count={state.toImport.length} rows={state.toImport} />
         <RowList title="Пропущено как дубликат" count={state.skippedDuplicate.length} rows={state.skippedDuplicate} />
         <RowList title="Пропущено — невалидные" count={state.skippedInvalid.length} rows={state.skippedInvalid} />
@@ -106,7 +106,7 @@ export function ImportCandidatesButton() {
 
   if (state.phase === "success") {
     return (
-      <div className="max-w-md space-y-3 rounded-xl border bg-card p-4">
+      <div className="w-full space-y-3 rounded-xl border bg-card p-4">
         <p className="flex items-center gap-1.5 text-sm font-medium text-emerald-600">
           <CheckCircle2 className="size-4" />
           Импорт завершён
@@ -125,7 +125,7 @@ export function ImportCandidatesButton() {
   }
 
   return (
-    <div className="max-w-md space-y-3">
+    <div className="w-full space-y-3">
       <p className="flex items-center gap-1.5 text-sm text-destructive">
         <AlertCircle className="size-4" />
         {state.message}
