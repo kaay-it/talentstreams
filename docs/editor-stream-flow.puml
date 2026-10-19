@@ -131,8 +131,22 @@ else Кандидат указал URL резюме
 end
 
 app -> app : id = crypto.randomUUID()\n(генерируется здесь же, синхронно — без внешнего скрипта)
-app -> sh_cands : createCandidateRecord({ id, name, email, phone,\n  coverLetter, status: "На проверке" })\nINSERT INTO candidates (TASK-DB-4 — один INSERT,\nраньше append+update в два шага в Sheets;\nнет колонки resumeUrl — резюме только в candidateResumes ниже)
-sh_cands --> app : OK
+
+alt email/телефон уже заняты другим кандидатом (TASK-38)
+  app -> sh_cands : createCandidateRecord({ id, name, email, phone, ... })\nINSERT INTO candidates — Postgres бросает 23505\n(candidates_email_unique / candidates_phone_unique)
+  sh_cands --> app : ошибка 23505
+  app -> app : registerCandidate() ловит через err.cause.constraint,\nвозвращает { ok: false, error } — не throw\n(Next.js иначе подменит текст в продакшене)
+  app --> candidate : «Кандидат с таким email/телефоном\nуже зарегистрирован»
+else email и телефон свободны
+  app -> sh_cands : createCandidateRecord({ id, name, email, phone,\n  coverLetter, status: "На проверке" })\nINSERT INTO candidates (TASK-DB-4 — один INSERT,\nраньше append+update в два шага в Sheets;\nнет колонки resumeUrl — резюме только в candidateResumes ниже)
+  sh_cands --> app : OK
+end
+
+note right of sh_cands
+  TASK-38: email/phone — UNIQUE + nullable (не NOT NULL
+  DEFAULT '' — два пустых телефона иначе считались бы
+  дублями друг друга, а NULL с NULL Postgres не сравнивает).
+end note
 
 alt резюме передано (файл или ссылка)
   app -> app : kind = isOwnFileUrl(url) ? "file" : "link"\n(hostname/паттерн самого URL — не переключатель формы)
@@ -305,7 +319,7 @@ editor -> app : «+ Добавить кандидата» в панели фил
 editor -> app : createCandidate({ name, title, email, phone, level,\n  activeSince, stream, countryPrimary, countryDesired,\n  summary, resumeUrl, resumeFilename?, coverLetter })
 app -> app : id = crypto.randomUUID()
 app -> sh_cands : createCandidateRecord({ id, name, email, phone,\n  coverLetter, status: "На проверке",\n  title, level, activeSince, stream, countryPrimary,\n  countryDesired, summary })\nINSERT INTO candidates — один шаг (TASK-DB-4,\nраньше append+update в два шага в Sheets; resumeUrl\nсюда не входит — пишется только через addResumeVersion ниже)
-sh_cands --> app : OK
+sh_cands --> app : OK\n(или ошибка 23505 на email/phone — createCandidate()\nловит так же, как registerCandidate() в §2, TASK-38)
 alt резюме передано
   app -> neonResumes : addResumeVersion({ candidateId: id, kind, filename?, url })
   neonResumes --> app : OK
@@ -347,7 +361,7 @@ employer -> app : Заполняет форму\n{ имя, компания (о�
 app -> sh_emp : findOrCreateCompanyByName("Uzum")\nSELECT id FROM companies WHERE name ILIKE 'Uzum' (TASK-36)\n→ найдена или создана, возвращает companyId
 sh_emp --> app : companyId
 app -> sh_emp : createEmployer({ token: uuid, companyId, …, status: "На проверке" })\nINSERT INTO employers (TASK-DB-3 — раньше appendEmployerRow в Sheets)
-sh_emp --> app : OK
+sh_emp --> app : OK\n(или ошибка 23505 — employers_email_unique/employers_phone_unique,\nTASK-38, подстраховка на случай гонки под уже существующей\nпроверкой по активным заявкам выше)
 
 app --> employer : «Заявка отправлена — ожидайте подтверждения»
 

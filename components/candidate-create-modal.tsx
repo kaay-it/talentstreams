@@ -116,7 +116,7 @@ export function CandidateCreateModal({
         finalUrl = resumeUrl.trim()
       }
 
-      await createCandidate({
+      const result = await createCandidate({
         name,
         title,
         email,
@@ -131,7 +131,12 @@ export function CandidateCreateModal({
         resumeFilename: uploadedFilename,
         coverLetter,
       })
-      setStatus("success")
+      if (result.ok) {
+        setStatus("success")
+      } else {
+        setStatus("error")
+        setErrorMsg(result.error)
+      }
     } catch (err) {
       setStatus("error")
       setErrorMsg(err instanceof Error ? err.message : "Не удалось добавить кандидата")

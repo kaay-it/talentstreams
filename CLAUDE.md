@@ -118,10 +118,10 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 - Защита от open redirect: проверка hostname `*.blob.vercel-storage.com`
 
 ### Neon — таблицы
-- `candidates` — кандидаты (TASK-DB-4 ✅, было Google Sheets); `stream`/`excludedCompanies`/`excludedStreams` — нативные Postgres `text[]`; `activeSince` — настоящая `date`-колонка (`mode: "string"`, ISO `YYYY-MM-DD`, nullable = «не задано»), конвертация в/из привычного ru-RU текста («21.07.2026») изолирована на границе `lib/db/candidates.ts` — остальной код работает со строкой как раньше; нет колонки `resumeUrl` — резюме только в `candidateResumes` (см. выше)
+- `candidates` — кандидаты (TASK-DB-4 ✅, было Google Sheets); `stream`/`excludedCompanies`/`excludedStreams` — нативные Postgres `text[]`; `activeSince` — настоящая `date`-колонка (`mode: "string"`, ISO `YYYY-MM-DD`, nullable = «не задано»), конвертация в/из привычного ru-RU текста («21.07.2026») изолирована на границе `lib/db/candidates.ts` — остальной код работает со строкой как раньше; нет колонки `resumeUrl` — резюме только в `candidateResumes` (см. выше). `email`/`phone` — `UNIQUE` + nullable (TASK-38 ✅; `NULL` = не указан — необязательное поле не может быть `NOT NULL DEFAULT ''` и `UNIQUE` одновременно, иначе второй кандидат без телефона не запишется: Postgres два `NULL` дублями не считает, а два `''` считал бы); конвертация `null ↔ ""` на той же границе модуля, внешний тип остаётся `string`
 - `contactRequests` — запросы работодателей на контакт с кандидатами; `employerToken` (FK на `employers.token`, `ON DELETE CASCADE` — запрос без работодателя не имеет смысла), `streamId` и `candidateId` (оба FK, `ON DELETE SET NULL` — запрос может быть «общим», без привязки к конкретному кандидату или стриму, и переживает удаление кандидата)
 - `streams` — стримы (Industry/Functional), полный CRUD через `/editor/streams`
-- `employers` — работодатели (TASK-DB-3); `token` — тот же UUID, что `employer_token` в SendPulse и `?e=` в публичной ссылке; `streams`/`additionalCountries` — нативные Postgres `text[]`; `companyId` — FK на `companies.id` (`ON DELETE SET NULL`)
+- `employers` — работодатели (TASK-DB-3); `token` — тот же UUID, что `employer_token` в SendPulse и `?e=` в публичной ссылке; `streams`/`additionalCountries` — нативные Postgres `text[]`; `companyId` — FK на `companies.id` (`ON DELETE SET NULL`); `email`/`phone` — `UNIQUE` (TASK-38 ✅; всегда заполнены, nullability не трогали — уникальность в коде `registerEmployer()` уже была, `UNIQUE` в БД — подстраховка от гонки)
 - `companies` — компании работодателей (TASK-36), отдельная сущность — одна компания может иметь несколько работодателей (людей); `name` — `unique()`. Поле «Компания» обязательно при регистрации, с автодополнением по существующим названиям (`findOrCreateCompanyByName()`, case-insensitive через `ilike`); записи без компании получают реальную строку-плейсхолдер «Не определено» (не NULL), управляемую как любая другая компания
 - `candidateResumes` — история версий резюме кандидата (TASK-32); `candidateId` — FK на `candidates.id`, `ON DELETE CASCADE` (резюме не живёт без кандидата)
 - `mailingListEntries` — строки выпусков рассылки (TASK-DB-5); `candidateId` — FK на `candidates.id`, `ON DELETE SET NULL` (история рассылок переживает удаление кандидата)
@@ -136,6 +136,8 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 
 ### Server Actions
 Все мутации — в `app/actions.ts`. После мутации, меняющей UI редактора, вызывать `revalidatePath(...)`.
+
+Пользовательские ошибки валидации (не баги) возвращаются как `{ ok: true } | { ok: false, error }`, не через `throw` — Next.js подменяет сообщение любого `throw new Error()` из Server Action на обобщённый текст в продакшен-сборке. Паттерн у `registerEmployer`/`updateEmployer`/`registerCandidate`/`createCandidate`/`updateCandidate` (TASK-38); неожиданные ошибки (не связанные с вводом пользователя) всё ещё пробрасываются как есть.
 
 ### Доступ к редактору
 `/editor/*` защищён: `if (editorSecret && secret !== editorSecret) notFound()`.
@@ -174,6 +176,7 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 | Подключение работодателя к Telegram-боту SendPulse, уведомление о подтверждении | ✅ TASK-35 (часть 1) |
 | Компания работодателя — обязательное поле, отдельная сущность с FK, автодополнение, раздел «Компании» | ✅ TASK-36 |
 | Страны работодателя — страна нахождения обязательна (+ опция «Другая»), пустой список доп. стран трактуется как «Любая» | ✅ TASK-37 |
+| Уникальность email/телефона у кандидатов и работодателей (`UNIQUE` на уровне БД, дружелюбная ошибка) | ✅ TASK-38 |
 
 ## Активные задачи (приоритет)
 

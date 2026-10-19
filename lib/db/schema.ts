@@ -26,8 +26,8 @@ export const employers = pgTable("employers", {
   token:               text("token").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name:                text("name").notNull().default(""),
   companyId:           integer("companyId").references(() => companies.id, { onDelete: "set null" }),
-  email:               text("email").notNull().default(""),
-  phone:               text("phone").notNull().default(""),
+  email:               text("email").notNull().default("").unique(),
+  phone:               text("phone").notNull().default("").unique(),
   primaryContact:      text("primaryContact").notNull().default(""),
   telegram:            text("telegram").notNull().default(""),
   linkedin:            text("linkedin").notNull().default(""),
@@ -66,8 +66,14 @@ export const candidates = pgTable("candidates", {
   id:                    text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name:                  text("name").notNull().default(""),
   title:                 text("title").notNull().default(""),
-  email:                 text("email").notNull().default(""),
-  phone:                 text("phone").notNull().default(""),
+  // Nullable, unique — NULL means "not provided" (legacy rows only; registration always requires
+  // an email). A plain UNIQUE constraint lets any number of rows have NULL (Postgres never treats
+  // two NULLs as equal), which a '' sentinel default could not — the 2nd empty-string row would
+  // collide. "" <-> null coercion happens at this module's boundary; external type stays string.
+  email:                 text("email").unique(),
+  // Same nullable+unique reasoning as email — phone is optional at registration, so many
+  // candidates legitimately have none.
+  phone:                 text("phone").unique(),
   stream:                text("stream").array().notNull().default([]),
   level:                 text("level").notNull().default(""),
   countryPrimary:        text("countryPrimary").notNull().default(""),

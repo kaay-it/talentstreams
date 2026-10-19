@@ -15,6 +15,17 @@ import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
 
+/**
+ * Postgres unique-violation (code 23505) constraint name, if `err` is one — undefined otherwise,
+ * so callers can `if (!constraint) throw err` to let anything unexpected propagate. The neon-http
+ * driver wraps the real pg error in `.cause`; see candidates_email_unique/candidates_phone_unique/
+ * employers_email_unique/employers_phone_unique (lib/db/schema.ts) for the names this returns.
+ */
+function uniqueViolationConstraint(err: unknown): string | undefined {
+  const cause = (err as { cause?: { code?: string; constraint?: string } } | undefined)?.cause
+  return cause?.code === "23505" ? cause.constraint : undefined
+}
+
 async function addToAddressBook(
   email: string,
   bookId: number,
@@ -444,19 +455,30 @@ export type CandidateData = {
   coverLetter: string
 }
 
-export async function registerCandidate(data: CandidateData): Promise<void> {
-  if (!data.name.trim()) throw new Error("Укажите имя")
-  if (!data.email.trim()) throw new Error("Укажите email")
+export type RegisterCandidateResult = { ok: true } | { ok: false; error: string }
+
+/** Returns a result object instead of throwing: Next.js redacts thrown Error messages
+ * from Server Actions in production builds, same reasoning as registerEmployer() below. */
+export async function registerCandidate(data: CandidateData): Promise<RegisterCandidateResult> {
+  if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
+  if (!data.email.trim()) return { ok: false, error: "Укажите email" }
 
   const id = crypto.randomUUID()
-  await createCandidateRecord({
-    id,
-    name: data.name,
-    email: data.email,
-    phone: data.phone,
-    coverLetter: data.coverLetter,
-    status: "На проверке",
-  })
+  try {
+    await createCandidateRecord({
+      id,
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      coverLetter: data.coverLetter,
+      status: "На проверке",
+    })
+  } catch (err) {
+    const constraint = uniqueViolationConstraint(err)
+    if (constraint === "candidates_email_unique") return { ok: false, error: "Кандидат с таким email уже зарегистрирован" }
+    if (constraint === "candidates_phone_unique") return { ok: false, error: "Кандидат с таким номером телефона уже зарегистрирован" }
+    throw err
+  }
 
   if (data.resumeUrl) {
     await addResumeVersion({
@@ -466,6 +488,7 @@ export async function registerCandidate(data: CandidateData): Promise<void> {
       url: data.resumeUrl,
     })
   }
+  return { ok: true }
 }
 
 /** Editor-only "quick add" — unlike registerCandidate(), writes the full field set in one go
@@ -487,26 +510,33 @@ export type NewCandidateData = {
   coverLetter: string
 }
 
-export async function createCandidate(data: NewCandidateData): Promise<void> {
-  if (!data.name.trim()) throw new Error("Укажите имя")
-  if (!data.email.trim()) throw new Error("Укажите email")
+export async function createCandidate(data: NewCandidateData): Promise<RegisterCandidateResult> {
+  if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
+  if (!data.email.trim()) return { ok: false, error: "Укажите email" }
 
   const id = crypto.randomUUID()
-  await createCandidateRecord({
-    id,
-    name: data.name,
-    email: data.email,
-    phone: data.phone,
-    coverLetter: data.coverLetter,
-    status: "На проверке",
-    title: data.title,
-    level: data.level,
-    activeSince: data.activeSince,
-    stream: data.stream,
-    countryPrimary: data.countryPrimary,
-    countryDesired: data.countryDesired,
-    summary: data.summary,
-  })
+  try {
+    await createCandidateRecord({
+      id,
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      coverLetter: data.coverLetter,
+      status: "На проверке",
+      title: data.title,
+      level: data.level,
+      activeSince: data.activeSince,
+      stream: data.stream,
+      countryPrimary: data.countryPrimary,
+      countryDesired: data.countryDesired,
+      summary: data.summary,
+    })
+  } catch (err) {
+    const constraint = uniqueViolationConstraint(err)
+    if (constraint === "candidates_email_unique") return { ok: false, error: "Кандидат с таким email уже зарегистрирован" }
+    if (constraint === "candidates_phone_unique") return { ok: false, error: "Кандидат с таким номером телефона уже зарегистрирован" }
+    throw err
+  }
 
   if (data.resumeUrl) {
     await addResumeVersion({
@@ -518,6 +548,7 @@ export async function createCandidate(data: NewCandidateData): Promise<void> {
   }
 
   revalidatePath("/editor/candidates")
+  return { ok: true }
 }
 
 export async function updateCandidate(
@@ -541,24 +572,31 @@ export async function updateCandidate(
     excludedCompanies: string[]
     excludedStreams: string[]
   },
-): Promise<void> {
-  if (!data.name.trim()) throw new Error("Укажите имя")
-  if (!data.email.trim()) throw new Error("Укажите email")
-  await updateCandidateFields(id, {
-    name: data.name,
-    email: data.email,
-    phone: data.phone,
-    coverLetter: data.coverLetter,
-    stream: data.stream,
-    level: data.level,
-    countryPrimary: data.countryPrimary,
-    countryDesired: data.countryDesired,
-    activeSince: data.activeSince,
-    title: data.title,
-    summary: data.summary,
-    excludedCompanies: data.excludedCompanies,
-    excludedStreams: data.excludedStreams,
-  })
+): Promise<RegisterCandidateResult> {
+  if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
+  if (!data.email.trim()) return { ok: false, error: "Укажите email" }
+  try {
+    await updateCandidateFields(id, {
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      coverLetter: data.coverLetter,
+      stream: data.stream,
+      level: data.level,
+      countryPrimary: data.countryPrimary,
+      countryDesired: data.countryDesired,
+      activeSince: data.activeSince,
+      title: data.title,
+      summary: data.summary,
+      excludedCompanies: data.excludedCompanies,
+      excludedStreams: data.excludedStreams,
+    })
+  } catch (err) {
+    const constraint = uniqueViolationConstraint(err)
+    if (constraint === "candidates_email_unique") return { ok: false, error: "Кандидат с таким email уже зарегистрирован" }
+    if (constraint === "candidates_phone_unique") return { ok: false, error: "Кандидат с таким номером телефона уже зарегистрирован" }
+    throw err
+  }
 
   if (data.resumeVersionChanged && data.resumeUrl) {
     await addResumeVersion({
@@ -570,6 +608,7 @@ export async function updateCandidate(
   }
 
   revalidatePath("/editor/candidates")
+  return { ok: true }
 }
 
 /** Resume version history for a candidate (editor only — keyed by candidates.id). */
@@ -675,20 +714,29 @@ export async function registerEmployer(data: EmployerData): Promise<RegisterEmpl
 
   const token = crypto.randomUUID()
   const companyId = await findOrCreateCompanyByName(data.company)
-  await createEmployer({
-    token,
-    name: data.name,
-    companyId,
-    email: data.email,
-    phone: data.phone,
-    primaryContact: data.primaryContact,
-    telegram: data.telegram || "",
-    linkedin: data.linkedin || "",
-    streams: data.streams,
-    status: "На проверке",
-    country: data.country,
-    additionalCountries: data.additionalCountries.length ? data.additionalCountries : ["Любая"],
-  })
+  try {
+    await createEmployer({
+      token,
+      name: data.name,
+      companyId,
+      email: data.email,
+      phone: data.phone,
+      primaryContact: data.primaryContact,
+      telegram: data.telegram || "",
+      linkedin: data.linkedin || "",
+      streams: data.streams,
+      status: "На проверке",
+      country: data.country,
+      additionalCountries: data.additionalCountries.length ? data.additionalCountries : ["Любая"],
+    })
+  } catch (err) {
+    // Safety net against a race the pre-check above (active-only, normalized) can miss — e.g.
+    // two concurrent submissions, or an exact-raw-value match among non-active employers.
+    const constraint = uniqueViolationConstraint(err)
+    if (constraint === "employers_email_unique") return { ok: false, error: "Работодатель с таким email уже зарегистрирован" }
+    if (constraint === "employers_phone_unique") return { ok: false, error: "Работодатель с таким номером телефона уже зарегистрирован" }
+    throw err
+  }
   revalidatePath("/editor/employers")
   return { ok: true, telegramUrl: telegramConnectUrl(token) }
 }
@@ -724,18 +772,25 @@ export async function updateEmployer(
   const existing = await getEmployerByToken(token)
   const companyId = await findOrCreateCompanyByName(data.company)
 
-  await updateEmployerFields(token, {
-    name: data.name,
-    companyId,
-    email: data.email,
-    phone: data.phone,
-    primaryContact: data.primaryContact,
-    telegram: data.telegram,
-    linkedin: data.linkedin,
-    streams: data.streams,
-    country: data.country,
-    additionalCountries: data.additionalCountries.length ? data.additionalCountries : ["Любая"],
-  })
+  try {
+    await updateEmployerFields(token, {
+      name: data.name,
+      companyId,
+      email: data.email,
+      phone: data.phone,
+      primaryContact: data.primaryContact,
+      telegram: data.telegram,
+      linkedin: data.linkedin,
+      streams: data.streams,
+      country: data.country,
+      additionalCountries: data.additionalCountries.length ? data.additionalCountries : ["Любая"],
+    })
+  } catch (err) {
+    const constraint = uniqueViolationConstraint(err)
+    if (constraint === "employers_email_unique") return { ok: false, error: "Работодатель с таким email уже зарегистрирован" }
+    if (constraint === "employers_phone_unique") return { ok: false, error: "Работодатель с таким номером телефона уже зарегистрирован" }
+    throw err
+  }
 
   if (existing?.status === "Подтверждён") {
     await syncEmployerToSendPulse(
