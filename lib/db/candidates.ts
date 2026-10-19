@@ -107,6 +107,8 @@ export async function createCandidateRecord(data: {
   countryPrimary?: string
   countryDesired?: string
   summary?: string
+  excludedCompanies?: string[]
+  excludedStreams?: string[]
 }): Promise<void> {
   await db.insert(candidates).values({
     id: data.id,
@@ -122,6 +124,8 @@ export async function createCandidateRecord(data: {
     countryPrimary: data.countryPrimary ?? "",
     countryDesired: data.countryDesired ?? "",
     summary: data.summary ?? "",
+    excludedCompanies: data.excludedCompanies ?? [],
+    excludedStreams: data.excludedStreams ?? [],
   })
 }
 

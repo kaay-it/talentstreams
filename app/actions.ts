@@ -12,6 +12,8 @@ import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields,
 import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, getCampaigns, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
+import { previewCandidatesImport as previewImport, importCandidatesFromSheet, type ImportPreview, type ImportResult } from "@/lib/sheets-import"
+export type { ImportPreview, ImportResult, ImportRow, ImportSkipped } from "@/lib/sheets-import"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
 
@@ -672,6 +674,21 @@ export async function deleteCandidate(id: string): Promise<void> {
   )
   await deleteCandidateRecord(id)
   revalidatePath("/editor/candidates")
+}
+
+/** Read-only dry run of importCandidatesFromSheets() — reports what would happen, writes nothing. */
+export async function previewCandidatesImport(): Promise<ImportPreview> {
+  return previewImport()
+}
+
+/** Actually imports new candidates from the Google Sheet (lib/sheets-import.ts). */
+export async function importCandidatesFromSheets(): Promise<ImportResult> {
+  const result = await importCandidatesFromSheet()
+  if (result.ok && result.imported.length > 0) {
+    revalidatePath("/editor/candidates")
+    revalidatePath("/editor")
+  }
+  return result
 }
 
 /** Autocomplete source for the "Компания" field in registration/edit forms. */
