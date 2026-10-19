@@ -120,6 +120,20 @@
       "when": 1792346745964,
       "tag": "0016_rename-excluded-industries-to-streams",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792426996556,
+      "tag": "0017_fluffy_alex_wilder",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792428160287,
+      "tag": "0018_unknown_epoch",
+      "breakpoints": true
     }
   ]
 }

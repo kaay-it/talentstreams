@@ -48,8 +48,8 @@ function toCandidate(row: typeof candidates.$inferSelect): Candidate {
     id: row.id,
     name: row.name,
     title: row.title,
-    email: row.email,
-    phone: row.phone,
+    email: row.email ?? "",
+    phone: row.phone ?? "",
     stream: row.stream,
     level: row.level,
     countryPrimary: row.countryPrimary,
@@ -111,8 +111,8 @@ export async function createCandidateRecord(data: {
   await db.insert(candidates).values({
     id: data.id,
     name: data.name,
-    email: data.email,
-    phone: data.phone,
+    email: data.email || null,
+    phone: data.phone || null,
     coverLetter: data.coverLetter,
     status: data.status,
     title: data.title ?? "",
@@ -145,12 +145,14 @@ export async function updateCandidateFields(
     excludedStreams: string[]
   }>,
 ): Promise<void> {
-  const { activeSince, ...rest } = data
+  const { activeSince, email, phone, ...rest } = data
   await db
     .update(candidates)
     .set({
       ...rest,
       ...(activeSince !== undefined && { activeSince: ruToIso(activeSince) }),
+      ...(email !== undefined && { email: email || null }),
+      ...(phone !== undefined && { phone: phone || null }),
     })
     .where(eq(candidates.id, id))
 }

@@ -390,7 +390,7 @@ export function CandidateEditModal({
       }
 
       const resumeVersionChanged = Boolean(finalUrl && finalUrl !== currentResumeUrl)
-      await updateCandidate(candidate.id, {
+      const result = await updateCandidate(candidate.id, {
         candidateId: candidate.id,
         name,
         email,
@@ -409,7 +409,12 @@ export function CandidateEditModal({
         excludedCompanies,
         excludedStreams,
       })
-      setStatus("success")
+      if (result.ok) {
+        setStatus("success")
+      } else {
+        setStatus("error")
+        setErrorMsg(result.error)
+      }
     } catch (err) {
       setStatus("error")
       setErrorMsg(err instanceof Error ? err.message : "Не удалось сохранить изменения")

@@ -99,7 +99,7 @@ export function CandidateRegistrationModal() {
         uploadedUrl = json.url
         uploadedFilename = resumeFile.name
       }
-      await registerCandidate({
+      const result = await registerCandidate({
         name,
         email,
         phone,
@@ -107,7 +107,12 @@ export function CandidateRegistrationModal() {
         resumeFilename: uploadedFilename,
         coverLetter,
       })
-      setStatus("success")
+      if (result.ok) {
+        setStatus("success")
+      } else {
+        setStatus("error")
+        setErrorMsg(result.error)
+      }
     } catch (err) {
       setStatus("error")
       setErrorMsg(err instanceof Error ? err.message : t.errors.submitFailed)
