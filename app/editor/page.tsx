@@ -3,12 +3,13 @@ import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle, ExternalLink } 
 import { getActiveCandidates, getEligibleCandidatesForRelease, getPausedCandidatesForRelease } from "@/lib/db/candidates"
 import { getMailingLists, campaignNameFor } from "@/lib/db/mailing-lists"
 import { getStreams } from "@/lib/db/streams"
-import { getEmployers, confirmedEmployersForStream, type Employer } from "@/lib/db/employers"
+import { getEmployers, confirmedEmployersForStream, type Employer, type EmployerPickOption } from "@/lib/db/employers"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
 import { ReleaseDeleteButton } from "@/components/release-delete-button"
+import { ReleaseDetailModal } from "@/components/release-detail-modal"
 import { CampaignHistory } from "@/components/campaign-history"
-import { ReleaseCreateModal, type EligibleCandidate, type EmployerPickOption } from "@/components/release-create-modal"
+import { ReleaseCreateModal, type EligibleCandidate } from "@/components/release-create-modal"
 
 export const dynamic = "force-dynamic"
 
@@ -166,7 +167,7 @@ export default async function ReleasesPage({
                       )}
                       {list.recipientLabel && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/20 dark:text-violet-400">
-                          Узкая рассылка: {list.recipientLabel}
+                          Ограниченная рассылка: {list.recipientLabel}
                         </span>
                       )}
                       <a
@@ -182,6 +183,17 @@ export default async function ReleasesPage({
                   </div>
 
                   <div className="flex items-center gap-1">
+                    <ReleaseDetailModal
+                      listId={list.listId}
+                      stream={list.stream}
+                      date={list.date}
+                      candidateIds={list.candidateIds}
+                      candidateNames={candidateNames}
+                      eligible={eligibleByStream[list.stream] ?? []}
+                      paused={pausedByStream[list.stream] ?? []}
+                      employersForStream={employersByStream[list.stream] ?? []}
+                      readOnly={alreadySent}
+                    />
                     <PublishButton listId={list.listId} alreadySent={alreadySent} bookEmpty={bookEmpty} />
                     {!alreadySent && <ReleaseDeleteButton listId={list.listId} />}
                   </div>
