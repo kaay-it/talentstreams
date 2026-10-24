@@ -1,14 +1,14 @@
 import { notFound } from "next/navigation"
 import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle, ExternalLink } from "lucide-react"
 import { getActiveCandidates, getEligibleCandidatesForRelease, getPausedCandidatesForRelease } from "@/lib/db/candidates"
-import { getMailingLists } from "@/lib/db/mailing-lists"
+import { getMailingLists, campaignNameFor } from "@/lib/db/mailing-lists"
 import { getStreams } from "@/lib/db/streams"
-import { getEmployers, confirmedEmployersForStream } from "@/lib/db/employers"
+import { getEmployers, confirmedEmployersForStream, type Employer } from "@/lib/db/employers"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
 import { ReleaseDeleteButton } from "@/components/release-delete-button"
 import { CampaignHistory } from "@/components/campaign-history"
-import { ReleaseCreateModal, type EligibleCandidate } from "@/components/release-create-modal"
+import { ReleaseCreateModal, type EligibleCandidate, type EmployerPickOption } from "@/components/release-create-modal"
 
 export const dynamic = "force-dynamic"
 
@@ -56,8 +56,17 @@ export default async function ReleasesPage({
       })),
     ]),
   )
+  const confirmedByStream: Record<string, Employer[]> = Object.fromEntries(
+    streams.map((name) => [name, confirmedEmployersForStream(allEmployers, { name })]),
+  )
   const subscriberCountByStream: Record<string, number> = Object.fromEntries(
-    streams.map((name) => [name, confirmedEmployersForStream(allEmployers, { name }).length]),
+    streams.map((name) => [name, confirmedByStream[name].length]),
+  )
+  const employersByStream: Record<string, EmployerPickOption[]> = Object.fromEntries(
+    streams.map((name) => [
+      name,
+      confirmedByStream[name].map((e) => ({ token: e.token, name: e.name, email: e.email, company: e.company })),
+    ]),
   )
 
   const campaignsByTitle = new Map<string, Campaign[]>()
@@ -93,6 +102,7 @@ export default async function ReleasesPage({
             eligibleByStream={eligibleByStream}
             pausedByStream={pausedByStream}
             subscriberCountByStream={subscriberCountByStream}
+            employersByStream={employersByStream}
             editorSecret={editorSecret}
           />
         </div>
@@ -113,9 +123,12 @@ export default async function ReleasesPage({
       ) : (
         <div className="space-y-3">
           {lists.map((list) => {
-            const campaignTitle = `${list.stream} — ${list.date}`
+            const campaignTitle = campaignNameFor(list.stream, list.date, list.recipientLabel)
             const matchedCampaigns = campaignsByTitle.get(campaignTitle) ?? []
-            const alreadySent = matchedCampaigns.length > 0
+            // The real source of truth — not matchedCampaigns.length, which is a best-effort
+            // display lookup by name and could miss a real send (e.g. SendPulse campaign
+            // renamed/deleted out of band).
+            const alreadySent = list.sentCampaignId !== null
             const bookEmpty = (streamBookCounts.get(list.stream) ?? 0) === 0
             const candidateNames = list.candidateIds
               .map((id) => candidateById.get(id)?.name)
@@ -149,6 +162,11 @@ export default async function ReleasesPage({
                         <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
                           <CheckCircle2 className="size-3" />
                           Отправлено
+                        </span>
+                      )}
+                      {list.recipientLabel && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/20 dark:text-violet-400">
+                          Узкая рассылка: {list.recipientLabel}
                         </span>
                       )}
                       <a

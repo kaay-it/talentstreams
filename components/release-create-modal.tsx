@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo, useRef, useEffect } from "react"
 import { createPortal } from "react-dom"
 import { X, Check, AlertCircle, AlertTriangle, Plus, Users, ExternalLink, ChevronDown, ChevronUp } from "lucide-react"
 import { createMailingList } from "@/app/actions"
@@ -13,6 +13,8 @@ export type EligibleCandidate = {
   /** ru-RU text ("21.07.2026") or "" if never set (always eligible). */
   activeSince: string
 }
+
+export type EmployerPickOption = { token: string; name: string; email: string; company: string }
 
 const inputCls =
   "w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -96,17 +98,90 @@ function subscriberPlural(n: number): string {
   return "подписчиков"
 }
 
+function EmployerPickerRow({
+  employer,
+  checked,
+  onToggle,
+}: {
+  employer: EmployerPickOption
+  checked: boolean
+  onToggle: () => void
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2 pl-9 text-sm hover:bg-muted/40">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onToggle}
+        className="size-4 shrink-0 accent-primary"
+      />
+      <span className="min-w-0 flex-1 truncate">
+        <span className="font-medium text-foreground">{employer.name}</span>
+        <span className="text-muted-foreground"> · {employer.email}</span>
+      </span>
+    </label>
+  )
+}
+
+function CompanyGroup({
+  company,
+  employers,
+  selectedTokens,
+  onToggleEmployer,
+  onToggleCompany,
+}: {
+  company: string
+  employers: EmployerPickOption[]
+  selectedTokens: Set<string>
+  onToggleEmployer: (token: string) => void
+  onToggleCompany: (tokens: string[], checkAll: boolean) => void
+}) {
+  const tokens = employers.map((e) => e.token)
+  const selectedCount = tokens.filter((t) => selectedTokens.has(t)).length
+  const allSelected = selectedCount === tokens.length
+  const checkboxRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (checkboxRef.current) checkboxRef.current.indeterminate = selectedCount > 0 && !allSelected
+  }, [selectedCount, allSelected])
+
+  return (
+    <>
+      <div className="flex items-center gap-2.5 bg-muted/30 px-3 py-1.5 text-sm">
+        <input
+          ref={checkboxRef}
+          type="checkbox"
+          checked={allSelected}
+          onChange={() => onToggleCompany(tokens, !allSelected)}
+          className="size-4 shrink-0 accent-primary"
+        />
+        <span className="font-semibold text-foreground">{company}</span>
+        <span className="text-xs text-muted-foreground">({selectedCount}/{tokens.length})</span>
+      </div>
+      {employers.map((e) => (
+        <EmployerPickerRow
+          key={e.token}
+          employer={e}
+          checked={selectedTokens.has(e.token)}
+          onToggle={() => onToggleEmployer(e.token)}
+        />
+      ))}
+    </>
+  )
+}
+
 export function ReleaseCreateModal({
   streams,
   eligibleByStream,
   pausedByStream,
   subscriberCountByStream,
+  employersByStream,
   editorSecret,
 }: {
   streams: string[]
   eligibleByStream: Record<string, EligibleCandidate[]>
   pausedByStream: Record<string, EligibleCandidate[]>
   subscriberCountByStream: Record<string, number>
+  employersByStream: Record<string, EmployerPickOption[]>
   editorSecret?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -118,15 +193,29 @@ export function ReleaseCreateModal({
   const [date, setDate] = useState(todayISO())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [pausedOpen, setPausedOpen] = useState(false)
+  const [recipientMode, setRecipientMode] = useState<"all" | "selected">("all")
+  const [selectedEmployerTokens, setSelectedEmployerTokens] = useState<Set<string>>(new Set())
 
   const eligible = stream ? eligibleByStream[stream] ?? [] : []
   const paused = stream ? pausedByStream[stream] ?? [] : []
   const subscriberCount = stream ? subscriberCountByStream[stream] ?? 0 : 0
+  const employersForStream = stream ? employersByStream[stream] ?? [] : []
+  const employerGroups = useMemo(() => {
+    const byCompany = new Map<string, EmployerPickOption[]>()
+    for (const e of employersForStream) {
+      const key = e.company || "Без компании"
+      if (!byCompany.has(key)) byCompany.set(key, [])
+      byCompany.get(key)!.push(e)
+    }
+    return [...byCompany.entries()].sort((a, b) => a[0].localeCompare(b[0], "ru"))
+  }, [employersForStream])
 
   function handleStreamChange(next: string) {
     setStream(next)
     setSelectedIds(new Set((eligibleByStream[next] ?? []).map((c) => c.id)))
     setPausedOpen(false)
+    setRecipientMode("all")
+    setSelectedEmployerTokens(new Set())
   }
 
   function toggleCandidate(id: string) {
@@ -134,6 +223,26 @@ export function ReleaseCreateModal({
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
+      return next
+    })
+  }
+
+  function toggleEmployer(token: string) {
+    setSelectedEmployerTokens((prev) => {
+      const next = new Set(prev)
+      if (next.has(token)) next.delete(token)
+      else next.add(token)
+      return next
+    })
+  }
+
+  function toggleCompany(tokens: string[], checkAll: boolean) {
+    setSelectedEmployerTokens((prev) => {
+      const next = new Set(prev)
+      for (const t of tokens) {
+        if (checkAll) next.add(t)
+        else next.delete(t)
+      }
       return next
     })
   }
@@ -147,6 +256,8 @@ export function ReleaseCreateModal({
     setDate(todayISO())
     setSelectedIds(new Set())
     setPausedOpen(false)
+    setRecipientMode("all")
+    setSelectedEmployerTokens(new Set())
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -158,6 +269,7 @@ export function ReleaseCreateModal({
         stream,
         date,
         candidateIds: [...selectedIds],
+        employerTokens: recipientMode === "selected" ? [...selectedEmployerTokens] : [],
       })
       setCreatedListId(result.listId)
       setStatus("success")
@@ -167,7 +279,10 @@ export function ReleaseCreateModal({
     }
   }
 
-  const canSubmit = Boolean(stream.trim() && date.trim() && selectedIds.size > 0)
+  const canSubmit = Boolean(
+    stream.trim() && date.trim() && selectedIds.size > 0 &&
+    (recipientMode === "all" || selectedEmployerTokens.size > 0),
+  )
 
   return (
     <>
@@ -256,6 +371,51 @@ export function ReleaseCreateModal({
                         />
                       </Field>
                     </div>
+
+                    {stream && (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setRecipientMode("all")}
+                          className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "all" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
+                        >
+                          Все подписчики стрима
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRecipientMode("selected")}
+                          className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "selected" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
+                        >
+                          Выбранные получатели
+                        </button>
+                      </div>
+                    )}
+
+                    {stream && recipientMode === "selected" && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Получатели выпуска ({selectedEmployerTokens.size} выбрано)
+                        </p>
+                        {employerGroups.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            Нет подтверждённых подписчиков стрима «{stream}», которых можно выбрать.
+                          </p>
+                        ) : (
+                          <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
+                            {employerGroups.map(([company, employers]) => (
+                              <CompanyGroup
+                                key={company}
+                                company={company}
+                                employers={employers}
+                                selectedTokens={selectedEmployerTokens}
+                                onToggleEmployer={toggleEmployer}
+                                onToggleCompany={toggleCompany}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {stream && (
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
