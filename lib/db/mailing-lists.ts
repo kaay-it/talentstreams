@@ -281,3 +281,28 @@ export async function getMailingListRecipientTokens(listId: string): Promise<str
     .where(eq(mailingListRecipients.listId, listId))
   return rows.map((r) => r.employerToken)
 }
+
+/** Fully replaces a release's candidate list — deletes all current mailingListEntries rows for
+ * this listId and inserts the new set. Used to edit an unsent release (publishMailingList()/
+ * deleteMailingList() never touch the entry set). */
+export async function replaceMailingListEntries(listId: string, candidateIds: string[]): Promise<void> {
+  if (!candidateIds.length) throw new Error("Выберите хотя бы одного кандидата")
+  await db.delete(mailingListEntries).where(eq(mailingListEntries.listId, listId))
+  await db.insert(mailingListEntries).values(candidateIds.map((candidateId) => ({ listId, candidateId })))
+}
+
+/** Fully replaces a release's recipient override and keeps the header's recipientLabel in sync
+ * with it (the two must always agree) — switching back to "whole stream" also goes through this
+ * (employerTokens: [], recipientLabel: "" clears the old rows and the label together). */
+export async function replaceMailingListRecipients(
+  listId: string,
+  employerTokens: string[],
+  recipientLabel: string,
+): Promise<void> {
+  await db.delete(mailingListRecipients).where(eq(mailingListRecipients.listId, listId))
+  const tokens = [...new Set(employerTokens)]
+  if (tokens.length) {
+    await db.insert(mailingListRecipients).values(tokens.map((employerToken) => ({ listId, employerToken })))
+  }
+  await db.update(mailingLists).set({ recipientLabel }).where(eq(mailingLists.id, listId))
+}
