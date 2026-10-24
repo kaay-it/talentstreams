@@ -236,6 +236,20 @@ export function ReleaseCreateModal({
     })
   }
 
+  // Only ever touches eligible (by-date) candidates — paused ones stay manual-only,
+  // so a bulk select/deselect never silently adds or removes a candidate the editor
+  // chose to include/exclude by hand despite the pause.
+  function selectAllEligible() {
+    setSelectedIds((prev) => new Set([...prev, ...eligible.map((c) => c.id)]))
+  }
+
+  function deselectAllEligible() {
+    setSelectedIds((prev) => {
+      const eligibleIds = new Set(eligible.map((c) => c.id))
+      return new Set([...prev].filter((id) => !eligibleIds.has(id)))
+    })
+  }
+
   function toggleEmployer(token: string) {
     setSelectedEmployerTokens((prev) => {
       const next = new Set(prev)
@@ -385,17 +399,17 @@ export function ReleaseCreateModal({
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => setRecipientMode("all")}
-                          className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "all" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
-                        >
-                          Все подписчики стрима
-                        </button>
-                        <button
-                          type="button"
                           onClick={() => setRecipientMode("selected")}
                           className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "selected" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
                         >
                           Выбранные получатели
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRecipientMode("all")}
+                          className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "all" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
+                        >
+                          Все подписчики стрима
                         </button>
                       </div>
                     )}
@@ -459,9 +473,19 @@ export function ReleaseCreateModal({
                           </p>
                         ) : (
                           <div className="space-y-1.5">
-                            <p className="text-xs font-medium text-muted-foreground">
-                              Кандидаты в выпуске ({selectedIds.size} из {eligible.length})
-                            </p>
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Кандидаты в выпуске ({selectedIds.size} из {eligible.length})
+                              </p>
+                              <div className="flex gap-2 text-xs">
+                                <button type="button" onClick={selectAllEligible} className="text-primary hover:underline">
+                                  Выбрать всех
+                                </button>
+                                <button type="button" onClick={deselectAllEligible} className="text-muted-foreground hover:underline">
+                                  Снять выделение
+                                </button>
+                              </div>
+                            </div>
                             <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
                               {eligible.map((c) => (
                                 <CandidateRow
