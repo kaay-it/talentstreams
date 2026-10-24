@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect } from "react"
 import { createPortal } from "react-dom"
 import { X, Check, AlertCircle, AlertTriangle, Plus, Users, ExternalLink, ChevronDown, ChevronUp } from "lucide-react"
 import { createMailingList } from "@/app/actions"
+import type { EmployerPickOption } from "@/lib/db/employers"
 
 export type EligibleCandidate = {
   id: string
@@ -13,8 +14,6 @@ export type EligibleCandidate = {
   /** ru-RU text ("21.07.2026") or "" if never set (always eligible). */
   activeSince: string
 }
-
-export type EmployerPickOption = { token: string; name: string; email: string; company: string }
 
 const inputCls =
   "w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -57,21 +56,24 @@ function candidatePlural(n: number): string {
   return "кандидатов"
 }
 
-function CandidateRow({
+export function CandidateRow({
   candidate,
   checked,
   onToggle,
+  readOnly,
 }: {
   candidate: EligibleCandidate
   checked: boolean
   onToggle: () => void
+  readOnly?: boolean
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted/40">
+    <label className={`flex items-center gap-2.5 px-3 py-2 text-sm ${readOnly ? "" : "cursor-pointer hover:bg-muted/40"}`}>
       <input
         type="checkbox"
         checked={checked}
-        onChange={onToggle}
+        onChange={readOnly ? undefined : onToggle}
+        disabled={readOnly}
         className="size-4 shrink-0 accent-primary"
       />
       <span className="min-w-0 flex-1 truncate">
@@ -98,21 +100,24 @@ function subscriberPlural(n: number): string {
   return "подписчиков"
 }
 
-function EmployerPickerRow({
+export function EmployerPickerRow({
   employer,
   checked,
   onToggle,
+  readOnly,
 }: {
   employer: EmployerPickOption
   checked: boolean
   onToggle: () => void
+  readOnly?: boolean
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2 pl-9 text-sm hover:bg-muted/40">
+    <label className={`flex items-center gap-2.5 px-3 py-2 pl-9 text-sm ${readOnly ? "" : "cursor-pointer hover:bg-muted/40"}`}>
       <input
         type="checkbox"
         checked={checked}
-        onChange={onToggle}
+        onChange={readOnly ? undefined : onToggle}
+        disabled={readOnly}
         className="size-4 shrink-0 accent-primary"
       />
       <span className="min-w-0 flex-1 truncate">
@@ -123,18 +128,20 @@ function EmployerPickerRow({
   )
 }
 
-function CompanyGroup({
+export function CompanyGroup({
   company,
   employers,
   selectedTokens,
   onToggleEmployer,
   onToggleCompany,
+  readOnly,
 }: {
   company: string
   employers: EmployerPickOption[]
   selectedTokens: Set<string>
   onToggleEmployer: (token: string) => void
   onToggleCompany: (tokens: string[], checkAll: boolean) => void
+  readOnly?: boolean
 }) {
   const tokens = employers.map((e) => e.token)
   const selectedCount = tokens.filter((t) => selectedTokens.has(t)).length
@@ -151,7 +158,8 @@ function CompanyGroup({
           ref={checkboxRef}
           type="checkbox"
           checked={allSelected}
-          onChange={() => onToggleCompany(tokens, !allSelected)}
+          onChange={readOnly ? undefined : () => onToggleCompany(tokens, !allSelected)}
+          disabled={readOnly}
           className="size-4 shrink-0 accent-primary"
         />
         <span className="font-semibold text-foreground">{company}</span>
@@ -163,6 +171,7 @@ function CompanyGroup({
           employer={e}
           checked={selectedTokens.has(e.token)}
           onToggle={() => onToggleEmployer(e.token)}
+          readOnly={readOnly}
         />
       ))}
     </>
@@ -193,7 +202,7 @@ export function ReleaseCreateModal({
   const [date, setDate] = useState(todayISO())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [pausedOpen, setPausedOpen] = useState(false)
-  const [recipientMode, setRecipientMode] = useState<"all" | "selected">("all")
+  const [recipientMode, setRecipientMode] = useState<"all" | "selected">("selected")
   const [selectedEmployerTokens, setSelectedEmployerTokens] = useState<Set<string>>(new Set())
 
   const eligible = stream ? eligibleByStream[stream] ?? [] : []
@@ -214,7 +223,7 @@ export function ReleaseCreateModal({
     setStream(next)
     setSelectedIds(new Set((eligibleByStream[next] ?? []).map((c) => c.id)))
     setPausedOpen(false)
-    setRecipientMode("all")
+    setRecipientMode("selected")
     setSelectedEmployerTokens(new Set())
   }
 
@@ -256,7 +265,7 @@ export function ReleaseCreateModal({
     setDate(todayISO())
     setSelectedIds(new Set())
     setPausedOpen(false)
-    setRecipientMode("all")
+    setRecipientMode("selected")
     setSelectedEmployerTokens(new Set())
   }
 

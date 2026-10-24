@@ -71,7 +71,7 @@ lib/
     employers.ts                    # CRUD работодателей (TASK-DB-3); employer.company — резолвленное имя через join на companies
     companies.ts                    # CRUD компаний, поиск для автодополнения, find-or-create (TASK-36)
     resumes.ts                      # История версий резюме кандидата (TASK-32), FK на candidates (ON DELETE CASCADE)
-    mailing-lists.ts                # CRUD выпусков (TASK-DB-5; заголовочная таблица mailingLists + sentCampaignId, TASK-40 ✅); campaignNameFor() — имя кампании SendPulse, живёт здесь (не app/actions.ts, "use server" требует async от каждого экспорта)
+    mailing-lists.ts                # CRUD выпусков (TASK-DB-5; заголовочная таблица mailingLists + sentCampaignId, TASK-40 ✅); campaignNameFor() — имя кампании SendPulse, живёт здесь (не app/actions.ts, "use server" требует async от каждого экспорта); replaceMailingListEntries()/replaceMailingListRecipients() — полная замена состава/получателей существующего выпуска (TASK-41 ✅)
     migrations/                     # SQL-миграции
 
 components/
@@ -98,7 +98,8 @@ components/
   profile-view.tsx                  # Полная карточка профиля кандидата
   campaign-history.tsx              # История отправленных кампаний на странице выпусков
   import-candidates-button.tsx      # Кнопка на /editor/settings: проверить таблицу → превью → подтвердить импорт (TASK-39)
-  release-create-modal.tsx          # Модалка создания выпуска: кандидаты стрима + переключатель «Все подписчики стрима»/«Выбранные получатели» — список работодателей, сгруппированный по компании, тройное состояние чекбокса группы (TASK-40)
+  release-create-modal.tsx          # Модалка создания выпуска: кандидаты стрима + переключатель «Все подписчики стрима»/«Выбранные получатели» (дефолт — TASK-41) — список работодателей, сгруппированный по компании, тройное состояние чекбокса группы (TASK-40). CandidateRow/EmployerPickerRow/CompanyGroup экспортируются с readOnly-пропом — переиспользуются release-detail-modal.tsx (TASK-41)
+  release-detail-modal.tsx          # Одна модалка на два режима через readOnly: редактирование неотправленного выпуска (дата/кандидаты/получатели — стрим зафиксирован) или просмотр отправленного, кому он реально ушёл (TASK-41)
 
 docs/
   backlog.adoc                      # ГЛАВНЫЙ ДОКУМЕНТ: все задачи и статусы
@@ -191,6 +192,7 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 | Уникальность email/телефона у кандидатов и работодателей (`UNIQUE` на уровне БД, дружелюбная ошибка) | ✅ TASK-38 |
 | Импорт кандидатов из Google-таблицы в Neon (`/editor/settings`, превью → подтверждение, дедуп по id/email/phone) | ✅ TASK-39 |
 | Рассылка по выбранным получателям (компании/работодатели, не только весь стрим) + заголовочная таблица выпусков (`mailingLists`), `sentCampaignId` вместо сравнения по имени кампании | ✅ TASK-40 |
+| Редактирование неотправленного выпуска (дата/кандидаты/получатели) + просмотр отправленного в рид-онли режиме («кому мы это направляем») | ✅ TASK-41 |
 
 ## Активные задачи (приоритет)
 

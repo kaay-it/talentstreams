@@ -29,6 +29,11 @@ export type Employer = {
   telegramId: string | null
 }
 
+/** Trimmed-down employer shape for recipient pickers/displays (release create/edit/view modals) —
+ * just enough to show and identify an employer, without leaking the full Employer record to the
+ * client bundle. */
+export type EmployerPickOption = { token: string; name: string; email: string; company: string }
+
 function toEmployer(row: { employers: typeof employers.$inferSelect; companies: { id: number; name: string } | null }): Employer {
   const e = row.employers
   return {

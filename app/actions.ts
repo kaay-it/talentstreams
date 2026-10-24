@@ -3,12 +3,12 @@
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
 import { getCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
-import { getMailingLists, getMailingListMeta, getMailingListCandidateIds, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent, createMailingListRecipientRows, getMailingListRecipientTokens, campaignNameFor, isoToRu } from "@/lib/db/mailing-lists"
+import { getMailingLists, getMailingListMeta, getMailingListCandidateIds, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent, createMailingListRecipientRows, getMailingListRecipientTokens, replaceMailingListEntries, replaceMailingListRecipients, campaignNameFor, isoToRu } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
-import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
+import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
 import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, deleteAddressBook, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
@@ -176,6 +176,44 @@ export async function createMailingList(data: {
   }
   revalidatePath("/editor")
   return result
+}
+
+/** Edits a release that hasn't been sent yet — stream is fixed at creation and not editable here
+ * (changing it would orphan the candidate/recipient selections, which are stream-specific; a
+ * different stream means a new release). sentCampaignId is re-checked fresh on the server, not
+ * trusted from whatever state the edit form was opened with — same guard as deleteMailingList(). */
+export async function updateMailingList(
+  listId: string,
+  data: { date: string; candidateIds: string[]; employerTokens?: string[] },
+): Promise<void> {
+  const list = await getMailingListMeta(listId)
+  if (!list) throw new Error(`Подборка не найдена: ${listId}`)
+  if (list.sentCampaignId !== null) throw new Error("Эта рассылка уже отправлена — редактирование недоступно")
+  if (!data.date.trim()) throw new Error("Укажите дату рассылки")
+
+  await updateMailingListTimestamp(listId, `${data.date}T00:00:00`)
+  await replaceMailingListEntries(listId, data.candidateIds)
+
+  let recipientLabel = ""
+  if (data.employerTokens?.length) {
+    const employers = (await Promise.all(data.employerTokens.map((t) => getEmployerByToken(t))))
+      .filter((e): e is Employer => Boolean(e))
+    recipientLabel = recipientLabelFor(employers)
+  }
+  await replaceMailingListRecipients(listId, data.employerTokens ?? [], recipientLabel)
+
+  revalidatePath("/editor")
+}
+
+/** Resolves a release's recipient-override tokens into displayable employer data — used by the
+ * edit modal (to seed the current selection) and the view modal (to show who it actually went
+ * to). [] means the release targets the whole stream (no override rows). */
+export async function getMailingListRecipients(listId: string): Promise<EmployerPickOption[]> {
+  const tokens = await getMailingListRecipientTokens(listId)
+  if (!tokens.length) return []
+  const employers = (await Promise.all(tokens.map((t) => getEmployerByToken(t))))
+    .filter((e): e is Employer => Boolean(e))
+  return employers.map((e) => ({ token: e.token, name: e.name, email: e.email, company: e.company }))
 }
 
 /** Deletes a release ("Mailing lists" rows) — only allowed before it has ever been sent,
