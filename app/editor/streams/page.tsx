@@ -3,7 +3,6 @@ import { getStreamsDetailed } from "@/lib/db/streams"
 import { getActiveCandidates, getCandidatesForStream } from "@/lib/db/candidates"
 import { getEmployers, confirmedEmployersForStream } from "@/lib/db/employers"
 import { getMailingLists, type MailingListSummary } from "@/lib/db/mailing-lists"
-import { getCampaigns } from "@/lib/sendpulse"
 import { StreamsTable } from "@/components/streams-table"
 import { ArchivedStreamsSection } from "@/components/archived-streams-section"
 
@@ -18,12 +17,11 @@ export default async function StreamsPage({
   const editorSecret = process.env.EDITOR_SECRET
   if (editorSecret && secret !== editorSecret) notFound()
 
-  const [streams, candidates, allEmployers, mailingLists, campaigns] = await Promise.all([
+  const [streams, candidates, allEmployers, mailingLists] = await Promise.all([
     getStreamsDetailed(),
     getActiveCandidates(),
     getEmployers(),
     getMailingLists(),
-    getCampaigns(),
   ])
 
   const candidateCounts = Object.fromEntries(
@@ -33,11 +31,10 @@ export default async function StreamsPage({
     streams.map((s) => [s.id, confirmedEmployersForStream(allEmployers, s).length]),
   )
 
-  const campaignNames = new Set(campaigns.map((c) => c.name))
   const mailingHistoryByStreamId: Record<number, (MailingListSummary & { sent: boolean })[]> = {}
   for (const list of mailingLists) {
     if (list.streamId === null) continue
-    const sent = campaignNames.has(`${list.stream} — ${list.date}`)
+    const sent = list.sentCampaignId !== null
     ;(mailingHistoryByStreamId[list.streamId] ??= []).push({ ...list, sent })
   }
   const hasSentReleases: Record<number, boolean> = Object.fromEntries(

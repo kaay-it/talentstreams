@@ -71,7 +71,7 @@ lib/
     employers.ts                    # CRUD работодателей (TASK-DB-3); employer.company — резолвленное имя через join на companies
     companies.ts                    # CRUD компаний, поиск для автодополнения, find-or-create (TASK-36)
     resumes.ts                      # История версий резюме кандидата (TASK-32), FK на candidates (ON DELETE CASCADE)
-    mailing-lists.ts                # CRUD выпусков (TASK-DB-5); candidateId — FK на candidates (ON DELETE SET NULL)
+    mailing-lists.ts                # CRUD выпусков (TASK-DB-5; заголовочная таблица mailingLists + sentCampaignId, TASK-40 ✅); campaignNameFor() — имя кампании SendPulse, живёт здесь (не app/actions.ts, "use server" требует async от каждого экспорта)
     migrations/                     # SQL-миграции
 
 components/
@@ -98,6 +98,7 @@ components/
   profile-view.tsx                  # Полная карточка профиля кандидата
   campaign-history.tsx              # История отправленных кампаний на странице выпусков
   import-candidates-button.tsx      # Кнопка на /editor/settings: проверить таблицу → превью → подтвердить импорт (TASK-39)
+  release-create-modal.tsx          # Модалка создания выпуска: кандидаты стрима + переключатель «Все подписчики стрима»/«Выбранные получатели» — список работодателей, сгруппированный по компании, тройное состояние чекбокса группы (TASK-40)
 
 docs/
   backlog.adoc                      # ГЛАВНЫЙ ДОКУМЕНТ: все задачи и статусы
@@ -131,7 +132,9 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 - `employers` — работодатели (TASK-DB-3); `token` — тот же UUID, что `employer_token` в SendPulse и `?e=` в публичной ссылке; `streams`/`additionalCountries` — нативные Postgres `text[]`; `companyId` — FK на `companies.id` (`ON DELETE SET NULL`); `email`/`phone` — `UNIQUE` (TASK-38 ✅; всегда заполнены, nullability не трогали — уникальность в коде `registerEmployer()` уже была, `UNIQUE` в БД — подстраховка от гонки). `name`/`email`/`phone`/`primaryContact`/`country` — `NOT NULL` без `DEFAULT` (TASK-38 ✅; все пять всегда валидируются перед записью, `''` для них никогда не было реальным состоянием — без default забытое поле падает на ограничении БД, а не тихо записывается пустым); `telegram`/`linkedin` сохранили `DEFAULT ''` — там пустая строка законна (другой способ связи)
 - `companies` — компании работодателей (TASK-36), отдельная сущность — одна компания может иметь несколько работодателей (людей); `name` — `unique()`. Поле «Компания» обязательно при регистрации, с автодополнением по существующим названиям (`findOrCreateCompanyByName()`, case-insensitive через `ilike`); записи без компании получают реальную строку-плейсхолдер «Не определено» (не NULL), управляемую как любая другая компания
 - `candidateResumes` — история версий резюме кандидата (TASK-32); `candidateId` — FK на `candidates.id`, `ON DELETE CASCADE` (резюме не живёт без кандидата)
-- `mailingListEntries` — строки выпусков рассылки (TASK-DB-5); `candidateId` — FK на `candidates.id`, `ON DELETE SET NULL` (история рассылок переживает удаление кандидата)
+- `mailingLists` — заголовок выпуска рассылки (TASK-40 ✅, одна строка на выпуск; раньше `streamId`/`targetDate` были продублированы на каждой строке `mailingListEntries`): `streamId` (FK на `streams.id`, `ON DELETE SET NULL`); `targetDate` — `timestamp` (не `date`, `mode: "string"` по той же причине, что `candidates.activeSince`), задел на будущую автоматизацию по дате и времени — UI пока выбирает только дату; `recipientLabel` — имена компаний узкого выпуска (`""` = весь стрим), только для читаемости (суффикс имени кампании, бейдж в редакторе); `sentCampaignId` — реальный id кампании SendPulse, пишется один раз на первой успешной отправке (`markMailingListSent()`), **единственный источник истины «отправлен ли выпуск» во всём приложении** — заменил хрупкое сравнение строки `${stream} — ${date}` с именами кампаний SendPulse везде, где оно использовалось (`publishMailingList()`, `deleteMailingList()`, `streamHasSentReleases()`, `applyPublicationPauseRules()` TASK-05, бейдж «Отправлено», история рассылок кандидата)
+- `mailingListEntries` — строки выпусков рассылки (TASK-DB-5; `streamId`/`targetDate` перенесены в `mailingLists`, TASK-40 ✅); `listId` — FK на `mailingLists.id`, `ON DELETE CASCADE` (раньше было просто группирующее значение без FK); `candidateId` — FK на `candidates.id`, `ON DELETE SET NULL` (история рассылок переживает удаление кандидата)
+- `mailingListRecipients` — переопределение получателей узкого выпуска (TASK-40 ✅); наличие строк для `listId` = сужено до этих работодателей, отсутствие = весь стрим (по умолчанию); `listId` — FK на `mailingLists.id`, `ON DELETE CASCADE`; `employerToken` — FK на `employers.token`, `ON DELETE CASCADE`
 - Миграции: `scripts/migrate.mjs`
 
 ### Telegram-бот (SendPulse)
@@ -145,6 +148,8 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 Все мутации — в `app/actions.ts`. После мутации, меняющей UI редактора, вызывать `revalidatePath(...)`.
 
 Пользовательские ошибки валидации (не баги) возвращаются как `{ ok: true } | { ok: false, error }`, не через `throw` — Next.js подменяет сообщение любого `throw new Error()` из Server Action на обобщённый текст в продакшен-сборке. Паттерн у `registerEmployer`/`updateEmployer`/`registerCandidate`/`createCandidate`/`updateCandidate` (TASK-38); неожиданные ошибки (не связанные с вводом пользователя) всё ещё пробрасываются как есть.
+
+`"use server"` в начале файла требует, чтобы КАЖДЫЙ экспорт был async-функцией — поэтому чистые синхронные хелперы, которые нужны и `app/actions.ts`, и server-компонентам (например `campaignNameFor()`), живут в `lib/db/*.ts` (только `import "server-only"`, без этого ограничения), не в `app/actions.ts`.
 
 ### Доступ к редактору
 `/editor/*` защищён: `if (editorSecret && secret !== editorSecret) notFound()`.
@@ -185,6 +190,7 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 | Страны работодателя — страна нахождения обязательна (+ опция «Другая»), пустой список доп. стран трактуется как «Любая» | ✅ TASK-37 |
 | Уникальность email/телефона у кандидатов и работодателей (`UNIQUE` на уровне БД, дружелюбная ошибка) | ✅ TASK-38 |
 | Импорт кандидатов из Google-таблицы в Neon (`/editor/settings`, превью → подтверждение, дедуп по id/email/phone) | ✅ TASK-39 |
+| Рассылка по выбранным получателям (компании/работодатели, не только весь стрим) + заголовочная таблица выпусков (`mailingLists`), `sentCampaignId` вместо сравнения по имени кампании | ✅ TASK-40 |
 
 ## Активные задачи (приоритет)
 

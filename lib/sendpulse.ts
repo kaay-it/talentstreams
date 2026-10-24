@@ -134,6 +134,28 @@ export async function getBookId(name: string, token: string): Promise<number | n
   return _bookCache?.get(name)?.id ?? null
 }
 
+/** Permanently deletes a SendPulse address book — tears down the throwaway book built for a
+ * narrowed-recipient release send. Best-effort: never throws, just logs, same convention as
+ * setTelegramContactState() — cleanup failing must never affect a campaign that already went out. */
+export async function deleteAddressBook(bookId: number, token: string): Promise<void> {
+  try {
+    const { status, text } = await spDelete(`${API}/addressbooks/${bookId}`, { Authorization: `Bearer ${token}` }, "")
+    const ok = status >= 200 && status < 300
+    if (ok) console.log(`[SendPulse] deleteAddressBook bookId=${bookId} status=${status}`)
+    else console.warn(`[SendPulse] deleteAddressBook bookId=${bookId} status=${status}`, text)
+    if (_bookCache) {
+      for (const [name, entry] of _bookCache) {
+        if (entry.id === bookId) {
+          _bookCache.delete(name)
+          break
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[SendPulse] deleteAddressBook failed:", err)
+  }
+}
+
 // ── Campaigns ─────────────────────────────────────────────────────────────────
 
 export type Campaign = {

@@ -49,12 +49,38 @@ export const employers = pgTable("employers", {
   telegramId:          text("telegramId"),
 })
 
+// Header row for a mailing-list "выпуск" (release) — one row per listId, shared by every
+// mailingListEntries/mailingListRecipients row of that release.
+export const mailingLists = pgTable("mailingLists", {
+  id:        text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  streamId:  integer("streamId").references(() => streams.id, { onDelete: "set null" }),
+  // timestamp, not date — mode: "string" (same reasoning as candidates.activeSince: avoids a
+  // JS Date timezone round-trip shifting the day). Full date+time groundwork for a future
+  // send-scheduling feature; the UI only picks a date today, time defaults to midnight.
+  targetDate: timestamp("targetDate", { mode: "string" }).notNull(),
+  // Names of the companies a narrowed release was sent to ("" = whole stream, the default) —
+  // readability only (SendPulse campaign name suffix, editor UI badge), never the source of
+  // truth for "was this release sent" (that's sentCampaignId below).
+  recipientLabel: text("recipientLabel").notNull().default(""),
+  // The real SendPulse campaign id, written once on the first successful send (publishMailingList()).
+  // NULL = never sent. The only source of truth for "was this release sent" across the app —
+  // replaces the old fragile convention of matching a `${stream} — ${date}` string against
+  // SendPulse's campaign list, which could never actually guarantee it was THIS release.
+  sentCampaignId: integer("sentCampaignId"),
+})
+
 export const mailingListEntries = pgTable("mailingListEntries", {
   id:          text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  listId:      text("listId").notNull(),
-  streamId:    integer("streamId").references(() => streams.id, { onDelete: "set null" }),
-  targetDate:  date("targetDate", { mode: "string" }).notNull(),
+  listId:      text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
   candidateId: text("candidateId").references(() => candidates.id, { onDelete: "set null" }),
+})
+
+// Recipient override for a release — presence of any row for a listId means "narrowed to these
+// employers", absence means the default "whole stream" send. Never written for ordinary releases.
+export const mailingListRecipients = pgTable("mailingListRecipients", {
+  id:            text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  listId:        text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
+  employerToken: text("employerToken").notNull().references(() => employers.token, { onDelete: "cascade" }),
 })
 
 export const contactRequests = pgTable("contactRequests", {

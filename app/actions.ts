@@ -3,14 +3,14 @@
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
 import { getCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
-import { getMailingLists, getMailingListMeta, getMailingListCandidateIds, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate, updateMailingListDate, isoToRu } from "@/lib/db/mailing-lists"
+import { getMailingLists, getMailingListMeta, getMailingListCandidateIds, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent, createMailingListRecipientRows, getMailingListRecipientTokens, campaignNameFor, isoToRu } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer } from "@/lib/db/employers"
 import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, getCampaigns, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, deleteAddressBook, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 import { previewCandidatesImport as previewImport, importCandidatesFromSheet, type ImportPreview, type ImportResult } from "@/lib/sheets-import"
 export type { ImportPreview, ImportResult, ImportRow, ImportSkipped } from "@/lib/sheets-import"
@@ -144,28 +144,50 @@ export async function rejectCandidate(id: string): Promise<void> {
 /** Creates a new release ("Mailing lists" rows) for a stream — the automated alternative to
  * typing rows by hand in Google Sheets. The editor picks the final candidate list in the UI;
  * this just writes it. */
+/** Company names of a narrowed release's recipients, for the SendPulse campaign name suffix and
+ * the editor's release-list badge. At most 3 named explicitly — beyond that, "и ещё N", so a
+ * broad manual pick (dozens of individual employers across many companies) doesn't blow up the
+ * SendPulse campaign name. */
+function recipientLabelFor(employers: Employer[]): string {
+  const companies = [...new Set(employers.map((e) => e.company).filter(Boolean))]
+  if (companies.length <= 3) return companies.join(", ")
+  return `${companies.slice(0, 3).join(", ")} и ещё ${companies.length - 3}`
+}
+
 export async function createMailingList(data: {
   stream: string
   date: string
   candidateIds: string[]
+  employerTokens?: string[]
 }): Promise<{ listId: string }> {
   if (!data.stream.trim()) throw new Error("Выберите стрим")
   if (!data.date.trim()) throw new Error("Укажите дату рассылки")
-  const result = await createMailingListRows(data)
+
+  let recipientLabel = ""
+  if (data.employerTokens?.length) {
+    const employers = (await Promise.all(data.employerTokens.map((t) => getEmployerByToken(t))))
+      .filter((e): e is Employer => Boolean(e))
+    recipientLabel = recipientLabelFor(employers)
+  }
+
+  const result = await createMailingListRows({ ...data, recipientLabel })
+  if (data.employerTokens?.length) {
+    await createMailingListRecipientRows(result.listId, data.employerTokens)
+  }
   revalidatePath("/editor")
   return result
 }
 
 /** Deletes a release ("Mailing lists" rows) — only allowed before it has ever been sent,
  * since a sent release is already out in a SendPulse campaign and deleting it here
- * would desync the site from what employers actually received. */
+ * would desync the site from what employers actually received. sentCampaignId is the real
+ * SendPulse campaign id (set once on first send, see publishMailingList()) — the only source of
+ * truth for "was this release sent", not a name comparison against SendPulse's campaign list. */
 export async function deleteMailingList(listId: string): Promise<void> {
   const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
 
-  const campaignTitle = `${list.stream} — ${list.date}`
-  const campaigns = await getCampaigns()
-  if (campaigns.some((c) => c.name === campaignTitle)) {
+  if (list.sentCampaignId !== null) {
     throw new Error("Эта рассылка уже отправлена — удалить её нельзя")
   }
 
@@ -359,15 +381,15 @@ function offsetIso(delta: { days?: number; months?: number; years?: number }): s
 /**
  * TASK-05 publication-pause rule, applied to exactly the candidates of a release right after its
  * first real send (never on a resend — see the `!alreadySent` guard at the call site). `sentBefore`
- * for each candidate is counted from their real mailing history using `campaignNames`, a SendPulse
- * snapshot taken *before* this send, so this send itself isn't double-counted:
+ * for each candidate is counted from their real mailing history via `sentCampaignId` — only
+ * releases actually sent at least once count, see getMailingListsForCandidate():
  * 1st real send → 2-week pause, 2nd → 3-month pause, 3rd → retired for good ("Не публиковать").
  * The 3rd-send cutoff is a deliberate simplification beyond §13 of the spec (which only defines
  * the pause after the 2nd send) — decided with the user rather than left open. Pushing `activeSince`
  * 10 years out on retirement is belt-and-suspenders: getProfiles() already excludes "Не публиковать"
  * candidates from every release, this just keeps the date field consistent if that ever changes.
  */
-async function applyPublicationPauseRules(candidateIds: string[], campaignNames: Set<string>): Promise<void> {
+async function applyPublicationPauseRules(candidateIds: string[]): Promise<void> {
   if (!candidateIds.length) return
 
   const allCandidates = await getCandidates()
@@ -379,7 +401,7 @@ async function applyPublicationPauseRules(candidateIds: string[], campaignNames:
       if (!candidate) return // candidate row deleted since the release was created
 
       const history = await getMailingListsForCandidate(id)
-      const sentBefore = history.filter((e) => campaignNames.has(`${e.stream} — ${e.date}`)).length
+      const sentBefore = history.filter((e) => e.sentCampaignId !== null).length
       const sendNumber = sentBefore + 1
 
       if (sendNumber === 1) {
@@ -397,18 +419,17 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
 
-  const campaigns = await getCampaigns()
-  const campaignNames = new Set(campaigns.map((c) => c.name))
-  const alreadySent = campaignNames.has(`${list.stream} — ${list.date}`)
+  const alreadySent = list.sentCampaignId !== null
 
   // Date is just a plan — the manager can end up sending on a different day. Snap it to the actual
-  // send date the first time this release goes out; leave it alone on every resend, so the campaign
-  // name/subject stay consistent with the one already delivered to employers.
+  // send moment the first time this release goes out; leave it alone on every resend, so the
+  // campaign name/subject stay consistent with the one already delivered to employers.
   let date = list.date
   if (!alreadySent) {
-    const todayRu = isoToRu(todayIso())
+    const now = new Date()
+    const todayRu = isoToRu(now.toISOString().slice(0, 10))
     if (todayRu !== list.date) {
-      await updateMailingListDate(listId, todayIso())
+      await updateMailingListTimestamp(listId, now.toISOString())
       date = todayRu
     }
   }
@@ -416,19 +437,59 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   const token = await getToken()
   if (!token) throw new Error("Не удалось получить токен SendPulse")
 
-  const bookId = await getOrCreateBook(list.stream, token)
+  // A narrowed release gets a fresh throwaway book every publish call (first send AND resend) —
+  // rebuilt from current employer data, then always torn down after, regardless of outcome.
+  const recipientTokens = await getMailingListRecipientTokens(listId)
+  let bookId: number
+  let adhocBookId: number | null = null
+
+  if (recipientTokens.length) {
+    const recipients = (await Promise.all(recipientTokens.map((t) => getEmployerByToken(t))))
+      .filter((e): e is Employer => Boolean(e))
+    if (!recipients.length) {
+      throw new Error("Выбранные получатели больше не найдены — пересоздайте выпуск")
+    }
+    const adhocBookName = `${list.stream} — ${date} — ${listId}`
+    adhocBookId = await getOrCreateBook(adhocBookName, token)
+    await Promise.all(
+      recipients.map((employer) =>
+        addToAddressBook(
+          employer.email,
+          adhocBookId!,
+          {
+            "Имя": employer.name,
+            phone: employer.phone,
+            Streams: employer.streams.join(", "),
+            employer_token: employer.token,
+          },
+          token,
+        ),
+      ),
+    )
+    bookId = adhocBookId
+  } else {
+    bookId = await getOrCreateBook(list.stream, token)
+  }
+
   const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
   const listUrl = `${appUrl}/list/${listId}?e={{employer_token}}`
   const subject = `Talent Stream: ${list.stream} — выпуск ${date}`
-  const campaignName = `${list.stream} — ${date}`
+  const campaignName = campaignNameFor(list.stream, date, list.recipientLabel)
   const html = buildEmailHtml(list.stream, date, listUrl, telegramConnectUrl("{{employer_token}}"))
 
-  const campaign = await createCampaign(bookId, subject, html, campaignName)
+  let campaign: { id: number }
+  try {
+    campaign = await createCampaign(bookId, subject, html, campaignName)
+  } finally {
+    // Best-effort, runs even if createCampaign threw — never leave a throwaway book behind.
+    if (adhocBookId !== null) await deleteAddressBook(adhocBookId, token)
+  }
 
   // Only on a genuine first send — a resend must not advance any candidate's pause window again.
   if (!alreadySent) {
+    await markMailingListSent(listId, campaign.id)
     const candidateIds = await getMailingListCandidateIds(listId)
-    await applyPublicationPauseRules(candidateIds, campaignNames)
+    await applyPublicationPauseRules(candidateIds)
   }
 
   revalidatePath("/editor")
@@ -623,14 +684,13 @@ export type CandidateMailingHistoryEntry = { listId: string; stream: string; dat
 /**
  * Every release a candidate has ever been included in, newest first — visibility groundwork for
  * TASK-05 (publication pause rules, §13 ТЗ), before any automatic pause enforcement exists.
- * `sent` cross-references SendPulse campaigns (a release can be created and never actually sent,
- * or deleted before sending) by the same `${stream} — ${date}` name publishMailingList() uses.
+ * `sent` is read straight from mailingLists.sentCampaignId (a release can be created and never
+ * actually sent, or deleted before sending) — not a name comparison against SendPulse campaigns.
  */
 export async function getCandidateMailingHistory(candidateId: string): Promise<CandidateMailingHistoryEntry[]> {
   if (!candidateId) return []
-  const [entries, campaigns] = await Promise.all([getMailingListsForCandidate(candidateId), getCampaigns()])
-  const campaignNames = new Set(campaigns.map((c) => c.name))
-  return entries.map((e) => ({ ...e, sent: campaignNames.has(`${e.stream} — ${e.date}`) }))
+  const entries = await getMailingListsForCandidate(candidateId)
+  return entries.map((e) => ({ listId: e.listId, stream: e.stream, date: e.date, sent: e.sentCampaignId !== null }))
 }
 
 /**
@@ -909,9 +969,8 @@ export async function submitContactRequest(
  * and (via mailingListEntries.streamId) into real send history, so renaming/deleting it would
  * silently desync that history. Archiving is always safe instead — it doesn't touch the name. */
 async function streamHasSentReleases(streamId: number): Promise<boolean> {
-  const [lists, campaigns] = await Promise.all([getMailingLists(), getCampaigns()])
-  const campaignNames = new Set(campaigns.map((c) => c.name))
-  return lists.some((l) => l.streamId === streamId && campaignNames.has(`${l.stream} — ${l.date}`))
+  const lists = await getMailingLists()
+  return lists.some((l) => l.streamId === streamId && l.sentCampaignId !== null)
 }
 
 export async function updateStream(
