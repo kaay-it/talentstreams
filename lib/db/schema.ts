@@ -72,7 +72,12 @@ export const mailingLists = pgTable("mailingLists", {
 export const mailingListEntries = pgTable("mailingListEntries", {
   id:          text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   listId:      text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
-  candidateId: text("candidateId").references(() => candidates.id, { onDelete: "set null" }),
+  // CASCADE, not SET NULL — a row here only ever means "this candidate was part of this
+  // release"; once the candidate is gone there's nothing identifiable left to keep (every
+  // reader of this table already filters out a null candidateId before computing
+  // candidateCount/candidateIds, so SET NULL bought no actual visible history, just a
+  // dangling row inflating raw COUNT(*) against what the app shows).
+  candidateId: text("candidateId").notNull().references(() => candidates.id, { onDelete: "cascade" }),
 })
 
 // Recipient override for a release — presence of any row for a listId means "narrowed to these

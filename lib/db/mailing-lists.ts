@@ -73,7 +73,7 @@ export async function getMailingList(listId: string): Promise<MailingList | null
     .select({ candidateId: mailingListEntries.candidateId })
     .from(mailingListEntries)
     .where(eq(mailingListEntries.listId, listId))
-  const candidateIds = new Set(entryRows.map((r) => r.candidateId).filter((id): id is string => Boolean(id)))
+  const candidateIds = new Set(entryRows.map((r) => r.candidateId))
   if (!candidateIds.size) return null
 
   const allProfiles = await getActiveCandidates()
@@ -120,7 +120,7 @@ export async function getMailingListCandidateIds(listId: string): Promise<string
     .select({ candidateId: mailingListEntries.candidateId })
     .from(mailingListEntries)
     .where(eq(mailingListEntries.listId, listId))
-  return [...new Set(rows.map((r) => r.candidateId).filter((id): id is string => Boolean(id)))]
+  return [...new Set(rows.map((r) => r.candidateId))]
 }
 
 /** Fetch all mailing lists grouped by List ID (no profile data, fast), newest date first. */
@@ -144,7 +144,7 @@ export async function getMailingLists(): Promise<MailingListSummary[]> {
     const candidateIdsByList = new Map<string, Set<string>>()
     for (const row of entryRows) {
       if (!candidateIdsByList.has(row.listId)) candidateIdsByList.set(row.listId, new Set())
-      if (row.candidateId) candidateIdsByList.get(row.listId)!.add(row.candidateId)
+      candidateIdsByList.get(row.listId)!.add(row.candidateId)
     }
 
     return headers

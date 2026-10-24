@@ -141,6 +141,13 @@
       "when": 1792850330621,
       "tag": "0019_mailing-lists-header-table",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792867870156,
+      "tag": "0020_mailing-entries-candidate-cascade",
+      "breakpoints": true
     }
   ]
 }
