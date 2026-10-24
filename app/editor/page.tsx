@@ -166,7 +166,7 @@ export default async function ReleasesPage({
                       )}
                       {list.recipientLabel && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/20 dark:text-violet-400">
-                          Узкая рассылка: {list.recipientLabel}
+                          Ограниченная рассылка: {list.recipientLabel}
                         </span>
                       )}
                       <a
