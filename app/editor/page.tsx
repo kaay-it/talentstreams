@@ -165,11 +165,6 @@ export default async function ReleasesPage({
                           Отправлено
                         </span>
                       )}
-                      {list.recipientLabel && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/20 dark:text-violet-400">
-                          Ограниченная рассылка: {list.recipientLabel}
-                        </span>
-                      )}
                       <a
                         href={`/list/${list.listId}${editorSecret ? `?secret=${editorSecret}` : ""}`}
                         target="_blank"
@@ -180,6 +175,13 @@ export default async function ReleasesPage({
                         Посмотреть рассылку {list.listId}
                       </a>
                     </div>
+                    {list.recipientLabel && (
+                      <div className="mt-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/20 dark:text-violet-400">
+                          Ограниченная рассылка: {list.recipientLabel}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1">
