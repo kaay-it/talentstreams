@@ -587,7 +587,7 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
           // changed in place at the same URL kept showing the stale version). The filename is
           // versioned on purpose: bump it (public/telegram-notify-vN.png) whenever the image
           // itself changes, so Telegram is forced to fetch fresh instead of serving a cached miss.
-          photo: `${appUrl}/telegram-notify-v2.png`,
+          photo: `${appUrl}/telegram-notify-v3.png`,
         },
       ),
     ),
