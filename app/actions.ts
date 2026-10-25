@@ -537,10 +537,20 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   let campaign: { id: number }
   try {
     campaign = await createCampaign(bookId, subject, html, campaignName)
-  } finally {
-    // Best-effort, runs even if createCampaign threw — never leave a throwaway book behind.
+  } catch (err) {
+    // No campaign got created, so nothing references this throwaway book yet — safe to clean up
+    // right away (unlike the success path below: confirmed by testing that SendPulse refuses to
+    // delete a book that's attached to a pending/moderation campaign, so trying here would just
+    // silently fail anyway).
     if (adhocBookId !== null) await deleteAddressBook(adhocBookId, token)
+    throw err
   }
+  // Campaign created successfully — deliberately NOT deleting the ad-hoc book here. SendPulse
+  // holds new campaigns in moderation for an unpredictable stretch before actually sending, and
+  // won't let the book be deleted while it's attached to that pending campaign; this request
+  // can't wait that out (10s hard cap on a Vercel Hobby serverless function). The daily
+  // cleanup-adhoc-books cron (vercel.json) deletes it once SendPulse reports the campaign fully
+  // processed.
 
   // Only on a genuine first send — a resend must not advance any candidate's pause window again.
   if (!alreadySent) {
