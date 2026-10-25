@@ -568,7 +568,8 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
     notifyEmployers.map((employer) =>
       sendTelegramToEmployer(
         employer.token,
-        `Новый выпуск ${list.stream} Talent Stream уже готов для вас!\n${date}\n\nОткрыть подборку: ${appUrl}/list/${listId}?e=${employer.token}`,
+        `<b>${escapeHtml(list.stream)}</b>\nНовый выпуск Talent Stream уже готов для вас!\n${escapeHtml(date)}`,
+        { label: "Открыть подборку →", url: `${appUrl}/list/${listId}?e=${employer.token}` },
       ),
     ),
   )

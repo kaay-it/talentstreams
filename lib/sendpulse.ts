@@ -362,21 +362,47 @@ export async function deleteTelegramContact(employerToken: string): Promise<void
  * Sends a Telegram message to the employer via the SendPulse bot. Best-effort: returns
  * false (never throws) if the bot isn't configured, the employer hasn't subscribed, or
  * SendPulse fails — Telegram is an optional channel on top of email.
+ *
+ * Plain text goes through `/telegram/contacts/sendText` — confirmed by SendPulse's own OpenAPI
+ * spec that this endpoint only accepts `{contact_id, text}`; `parse_mode`/`reply_markup` are
+ * silently dropped there (tested directly — both come back `null` in the response even on 200).
+ * Pass `button` to get an actual tappable link instead of a bare URL pasted into the text: that
+ * routes through the richer `/telegram/contacts/send`, which does support `parse_mode: "html"`
+ * and `reply_markup.inline_keyboard` (confirmed working end-to-end against a real contact — the
+ * button's `url` must be a real reachable HTTPS address, Telegram itself rejects `localhost`).
  */
-export async function sendTelegramToEmployer(employerToken: string, text: string): Promise<boolean> {
+export async function sendTelegramToEmployer(
+  employerToken: string,
+  text: string,
+  button?: { label: string; url: string },
+): Promise<boolean> {
   try {
     const token = await getToken()
     if (!token) return false
     const contactId = await findTelegramContactId(employerToken, token)
     if (!contactId) return false
+
+    const endpoint = button ? "/telegram/contacts/send" : "/telegram/contacts/sendText"
+    const payload = button
+      ? {
+          contact_id: contactId,
+          message: {
+            type: "text",
+            text,
+            parse_mode: "html",
+            reply_markup: { inline_keyboard: [[{ text: button.label, type: "web_url", url: button.url }]] },
+          },
+        }
+      : { contact_id: contactId, text }
+
     const res = await spPost(
-      `${API}/telegram/contacts/sendText`,
+      `${API}${endpoint}`,
       { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      JSON.stringify({ contact_id: contactId, text }),
+      JSON.stringify(payload),
     )
     const ok = res.status >= 200 && res.status < 300
-    if (ok) console.log(`[SendPulse] telegram sendText status=${res.status}`)
-    else console.warn(`[SendPulse] telegram sendText status=${res.status}`, res.text)
+    if (ok) console.log(`[SendPulse] telegram send status=${res.status}`)
+    else console.warn(`[SendPulse] telegram send status=${res.status}`, res.text)
     return ok
   } catch (err) {
     console.error("[SendPulse] sendTelegramToEmployer failed:", err)
