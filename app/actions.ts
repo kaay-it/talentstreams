@@ -587,7 +587,12 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
           // changed in place at the same URL kept showing the stale version). The filename is
           // versioned on purpose: bump it (public/telegram-notify-vN.png) whenever the image
           // itself changes, so Telegram is forced to fetch fresh instead of serving a cached miss.
-          photo: `${appUrl}/telegram-notify-v3.png`,
+          // 1200×630 (1.91:1) — the standard Open Graph link-preview image size: SendPulse marks
+          // this send is_external_attachment: true, meaning Telegram renders it as a link-preview
+          // card, not a native uploaded photo, and crops/pads any other aspect ratio to fit that
+          // card (confirmed by testing several off-ratio sizes — vertical bands on a near-square
+          // image, horizontal bands on an overly wide one; 1.91:1 is the documented safe ratio).
+          photo: `${appUrl}/telegram-notify-v5.png`,
         },
       ),
     ),
