@@ -382,10 +382,13 @@ async function createCampaign(
   // SendPulse's "add email to book" write isn't always immediately visible to the campaign
   // endpoint's own book-membership check — confirmed by direct testing: a freshly-created,
   // freshly-populated book (exactly the throwaway ad-hoc book a narrowed release builds, TASK-40)
-  // can transiently read back as empty (error_code 798) for several seconds after the add call
+  // can transiently read back as empty (error_code 798) for a second or two after the add call
   // already returned 200, even for a recipient who is a long-confirmed employer. Retry a few
   // times with a short delay before surfacing "book is empty" as a real, actionable error.
-  const RETRY_DELAYS_MS = [1000, 2000, 3000]
+  // Delays kept small (1.5s total) — this Server Action runs as a Vercel serverless function
+  // with a hard 10s execution ceiling on the Hobby plan (not raisable via maxDuration there),
+  // and this retry sits on top of the rest of the publish flow's own network calls.
+  const RETRY_DELAYS_MS = [500, 1000, 1500]
   for (let attempt = 0; ; attempt++) {
     const { status, text } = await spPost(
       `${SENDPULSE_API}/campaigns`,
