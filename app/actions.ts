@@ -379,26 +379,42 @@ async function createCampaign(
   })
   console.log("[SendPulse] createCampaign:", payload)
 
-  const { status, text } = await spPost(
-    `${SENDPULSE_API}/campaigns`,
-    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    payload,
-  )
-  console.log(`[SendPulse] campaigns status=${status} body=${text}`)
+  // SendPulse's "add email to book" write isn't always immediately visible to the campaign
+  // endpoint's own book-membership check — confirmed by direct testing: a freshly-created,
+  // freshly-populated book (exactly the throwaway ad-hoc book a narrowed release builds, TASK-40)
+  // can transiently read back as empty (error_code 798) for several seconds after the add call
+  // already returned 200, even for a recipient who is a long-confirmed employer. Retry a few
+  // times with a short delay before surfacing "book is empty" as a real, actionable error.
+  const RETRY_DELAYS_MS = [1000, 2000, 3000]
+  for (let attempt = 0; ; attempt++) {
+    const { status, text } = await spPost(
+      `${SENDPULSE_API}/campaigns`,
+      { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      payload,
+    )
+    console.log(`[SendPulse] campaigns status=${status} body=${text}`)
 
-  if (status < 200 || status >= 300) {
+    if (status >= 200 && status < 300) return JSON.parse(text) as { id: number }
+
+    let errorCode: number | undefined
     let message = `SendPulse campaign error (${status}): ${text}`
     try {
       const err = JSON.parse(text) as { error_code?: number; message?: string }
-      if (err.error_code === 709) {
+      errorCode = err.error_code
+      if (errorCode === 709) {
         message = "Адресная книга занята (идёт копирование адресов). Подождите минуту и попробуйте снова."
-      } else if (err.error_code === 798) {
+      } else if (errorCode === 798) {
         message = "В адресной книге нет подписчиков. Добавьте работодателей в стрим «" + name.split(" — ")[0] + "» и повторите попытку."
       }
     } catch { /* ignore parse errors */ }
+
+    if (errorCode === 798 && attempt < RETRY_DELAYS_MS.length) {
+      console.log(`[SendPulse] campaigns: book not indexed yet, retrying in ${RETRY_DELAYS_MS[attempt]}ms (attempt ${attempt + 1}/${RETRY_DELAYS_MS.length})`)
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]))
+      continue
+    }
     throw new Error(message)
   }
-  return JSON.parse(text) as { id: number }
 }
 
 function todayIso(): string {
