@@ -363,18 +363,19 @@ export async function deleteTelegramContact(employerToken: string): Promise<void
  * false (never throws) if the bot isn't configured, the employer hasn't subscribed, or
  * SendPulse fails — Telegram is an optional channel on top of email.
  *
- * Plain text goes through `/telegram/contacts/sendText` — confirmed by SendPulse's own OpenAPI
- * spec that this endpoint only accepts `{contact_id, text}`; `parse_mode`/`reply_markup` are
- * silently dropped there (tested directly — both come back `null` in the response even on 200).
- * Pass `button` to get an actual tappable link instead of a bare URL pasted into the text: that
- * routes through the richer `/telegram/contacts/send`, which does support `parse_mode: "html"`
- * and `reply_markup.inline_keyboard` (confirmed working end-to-end against a real contact — the
- * button's `url` must be a real reachable HTTPS address, Telegram itself rejects `localhost`).
+ * Plain text (no button, no photo) goes through `/telegram/contacts/sendText` — confirmed by
+ * SendPulse's own OpenAPI spec that this endpoint only accepts `{contact_id, text}`;
+ * `parse_mode`/`reply_markup` are silently dropped there (tested directly — both come back
+ * `null` in the response even on 200). `button` and/or `photo` route through the richer
+ * `/telegram/contacts/send`, which supports `parse_mode: "html"`, `reply_markup.inline_keyboard`,
+ * and `type: "photo"` with a `caption` (confirmed working end-to-end against a real contact). Both
+ * `button.url` and `photo` must be real reachable HTTPS addresses — Telegram itself rejects
+ * `localhost`, and media URLs must be publicly fetchable at send time (per SendPulse's own spec).
  */
 export async function sendTelegramToEmployer(
   employerToken: string,
   text: string,
-  button?: { label: string; url: string },
+  extra?: { button?: { label: string; url: string }; photo?: string },
 ): Promise<boolean> {
   try {
     const token = await getToken()
@@ -382,16 +383,17 @@ export async function sendTelegramToEmployer(
     const contactId = await findTelegramContactId(employerToken, token)
     if (!contactId) return false
 
-    const endpoint = button ? "/telegram/contacts/send" : "/telegram/contacts/sendText"
-    const payload = button
+    const rich = Boolean(extra?.button || extra?.photo)
+    const endpoint = rich ? "/telegram/contacts/send" : "/telegram/contacts/sendText"
+    const replyMarkup = extra?.button
+      ? { inline_keyboard: [[{ text: extra.button.label, type: "web_url", url: extra.button.url }]] }
+      : undefined
+    const payload = rich
       ? {
           contact_id: contactId,
-          message: {
-            type: "text",
-            text,
-            parse_mode: "html",
-            reply_markup: { inline_keyboard: [[{ text: button.label, type: "web_url", url: button.url }]] },
-          },
+          message: extra?.photo
+            ? { type: "photo", photo: extra.photo, caption: text, parse_mode: "html", reply_markup: replyMarkup }
+            : { type: "text", text, parse_mode: "html", reply_markup: replyMarkup },
         }
       : { contact_id: contactId, text }
 

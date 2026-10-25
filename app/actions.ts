@@ -581,7 +581,10 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
       sendTelegramToEmployer(
         employer.token,
         `<b>Новый выпуск Talent Stream уже готов!</b>\n\nВ поток ${escapeHtml(list.stream)} от ${escapeHtml(date)} вошли ${candidateIds.length} ${candidatePlural(candidateIds.length)}`,
-        { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}` },
+        {
+          button: { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}` },
+          photo: `${appUrl}/telegram-notify.png`,
+        },
       ),
     ),
   )
