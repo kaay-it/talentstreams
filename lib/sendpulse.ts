@@ -165,6 +165,27 @@ export type Campaign = {
   created?: string
 }
 
+/** Raw numeric status of a single campaign straight from SendPulse's campaign-info endpoint — NOT
+ * the same field shape as Campaign.status above (that one is typed string but the list endpoint
+ * actually returns a number too; this function exists separately for the one value that's been
+ * confirmed by direct testing: status 3 means fully processed/delivered — the signal the
+ * cleanup-adhoc-books cron needs to know a release's throwaway SendPulse book is safe to delete).
+ * Returns null on any failure — callers must treat that as "not yet safe to act on". */
+export async function getCampaignStatus(campaignId: number, token: string): Promise<number | null> {
+  try {
+    const { status, text } = await spGet(`${API}/campaigns/${campaignId}`, { Authorization: `Bearer ${token}` })
+    if (status < 200 || status >= 300) {
+      console.warn(`[SendPulse] GET /campaigns/${campaignId} status=${status}`, text)
+      return null
+    }
+    const data = JSON.parse(text) as { status?: number }
+    return typeof data.status === "number" ? data.status : null
+  } catch (err) {
+    console.error("[SendPulse] getCampaignStatus failed:", err)
+    return null
+  }
+}
+
 export async function getCampaigns(): Promise<Campaign[]> {
   const token = await getToken()
   if (!token) return []

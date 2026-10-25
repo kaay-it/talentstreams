@@ -1,5 +1,5 @@
 import "server-only"
-import { eq, inArray } from "drizzle-orm"
+import { eq, inArray, and, isNotNull, ne } from "drizzle-orm"
 import { db } from "./index"
 import { mailingLists, mailingListEntries, mailingListRecipients, streams } from "./schema"
 import { getStreamIdByName } from "./streams"
@@ -261,6 +261,33 @@ export async function getMailingListsForCandidate(candidateId: string): Promise<
     .map((h) => ({ listId: h.listId, stream: h.streamName ?? "", targetDate: h.targetDate, sentCampaignId: h.sentCampaignId }))
     .sort((a, b) => b.targetDate.localeCompare(a.targetDate))
     .map(({ listId, stream, targetDate, sentCampaignId }) => ({ listId, stream, date: timestampToRu(targetDate), sentCampaignId }))
+}
+
+/** Every sent restricted (narrowed-recipient) release — the only ones that ever got a throwaway
+ * SendPulse address book (`${stream} — ${date} — ${listId}`, see publishMailingList()). A
+ * whole-stream release reuses the long-lived per-stream book and is never a candidate for this
+ * cleanup. Used by the cleanup-adhoc-books cron — recipientLabel itself isn't needed there, just
+ * enough to reconstruct the exact book name and know which campaign to check. */
+export async function getSentRestrictedMailingLists(): Promise<
+  { listId: string; stream: string; date: string; sentCampaignId: number }[]
+> {
+  const rows = await db
+    .select({
+      listId: mailingLists.id,
+      streamName: streams.name,
+      targetDate: mailingLists.targetDate,
+      sentCampaignId: mailingLists.sentCampaignId,
+    })
+    .from(mailingLists)
+    .leftJoin(streams, eq(mailingLists.streamId, streams.id))
+    .where(and(isNotNull(mailingLists.sentCampaignId), ne(mailingLists.recipientLabel, "")))
+
+  return rows.map((r) => ({
+    listId: r.listId,
+    stream: r.streamName ?? "",
+    date: timestampToRu(r.targetDate),
+    sentCampaignId: r.sentCampaignId as number,
+  }))
 }
 
 /** Writes the hand-picked recipient-override rows for a release — one row per employer token.
