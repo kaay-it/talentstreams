@@ -243,6 +243,14 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
+function candidatePlural(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return "кандидат"
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "кандидата"
+  return "кандидатов"
+}
+
 function buildEmailHtml(stream: string, date: string, url: string, telegramUrl: string | null): string {
   const s = escapeHtml(stream)
   const d = escapeHtml(date)
@@ -560,15 +568,19 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   // cleanup-adhoc-books cron (vercel.json) deletes it once SendPulse reports the campaign fully
   // processed.
 
+  const candidateIds = await getMailingListCandidateIds(listId)
+
   // TASK-35, часть 2 — same recipients the email just went to, also pinged on Telegram (whoever
   // connected the bot; sendTelegramToEmployer() never throws, just no-ops for anyone who hasn't —
   // best-effort, Telegram is a supplementary channel on top of email, not load-bearing). Fires on
   // every real send including a resend, mirroring createCampaign() above (also unconditional).
+  // Candidate count shown here on purpose — unlike the email body (TASK-26's neutral phrasing,
+  // no exact count), this was an explicit request for the Telegram channel specifically.
   await Promise.all(
     notifyEmployers.map((employer) =>
       sendTelegramToEmployer(
         employer.token,
-        "Новый выпуск Talent Stream уже готов для вас!",
+        `В поток ${list.stream} от ${date} вошли ${candidateIds.length} ${candidatePlural(candidateIds.length)}`,
         { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}` },
       ),
     ),
@@ -577,7 +589,6 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   // Only on a genuine first send — a resend must not advance any candidate's pause window again.
   if (!alreadySent) {
     await markMailingListSent(listId, campaign.id)
-    const candidateIds = await getMailingListCandidateIds(listId)
     await applyPublicationPauseRules(candidateIds)
   }
 
