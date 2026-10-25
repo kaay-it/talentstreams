@@ -592,7 +592,7 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
           // card, not a native uploaded photo, and crops/pads any other aspect ratio to fit that
           // card (confirmed by testing several off-ratio sizes — vertical bands on a near-square
           // image, horizontal bands on an overly wide one; 1.91:1 is the documented safe ratio).
-          photo: `${appUrl}/telegram-notify-v6.png`,
+          photo: `${appUrl}/telegram-notify-v7.png`,
         },
       ),
     ),
