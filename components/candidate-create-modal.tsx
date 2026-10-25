@@ -207,10 +207,9 @@ export function CandidateCreateModal({
                   />
                 </Field>
 
-                <Field label="Email" required>
+                <Field label="Email">
                   <input
                     type="email"
-                    required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"

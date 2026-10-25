@@ -483,10 +483,9 @@ export function CandidateEditModal({
                   />
                 </Field>
 
-                <Field label="Email" required>
+                <Field label="Email">
                   <input
                     type="email"
-                    required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"
@@ -515,12 +514,24 @@ export function CandidateEditModal({
                 </Field>
 
                 <Field label="Активен с">
-                  <input
-                    type="date"
-                    value={activeSince}
-                    onChange={(e) => setActiveSince(e.target.value)}
-                    className={inputCls}
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={activeSince}
+                      onChange={(e) => setActiveSince(e.target.value)}
+                      className={inputCls}
+                    />
+                    {activeSince && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveSince("")}
+                        title="Очистить дату — кандидат не будет ограничен по дате"
+                        className="shrink-0 rounded-lg border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
+                      >
+                        Очистить
+                      </button>
+                    )}
+                  </div>
                 </Field>
 
                 <Field label="Страна (текущая)">
