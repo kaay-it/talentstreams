@@ -583,7 +583,11 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
         `<b>Новый выпуск Talent Stream уже готов!</b>\n\nВ поток ${escapeHtml(list.stream)} от ${escapeHtml(date)} вошли ${candidateIds.length} ${candidatePlural(candidateIds.length)}`,
         {
           button: { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}` },
-          photo: `${appUrl}/telegram-notify.png`,
+          // Telegram caches an external photo per exact URL (confirmed by testing — a file
+          // changed in place at the same URL kept showing the stale version). The filename is
+          // versioned on purpose: bump it (public/telegram-notify-vN.png) whenever the image
+          // itself changes, so Telegram is forced to fetch fresh instead of serving a cached miss.
+          photo: `${appUrl}/telegram-notify-v2.png`,
         },
       ),
     ),
