@@ -8,7 +8,7 @@ import { appendContactRequest, updateContactRequestStatus, type ContactRequestSt
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
-import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
+import { getEmployers, getEmployerByToken, confirmedEmployersForStream, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
 import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, deleteAddressBook, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
@@ -502,6 +502,9 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   const recipientTokens = await getMailingListRecipientTokens(listId)
   let bookId: number
   let adhocBookId: number | null = null
+  // Same population the email campaign reaches — reused below to also notify via Telegram
+  // (TASK-35, часть 2) once the campaign is confirmed sent.
+  let notifyEmployers: Employer[]
 
   if (recipientTokens.length) {
     const recipients = (await Promise.all(recipientTokens.map((t) => getEmployerByToken(t))))
@@ -527,8 +530,10 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
       ),
     )
     bookId = adhocBookId
+    notifyEmployers = recipients
   } else {
     bookId = await getOrCreateBook(list.stream, token)
+    notifyEmployers = confirmedEmployersForStream(await getEmployers(), { name: list.stream })
   }
 
   const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
@@ -554,6 +559,19 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   // can't wait that out (10s hard cap on a Vercel Hobby serverless function). The daily
   // cleanup-adhoc-books cron (vercel.json) deletes it once SendPulse reports the campaign fully
   // processed.
+
+  // TASK-35, часть 2 — same recipients the email just went to, also pinged on Telegram (whoever
+  // connected the bot; sendTelegramToEmployer() never throws, just no-ops for anyone who hasn't —
+  // best-effort, Telegram is a supplementary channel on top of email, not load-bearing). Fires on
+  // every real send including a resend, mirroring createCampaign() above (also unconditional).
+  await Promise.all(
+    notifyEmployers.map((employer) =>
+      sendTelegramToEmployer(
+        employer.token,
+        `Новый выпуск ${list.stream} Talent Stream уже готов для вас!\n${date}\n\nОткрыть подборку: ${appUrl}/list/${listId}?e=${employer.token}`,
+      ),
+    ),
+  )
 
   // Only on a genuine first send — a resend must not advance any candidate's pause window again.
   if (!alreadySent) {
