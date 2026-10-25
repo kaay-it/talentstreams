@@ -642,7 +642,6 @@ export type NewCandidateData = {
 
 export async function createCandidate(data: NewCandidateData): Promise<RegisterCandidateResult> {
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
-  if (!data.email.trim()) return { ok: false, error: "Укажите email" }
 
   const id = crypto.randomUUID()
   try {
@@ -704,7 +703,6 @@ export async function updateCandidate(
   },
 ): Promise<RegisterCandidateResult> {
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
-  if (!data.email.trim()) return { ok: false, error: "Укажите email" }
   try {
     await updateCandidateFields(id, {
       name: data.name,
