@@ -8,7 +8,7 @@ import { appendContactRequest, updateContactRequestStatus, type ContactRequestSt
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
-import { getEmployers, getEmployerByToken, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
+import { getEmployers, getEmployerByToken, confirmedEmployersForStream, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
 import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, deleteAddressBook, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
@@ -241,6 +241,14 @@ export type PublishResult = {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+function candidatePlural(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return "кандидат"
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "кандидата"
+  return "кандидатов"
 }
 
 function buildEmailHtml(stream: string, date: string, url: string, telegramUrl: string | null): string {
@@ -502,6 +510,9 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   const recipientTokens = await getMailingListRecipientTokens(listId)
   let bookId: number
   let adhocBookId: number | null = null
+  // Same population the email campaign reaches — reused below to also notify via Telegram
+  // (TASK-35, часть 2) once the campaign is confirmed sent.
+  let notifyEmployers: Employer[]
 
   if (recipientTokens.length) {
     const recipients = (await Promise.all(recipientTokens.map((t) => getEmployerByToken(t))))
@@ -527,8 +538,10 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
       ),
     )
     bookId = adhocBookId
+    notifyEmployers = recipients
   } else {
     bookId = await getOrCreateBook(list.stream, token)
+    notifyEmployers = confirmedEmployersForStream(await getEmployers(), { name: list.stream })
   }
 
   const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
@@ -555,10 +568,27 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   // cleanup-adhoc-books cron (vercel.json) deletes it once SendPulse reports the campaign fully
   // processed.
 
+  const candidateIds = await getMailingListCandidateIds(listId)
+
+  // TASK-35, часть 2 — same recipients the email just went to, also pinged on Telegram (whoever
+  // connected the bot; sendTelegramToEmployer() never throws, just no-ops for anyone who hasn't —
+  // best-effort, Telegram is a supplementary channel on top of email, not load-bearing). Fires on
+  // every real send including a resend, mirroring createCampaign() above (also unconditional).
+  // Candidate count shown here on purpose — unlike the email body (TASK-26's neutral phrasing,
+  // no exact count), this was an explicit request for the Telegram channel specifically.
+  await Promise.all(
+    notifyEmployers.map((employer) =>
+      sendTelegramToEmployer(
+        employer.token,
+        `<b>Новый выпуск Talent Stream уже готов!</b>\n\nВ поток ${escapeHtml(list.stream)} от ${escapeHtml(date)} вошли ${candidateIds.length} ${candidatePlural(candidateIds.length)}`,
+        { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}` },
+      ),
+    ),
+  )
+
   // Only on a genuine first send — a resend must not advance any candidate's pause window again.
   if (!alreadySent) {
     await markMailingListSent(listId, campaign.id)
-    const candidateIds = await getMailingListCandidateIds(listId)
     await applyPublicationPauseRules(candidateIds)
   }
 
