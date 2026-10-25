@@ -3,7 +3,7 @@ import { eq, inArray, and, isNotNull, ne } from "drizzle-orm"
 import { db } from "./index"
 import { mailingLists, mailingListEntries, mailingListRecipients, streams } from "./schema"
 import { getStreamIdByName } from "./streams"
-import { getActiveCandidates, type Candidate } from "./candidates"
+import { getCandidates, type Candidate } from "./candidates"
 
 export type MailingListEntry = {
   profile: Candidate
@@ -76,7 +76,11 @@ export async function getMailingList(listId: string): Promise<MailingList | null
   const candidateIds = new Set(entryRows.map((r) => r.candidateId))
   if (!candidateIds.size) return null
 
-  const allProfiles = await getActiveCandidates()
+  // All statuses, not just getActiveCandidates() — a candidate's historical membership in an
+  // already-sent release must survive their status changing afterward (e.g. TASK-05's pause/
+  // retirement to "Не публиковать" right after this exact send); country/company filtering for
+  // a specific employer still happens downstream (filterCandidatesForEmployer in the page).
+  const allProfiles = await getCandidates()
   const entries: MailingListEntry[] = allProfiles
     .filter((p) => candidateIds.has(p.id))
     .map((p) => ({ profile: p, mailingStream: h.streamName ?? "" }))
