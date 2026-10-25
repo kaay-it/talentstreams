@@ -183,7 +183,7 @@ searchCompanies(query) (TASK-36) — тонкая обёртка над lib/db/c
     talentStreams.webApp.profilePage -> talentStreams.webApp.dbLib "getCandidateById(id)"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.dbLib "getMailingList(listId) — джойн с getActiveCandidates() (candidates.ts, TASK-DB-4)"
     talentStreams.webApp.mailingListPage -> talentStreams.webApp.dbLib "getStreamsDetailed() — типы стримов для тегов на карточке (TASK-27)"
-    talentStreams.webApp.releasesPage -> talentStreams.webApp.dbLib "getActiveCandidates() — подходящие кандидаты на стрим для ReleaseCreateModal"
+    talentStreams.webApp.releasesPage -> talentStreams.webApp.dbLib "getActiveCandidates() — подходящие кандидаты на стрим для ReleaseCreateModal; getCandidates() (все статусы, не только Активный) — резолвит имена для candidateNames (ReleaseDetailModal/CampaignHistory), чтобы кандидат не пропадал из истории выпуска после смены статуса (пауза TASK-05 и т. п.)"
     talentStreams.webApp.releasesPage -> talentStreams.webApp.dbLib "getMailingLists() / getStreams() / getEmployers() — выпуски и подтверждённые подписчики на стрим для ReleaseCreateModal"
     talentStreams.webApp.releasesPage -> talentStreams.webApp.sendPulseLib "getBookEmailCount() — проверка пустой книги"
     talentStreams.webApp.employersPage -> talentStreams.webApp.dbLib "getEmployers()"

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle, ExternalLink } from "lucide-react"
-import { getActiveCandidates, getEligibleCandidatesForRelease, getPausedCandidatesForRelease } from "@/lib/db/candidates"
+import { getCandidates, getActiveCandidates, getEligibleCandidatesForRelease, getPausedCandidatesForRelease } from "@/lib/db/candidates"
 import { getMailingLists, campaignNameFor } from "@/lib/db/mailing-lists"
 import { getStreams } from "@/lib/db/streams"
 import { getEmployers, confirmedEmployersForStream, type Employer, type EmployerPickOption } from "@/lib/db/employers"
@@ -25,11 +25,12 @@ export default async function ReleasesPage({
     notFound()
   }
 
-  const [lists, campaigns, streams, candidates, allEmployers] = await Promise.all([
+  const [lists, campaigns, streams, candidates, allCandidates, allEmployers] = await Promise.all([
     getMailingLists(),
     getCampaigns(),
     getStreams(),
     getActiveCandidates(),
+    getCandidates(),
     getEmployers(),
   ])
 
@@ -77,7 +78,12 @@ export default async function ReleasesPage({
     campaignsByTitle.set(c.name, arr)
   }
 
-  const candidateById = new Map(candidates.map((c) => [c.id, c]))
+  // All statuses, not just getActiveCandidates() — a release's historical membership (candidate
+  // names in ReleaseDetailModal / CampaignHistory) must survive a candidate's status changing
+  // after the fact (e.g. TASK-05's pause/retirement to "Не публиковать" right after this exact
+  // send). candidates (active-only) is reserved for eligibleByStream/pausedByStream above, the
+  // real pool for creating a NEW release.
+  const candidateById = new Map(allCandidates.map((c) => [c.id, c]))
 
   const token = await getToken()
   const streamBookCounts = new Map<string, number>()
