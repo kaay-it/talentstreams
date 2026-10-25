@@ -340,7 +340,7 @@ searchCompanies(query) (TASK-36) — тонкая обёртка над lib/db/c
       talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "createCampaign(bookId, subject, html, campaignNameFor(stream,date,recipientLabel))"
       talentStreams.webApp.sendPulseLib -> sendPulse "POST /oauth/access_token → POST /campaigns"
       talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "ошибка createCampaign(): deleteAddressBook(adhocBookId) — книга ещё ничем не занята, best-effort; на успехе НЕ удаляется здесь (TASK-43 ✅, см. cleanupCron)"
-      talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "успех: sendTelegramToEmployer(token, text, button) на каждого получателя (confirmedEmployersForStream() либо recipients, TASK-35 часть 2 ✅) — <b>стрим</b> + кнопка «Открыть подборку →» с персональной ссылкой, Promise.all, best-effort"
+      talentStreams.webApp.serverActions -> talentStreams.webApp.sendPulseLib "успех: sendTelegramToEmployer(token, text, button) на каждого получателя (confirmedEmployersForStream() либо recipients, TASK-35 часть 2 ✅) — текст «готов для вас», стрим+дата в самой кнопке «Открыть поток {стрим} за {дата} →» с персональной ссылкой, Promise.all, best-effort"
       talentStreams.webApp.sendPulseLib -> sendPulse "POST /telegram/contacts/getByVariable + POST /telegram/contacts/send (с button — parse_mode html + inline_keyboard; /sendText без него, как у confirmEmployer())"
       talentStreams.webApp.serverActions -> talentStreams.webApp.dbLib "markMailingListSent(listId, campaign.id) — только при первой отправке"
       talentStreams.webApp.dbLib -> neon "UPDATE mailingLists SET sentCampaignId = ... WHERE id = ..."
