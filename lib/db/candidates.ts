@@ -28,7 +28,7 @@ export type Candidate = {
   status: CandidateStatus
   /** ru-RU text, e.g. "21.07.2026" — "" means not set (candidate always passes the availability
    * filter). Stored in Postgres as a native nullable date; converted at this module's boundary
-   * so the rest of the app (toISODate/toRuDate in candidate-edit-modal.tsx, approveCandidate(),
+   * so the rest of the app (toISODate/toRuDate in candidate-form-modal.tsx, approveCandidate(),
    * the pure filter helpers below) keeps working with the same ru-RU string it always has. */
   activeSince: string
   timestamp: string

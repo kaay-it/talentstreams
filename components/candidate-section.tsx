@@ -3,8 +3,7 @@
 import { useMemo, useState, useTransition } from "react"
 import { CheckCircle2, XCircle, Ban, Trash2, FileText, Link as LinkIcon, Loader2, Pencil, Plus, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { approveCandidate, rejectCandidate, deleteCandidate, type ResumeVersion } from "@/app/actions"
-import { CandidateEditModal } from "@/components/candidate-edit-modal"
-import { CandidateCreateModal } from "@/components/candidate-create-modal"
+import { CandidateFormModal } from "@/components/candidate-form-modal"
 import { PaginationControls, type PageSize } from "@/components/pagination-controls"
 import { withDownloadFilename } from "@/lib/blob"
 import type { Candidate, CandidateStatus } from "@/lib/db/candidates"
@@ -31,7 +30,7 @@ function parseIsoDate(s: string): number | null {
   return Number.isNaN(t) ? null : t
 }
 
-/** candidate.activeSince is stored as ru-RU text ("21.07.2026"), not ISO — see toRuDate() in candidate-edit-modal.tsx. */
+/** candidate.activeSince is stored as ru-RU text ("21.07.2026"), not ISO — see toRuDate() in candidate-form-modal.tsx. */
 function parseRuDate(s: string): number | null {
   const m = s.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/)
   if (!m) return null
@@ -154,7 +153,7 @@ function CandidateRow({
 
   return (
     <>
-      {editing && <CandidateEditModal candidate={candidate} streams={streams} onClose={() => setEditing(false)} />}
+      {editing && <CandidateFormModal candidate={candidate} streams={streams} onClose={() => setEditing(false)} />}
       <tr className={`border-b last:border-b-0 align-top transition-opacity ${done ? "opacity-50" : ""}`}>
         <td className="px-4 py-3">
           <div className="flex items-center gap-2 flex-wrap">
@@ -438,7 +437,7 @@ export function CandidateSection({
         </button>
       </div>
 
-      {creating && <CandidateCreateModal streams={streams} onClose={() => setCreating(false)} />}
+      {creating && <CandidateFormModal streams={streams} onClose={() => setCreating(false)} />}
 
       <div className="rounded-xl border bg-card overflow-hidden">
         {candidates.length === 0 ? (

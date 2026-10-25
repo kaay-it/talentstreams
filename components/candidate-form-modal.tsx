@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useTransition } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Plus, Trash2, CheckCircle2, OctagonX } from "lucide-react"
-import { updateCandidate, getCandidateResumeHistory, deleteCandidateResumeVersion, getCandidateMailingHistory, searchCompanies, type ResumeVersion, type CandidateMailingHistoryEntry } from "@/app/actions"
+import { X, Check, Paperclip, Loader2, FileText, Link as LinkIcon, Trash2, CheckCircle2, OctagonX } from "lucide-react"
+import { createCandidate, updateCandidate, getCandidateResumeHistory, deleteCandidateResumeVersion, getCandidateMailingHistory, searchCompanies, type ResumeVersion, type CandidateMailingHistoryEntry } from "@/app/actions"
 import { ADDITIONAL_COUNTRIES } from "@/components/employer-registration-modal"
 import { withDownloadFilename } from "@/lib/blob"
 import type { Candidate } from "@/lib/db/candidates"
@@ -14,6 +14,9 @@ const inputCls =
 // Must match SEARCH_MIN_LENGTH in lib/db/companies.ts — searchCompanies() ignores shorter queries anyway.
 const SEARCH_MIN_LENGTH = 3
 
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10)
+}
 /** activeSince is stored as ru-RU locale text ("21.07.2026") to match approveCandidate(); <input type="date"> needs ISO. */
 function toISODate(ruDate: string): string {
   const m = ruDate.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/)
@@ -137,9 +140,6 @@ function ResumeVersionList({
   )
 }
 
-/** Free-text multi-value chip input (company/industry names — not a fixed list like streams or
- * countries). Type a value, Enter or comma commits it as a chip; Backspace on an empty draft
- * removes the last chip; blur also commits whatever's left typed, so nothing is silently lost. */
 /** Free-text multi-value chip input — optionally backed by a suggestions dropdown (onSearch,
  * debounced, SEARCH_MIN_LENGTH floor — same convention as CompanyAutocompleteInput). Picking a
  * suggestion or typing a brand-new value and pressing Enter/comma are both valid; a suggestion
@@ -275,66 +275,71 @@ function Field({
   )
 }
 
-export function CandidateEditModal({
+/** One modal for both "add" and "edit" — pass `candidate` to edit, omit it to create (same
+ * readOnly-flag-driven pattern as ReleaseDetailModal, TASK-41). The two forms used to be separate
+ * components that duplicated ~90% of their fields/handlers; the only real differences are what's
+ * edit-only (resume/mailing history, excluded companies/streams — nothing to show yet for a
+ * candidate that doesn't exist) and which Server Action the submit calls. */
+export function CandidateFormModal({
   candidate,
   streams,
   onClose,
 }: {
-  candidate: Candidate
+  candidate?: Candidate
   streams: string[]
   onClose: () => void
 }) {
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
   const [errorMsg, setErrorMsg] = useState("")
 
-  const [name, setName] = useState(candidate.name)
-  const [title, setTitle] = useState(candidate.title)
-  const [email, setEmail] = useState(candidate.email)
-  const [phone, setPhone] = useState(candidate.phone)
+  const [name, setName] = useState(candidate?.name ?? "")
+  const [title, setTitle] = useState(candidate?.title ?? "")
+  const [email, setEmail] = useState(candidate?.email ?? "")
+  const [phone, setPhone] = useState(candidate?.phone ?? "")
 
-  // "none" = keep the current resume as-is; "file"/"link" = adding a new version to replace it.
+  // "none" = keep the current resume as-is (edit) / no resume yet (create); "file"/"link" = adding one.
   const [resumeAction, setResumeAction] = useState<"none" | "file" | "link">("none")
   const [resumeFile, setResumeFile] = useState<File | null>(null)
   const [newResumeUrl, setNewResumeUrl] = useState("")
 
-  const [coverLetter, setCoverLetter] = useState(candidate.coverLetter)
-  const [level, setLevel] = useState(candidate.level)
-  const [selectedStreams, setSelectedStreams] = useState<string[]>(candidate.stream)
-  const [countryPrimary, setCountryPrimary] = useState(candidate.countryPrimary)
-  const [countryDesired, setCountryDesired] = useState(candidate.countryDesired)
-  const [activeSince, setActiveSince] = useState(toISODate(candidate.activeSince))
-  const [summary, setSummary] = useState(candidate.summary)
-  const [excludedCompanies, setExcludedCompanies] = useState<string[]>(candidate.excludedCompanies)
-  const [excludedStreams, setExcludedStreams] = useState<string[]>(candidate.excludedStreams)
+  const [coverLetter, setCoverLetter] = useState(candidate?.coverLetter ?? "")
+  const [level, setLevel] = useState(candidate?.level ?? "")
+  const [selectedStreams, setSelectedStreams] = useState<string[]>(candidate?.stream ?? [])
+  const [countryPrimary, setCountryPrimary] = useState(candidate?.countryPrimary ?? "")
+  const [countryDesired, setCountryDesired] = useState(candidate?.countryDesired ?? "")
+  const [activeSince, setActiveSince] = useState(candidate ? toISODate(candidate.activeSince) : todayISO())
+  const [summary, setSummary] = useState(candidate?.summary ?? "")
+  const [excludedCompanies, setExcludedCompanies] = useState<string[]>(candidate?.excludedCompanies ?? [])
+  const [excludedStreams, setExcludedStreams] = useState<string[]>(candidate?.excludedStreams ?? [])
 
   const [resumeHistory, setResumeHistory] = useState<ResumeVersion[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const resumeFiles = resumeHistory.filter((v) => v.kind === "file")
   const resumeLinks = resumeHistory.filter((v) => v.kind === "link")
   // candidates has no resumeUrl column — candidateResumes (newest first) is the only source of
-  // truth, so the current resume is simply its first entry.
+  // truth, so the current resume is simply its first entry. Stays [] in create mode (no id yet).
   const currentResumeUrl = resumeHistory[0]?.url ?? ""
 
   useEffect(() => {
-    if (!candidate.id) return
+    if (!candidate?.id) return
     setHistoryLoading(true)
     getCandidateResumeHistory(candidate.id)
       .then(setResumeHistory)
       .catch(() => setResumeHistory([]))
       .finally(() => setHistoryLoading(false))
-  }, [candidate.id])
+  }, [candidate?.id])
 
   const [mailingHistory, setMailingHistory] = useState<CandidateMailingHistoryEntry[]>([])
   const [mailingHistoryLoading, setMailingHistoryLoading] = useState(false)
 
   useEffect(() => {
-    if (!candidate.id) return
+    if (!candidate?.id) return
     setMailingHistoryLoading(true)
     getCandidateMailingHistory(candidate.id)
       .then(setMailingHistory)
       .catch(() => setMailingHistory([]))
       .finally(() => setMailingHistoryLoading(false))
-  }, [candidate.id])
+  }, [candidate?.id])
 
   function toggleStream(s: string) {
     setSelectedStreams((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
@@ -389,26 +394,42 @@ export function CandidateEditModal({
         finalUrl = newResumeUrl.trim()
       }
 
-      const resumeVersionChanged = Boolean(finalUrl && finalUrl !== currentResumeUrl)
-      const result = await updateCandidate(candidate.id, {
-        candidateId: candidate.id,
-        name,
-        email,
-        phone,
-        resumeUrl: finalUrl,
-        resumeVersionChanged,
-        resumeFilename: uploadedFilename,
-        coverLetter,
-        stream: selectedStreams,
-        level,
-        countryPrimary,
-        countryDesired,
-        activeSince: toRuDate(activeSince),
-        title,
-        summary,
-        excludedCompanies,
-        excludedStreams,
-      })
+      const result = candidate
+        ? await updateCandidate(candidate.id, {
+            candidateId: candidate.id,
+            name,
+            email,
+            phone,
+            resumeUrl: finalUrl,
+            resumeVersionChanged: Boolean(finalUrl && finalUrl !== currentResumeUrl),
+            resumeFilename: uploadedFilename,
+            coverLetter,
+            stream: selectedStreams,
+            level,
+            countryPrimary,
+            countryDesired,
+            activeSince: toRuDate(activeSince),
+            title,
+            summary,
+            excludedCompanies,
+            excludedStreams,
+          })
+        : await createCandidate({
+            name,
+            title,
+            email,
+            phone,
+            level,
+            activeSince: toRuDate(activeSince),
+            stream: selectedStreams,
+            countryPrimary,
+            countryDesired,
+            summary,
+            resumeUrl: finalUrl,
+            resumeFilename: uploadedFilename,
+            coverLetter,
+          })
+
       if (result.ok) {
         setStatus("success")
       } else {
@@ -417,7 +438,7 @@ export function CandidateEditModal({
       }
     } catch (err) {
       setStatus("error")
-      setErrorMsg(err instanceof Error ? err.message : "Не удалось сохранить изменения")
+      setErrorMsg(err instanceof Error ? err.message : `Не удалось ${candidate ? "сохранить изменения" : "добавить кандидата"}`)
     }
   }
 
@@ -428,12 +449,12 @@ export function CandidateEditModal({
         <div
           role="dialog"
           aria-modal="true"
-          aria-labelledby="edit-candidate-title"
+          aria-labelledby="candidate-form-title"
           className="relative w-full max-w-2xl rounded-2xl border bg-card shadow-xl"
         >
           <div className="flex items-center justify-between border-b px-6 py-4">
-            <h2 id="edit-candidate-title" className="text-base font-semibold text-card-foreground">
-              Редактировать кандидата
+            <h2 id="candidate-form-title" className="text-base font-semibold text-card-foreground">
+              {candidate ? "Редактировать кандидата" : "Добавить кандидата"}
             </h2>
             <button
               onClick={onClose}
@@ -449,8 +470,14 @@ export function CandidateEditModal({
               <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <Check className="size-6" />
               </span>
-              <h3 className="mt-4 text-lg font-semibold text-card-foreground">Сохранено</h3>
-              <p className="mt-2 text-sm text-muted-foreground">Данные кандидата обновлены.</p>
+              <h3 className="mt-4 text-lg font-semibold text-card-foreground">
+                {candidate ? "Сохранено" : "Добавлен"}
+              </h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {candidate
+                  ? "Данные кандидата обновлены."
+                  : "Кандидат в статусе «На проверке» — появится в подборках и рассылках после подтверждения."}
+              </p>
               <button
                 onClick={onClose}
                 className="mt-6 rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
@@ -578,57 +605,59 @@ export function CandidateEditModal({
                   )}
                 </Field>
 
-                <Field label="Исключённые компании" full danger>
-                  <TagsInput
-                    values={excludedCompanies}
-                    onChange={setExcludedCompanies}
-                    placeholder="Например: ООО Пример — Enter чтобы добавить"
-                    onSearch={async (query) => (await searchCompanies(query)).map((c) => c.name)}
-                  />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Кандидат не попадёт в подборку работодателю, у которого «Компания» совпадает посимвольно — сверяйтесь с разделом «Компании».
-                  </p>
-                </Field>
-
-                <Field label="Исключённые стримы" full danger>
-                  <TagsInput
-                    values={excludedStreams}
-                    onChange={setExcludedStreams}
-                    placeholder="Точное название стрима — Enter чтобы добавить"
-                    onSearch={async (query) => streams.filter((s) => s.toLowerCase().includes(query.toLowerCase()))}
-                  />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Сверяется со стримами работодателя — выберите из подсказки или впишите точное название.
-                  </p>
-                </Field>
-
-                {candidate.id && (
-                  <Field label="История рассылок" full>
-                    {mailingHistoryLoading ? (
-                      <p className="text-xs text-muted-foreground">Загрузка истории рассылок…</p>
-                    ) : mailingHistory.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        Кандидат ещё не попадал ни в один выпуск.
+                {candidate && (
+                  <>
+                    <Field label="Исключённые компании" full danger>
+                      <TagsInput
+                        values={excludedCompanies}
+                        onChange={setExcludedCompanies}
+                        placeholder="Например: ООО Пример — Enter чтобы добавить"
+                        onSearch={async (query) => (await searchCompanies(query)).map((c) => c.name)}
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Кандидат не попадёт в подборку работодателю, у которого «Компания» совпадает посимвольно — сверяйтесь с разделом «Компании».
                       </p>
-                    ) : (
-                      <ul className="divide-y rounded-lg border">
-                        {mailingHistory.map((entry) => (
-                          <li key={entry.listId} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-                            <span className="shrink-0 text-muted-foreground">{entry.date}</span>
-                            <span className="min-w-0 flex-1 truncate text-foreground">{entry.stream}</span>
-                            {entry.sent ? (
-                              <span className="inline-flex shrink-0 items-center gap-1 text-emerald-600">
-                                <CheckCircle2 className="size-3.5" />
-                                Отправлено
-                              </span>
-                            ) : (
-                              <span className="shrink-0 text-muted-foreground">Не отправлено</span>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </Field>
+                    </Field>
+
+                    <Field label="Исключённые стримы" full danger>
+                      <TagsInput
+                        values={excludedStreams}
+                        onChange={setExcludedStreams}
+                        placeholder="Точное название стрима — Enter чтобы добавить"
+                        onSearch={async (query) => streams.filter((s) => s.toLowerCase().includes(query.toLowerCase()))}
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Сверяется со стримами работодателя — выберите из подсказки или впишите точное название.
+                      </p>
+                    </Field>
+
+                    <Field label="История рассылок" full>
+                      {mailingHistoryLoading ? (
+                        <p className="text-xs text-muted-foreground">Загрузка истории рассылок…</p>
+                      ) : mailingHistory.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          Кандидат ещё не попадал ни в один выпуск.
+                        </p>
+                      ) : (
+                        <ul className="divide-y rounded-lg border">
+                          {mailingHistory.map((entry) => (
+                            <li key={entry.listId} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                              <span className="shrink-0 text-muted-foreground">{entry.date}</span>
+                              <span className="min-w-0 flex-1 truncate text-foreground">{entry.stream}</span>
+                              {entry.sent ? (
+                                <span className="inline-flex shrink-0 items-center gap-1 text-emerald-600">
+                                  <CheckCircle2 className="size-3.5" />
+                                  Отправлено
+                                </span>
+                              ) : (
+                                <span className="shrink-0 text-muted-foreground">Не отправлено</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </Field>
+                  </>
                 )}
 
                 <Field label="Summary" full>
@@ -650,7 +679,7 @@ export function CandidateEditModal({
                           onClick={() => setResumeAction("file")}
                           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
                         >
-                          <Plus className="size-3.5" />
+                          <Paperclip className="size-3.5" />
                           Добавить файл
                         </button>
                         <button
@@ -658,7 +687,7 @@ export function CandidateEditModal({
                           onClick={() => setResumeAction("link")}
                           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
                         >
-                          <Plus className="size-3.5" />
+                          <LinkIcon className="size-3.5" />
                           Добавить ссылку
                         </button>
                       </div>
@@ -695,9 +724,11 @@ export function CandidateEditModal({
                             Отмена
                           </button>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          Старое резюме не удаляется — остаётся в истории версий ниже.
-                        </p>
+                        {candidate && (
+                          <p className="text-xs text-muted-foreground">
+                            Старое резюме не удаляется — остаётся в истории версий ниже.
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -721,7 +752,7 @@ export function CandidateEditModal({
                       </div>
                     )}
 
-                    {candidate.id && (
+                    {candidate?.id && (
                       <div className="space-y-3 pt-1">
                         {historyLoading ? (
                           <p className="text-xs text-muted-foreground">Загрузка истории резюме…</p>
@@ -786,7 +817,9 @@ export function CandidateEditModal({
                 disabled={status === "submitting"}
                 className="mt-5 w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {status === "submitting" ? "Сохранение…" : "Сохранить"}
+                {status === "submitting"
+                  ? (candidate ? "Сохранение…" : "Добавляем…")
+                  : (candidate ? "Сохранить" : "Добавить кандидата")}
               </button>
             </form>
           )}
