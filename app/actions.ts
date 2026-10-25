@@ -303,8 +303,12 @@ function buildEmailHtml(stream: string, date: string, url: string, telegramUrl: 
             </span>
           </p>
 
+          <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.5;font-family:${font}">
+            Здравствуйте, {{Имя}}!
+          </p>
+
           <h1 style="margin:0 0 10px;font-size:22px;font-weight:600;color:#0f172a;line-height:1.35;letter-spacing:-0.02em;font-family:${font}">
-            Выпуск ${s} Talent Stream подготовлен специально для вас.
+            Новый выпуск ${s} Talent Stream уже готов для вас.
           </h1>
 
           <p style="margin:0 0 16px;font-size:14px;color:#64748b;line-height:1.65;font-family:${font}">
@@ -312,13 +316,12 @@ function buildEmailHtml(stream: string, date: string, url: string, telegramUrl: 
           </p>
 
           <p style="margin:0 0 24px;font-size:13px;color:#94a3b8;font-family:${font}">
-            ${d}&nbsp;&nbsp;·&nbsp;&nbsp;новые кандидаты в этом выпуске
+            Новые кандидаты в выпуске от ${d}
           </p>
 
           <hr style="border:none;border-top:1px solid #f1f5f9;margin:0 0 24px">
 
           <p style="margin:0 0 20px;font-size:14px;color:#374151;line-height:1.65;font-family:${font}">
-            Здравствуйте, {{Имя}}!<br>
             Перейдите по ссылке, чтобы познакомиться с кандидатами этого выпуска.
           </p>
 
