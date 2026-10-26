@@ -1,5 +1,5 @@
 import "server-only"
-import { eq, inArray, and, isNotNull, ne } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 import { db } from "./index"
 import { mailingLists, mailingListEntries, mailingListRecipients, streams } from "./schema"
 import { getStreamIdByName } from "./streams"
@@ -267,31 +267,23 @@ export async function getMailingListsForCandidate(candidateId: string): Promise<
     .map(({ listId, stream, targetDate, sentCampaignId }) => ({ listId, stream, date: timestampToRu(targetDate), sentCampaignId }))
 }
 
-/** Every sent restricted (narrowed-recipient) release — the only ones that ever got a throwaway
- * SendPulse address book (`${stream} — ${date} — ${listId}`, see publishMailingList()). A
- * whole-stream release reuses the long-lived per-stream book and is never a candidate for this
- * cleanup. Used by the cleanup-adhoc-books cron — recipientLabel itself isn't needed there, just
- * enough to reconstruct the exact book name and know which campaign to check. */
-export async function getSentRestrictedMailingLists(): Promise<
-  { listId: string; stream: string; date: string; sentCampaignId: number }[]
-> {
-  const rows = await db
-    .select({
-      listId: mailingLists.id,
-      streamName: streams.name,
-      targetDate: mailingLists.targetDate,
-      sentCampaignId: mailingLists.sentCampaignId,
-    })
-    .from(mailingLists)
-    .leftJoin(streams, eq(mailingLists.streamId, streams.id))
-    .where(and(isNotNull(mailingLists.sentCampaignId), ne(mailingLists.recipientLabel, "")))
+export type MailingListCleanupStatus = { sentCampaignId: number | null; targetDate: string }
 
-  return rows.map((r) => ({
-    listId: r.listId,
-    stream: r.streamName ?? "",
-    date: timestampToRu(r.targetDate),
-    sentCampaignId: r.sentCampaignId as number,
-  }))
+/** Batched lookup of just enough mailingLists state to decide whether a throwaway SendPulse
+ * address book is safe to clean up — used by the cleanup-adhoc-books cron, which discovers
+ * candidate books directly from SendPulse (by naming pattern) and then cross-references each
+ * extracted listId here. A listId missing from the returned map means the release row no longer
+ * exists (deleteMailingList() only ever allows deleting an unsent release, so a missing row is
+ * never one that had a successful campaign). */
+export async function getMailingListCleanupStatuses(
+  listIds: string[],
+): Promise<Map<string, MailingListCleanupStatus>> {
+  if (!listIds.length) return new Map()
+  const rows = await db
+    .select({ id: mailingLists.id, sentCampaignId: mailingLists.sentCampaignId, targetDate: mailingLists.targetDate })
+    .from(mailingLists)
+    .where(inArray(mailingLists.id, listIds))
+  return new Map(rows.map((r) => [r.id, { sentCampaignId: r.sentCampaignId, targetDate: r.targetDate }]))
 }
 
 /** Writes the hand-picked recipient-override rows for a release — one row per employer token.

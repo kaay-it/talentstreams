@@ -134,6 +134,25 @@ export async function getBookId(name: string, token: string): Promise<number | n
   return _bookCache?.get(name)?.id ?? null
 }
 
+/** Raw list of every address book in the account — bypasses the name-keyed cache (which only
+ * ever holds the books some other call has already looked up/created). Used by the
+ * cleanup-adhoc-books cron to sweep for throwaway books by naming pattern rather than by
+ * cross-referencing a known set of listIds first. */
+export async function listAllAddressBooks(token: string): Promise<{ id: number; name: string }[]> {
+  try {
+    const { status, text } = await spGet(`${API}/addressbooks?limit=500&offset=0`, { Authorization: `Bearer ${token}` })
+    if (status < 200 || status >= 300) {
+      console.warn(`[SendPulse] GET /addressbooks status=${status}`, text)
+      return []
+    }
+    const books = JSON.parse(text) as Array<{ id: number; name: string }>
+    return books.map((b) => ({ id: b.id, name: b.name }))
+  } catch (err) {
+    console.error("[SendPulse] listAllAddressBooks failed:", err)
+    return []
+  }
+}
+
 /** Permanently deletes a SendPulse address book — tears down the throwaway book built for a
  * narrowed-recipient release send. Best-effort: never throws, just logs, same convention as
  * setTelegramContactState() — cleanup failing must never affect a campaign that already went out. */

@@ -56,7 +56,7 @@ app/
     publish/[listId]/route.ts       # curl-запуск рассылки
     upload/route.ts                 # POST: загрузка резюме → Vercel Blob
     resume/route.ts                 # GET: прокси приватных blob-файлов
-    cron/cleanup-adhoc-books/route.ts # Ежедневный Vercel Cron (vercel.json): удаляет одноразовые SendPulse-книги ограниченных рассылок после реальной отправки (TASK-43)
+    cron/cleanup-adhoc-books/route.ts # Ежедневный Vercel Cron (vercel.json): удаляет одноразовые SendPulse-книги ограниченных рассылок — после реальной отправки, после удаления выпуска из редактора, либо после долгого простоя без отправки (TASK-43)
 
 lib/
   sheets.ts                         # Google Sheets: типы, чтение, запись — не часть боевого пути приложения; читается только lib/sheets-import.ts (TASK-39)
@@ -73,7 +73,7 @@ lib/
     employers.ts                    # CRUD работодателей (TASK-DB-3); employer.company — резолвленное имя через join на companies
     companies.ts                    # CRUD компаний, поиск для автодополнения, find-or-create (TASK-36)
     resumes.ts                      # История версий резюме кандидата (TASK-32), FK на candidates (ON DELETE CASCADE)
-    mailing-lists.ts                # CRUD выпусков (TASK-DB-5; заголовочная таблица mailingLists + sentCampaignId, TASK-40 ✅); campaignNameFor() — имя кампании SendPulse, живёт здесь (не app/actions.ts, "use server" требует async от каждого экспорта); replaceMailingListEntries()/replaceMailingListRecipients() — полная замена состава/получателей существующего выпуска (TASK-41 ✅); getSentRestrictedMailingLists() — отправленные ограниченные выпуски для крон-очистки одноразовых книг (TASK-43 ✅)
+    mailing-lists.ts                # CRUD выпусков (TASK-DB-5; заголовочная таблица mailingLists + sentCampaignId, TASK-40 ✅); campaignNameFor() — имя кампании SendPulse, живёт здесь (не app/actions.ts, "use server" требует async от каждого экспорта); replaceMailingListEntries()/replaceMailingListRecipients() — полная замена состава/получателей существующего выпуска (TASK-41 ✅); getMailingListCleanupStatuses(listIds) — пакетный sentCampaignId/targetDate по id для крон-очистки одноразовых книг (TASK-43 ✅)
     migrations/                     # SQL-миграции
 
 components/
