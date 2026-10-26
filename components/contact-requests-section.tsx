@@ -32,12 +32,14 @@ const STATUS_COLOR: Partial<Record<ContactRequestStatus, string>> = {
   "Завершён":               "bg-green-100 text-green-700",
 }
 
+type ProfileLabel = { name: string; title: string }
+
 export function ContactRequestsSection({
   requests,
-  profileTitles,
+  profileLabels,
 }: {
   requests: ContactRequest[]
-  profileTitles: Map<string, string>
+  profileLabels: Map<string, ProfileLabel>
 }) {
   const candidateRequests = requests.filter((r) => r.candidateId)
   const generalInquiries = requests.filter((r) => !r.candidateId)
@@ -54,7 +56,7 @@ export function ContactRequestsSection({
           <div className="rounded-xl border bg-card overflow-hidden">
             <div className="divide-y">
               {generalInquiries.map((req) => (
-                <RequestRow key={req.id} req={req} statuses={INQUIRY_STATUSES} profileTitles={profileTitles} showCandidate={false} />
+                <RequestRow key={req.id} req={req} statuses={INQUIRY_STATUSES} profileLabels={profileLabels} showCandidate={false} />
               ))}
             </div>
           </div>
@@ -67,7 +69,7 @@ export function ContactRequestsSection({
           <div className="rounded-xl border bg-card overflow-hidden">
             <div className="divide-y">
               {candidateRequests.map((req) => (
-                <RequestRow key={req.id} req={req} statuses={CANDIDATE_STATUSES} profileTitles={profileTitles} showCandidate />
+                <RequestRow key={req.id} req={req} statuses={CANDIDATE_STATUSES} profileLabels={profileLabels} showCandidate />
               ))}
             </div>
           </div>
@@ -80,12 +82,12 @@ export function ContactRequestsSection({
 function RequestRow({
   req,
   statuses,
-  profileTitles,
+  profileLabels,
   showCandidate,
 }: {
   req: ContactRequest
   statuses: ContactRequestStatus[]
-  profileTitles: Map<string, string>
+  profileLabels: Map<string, ProfileLabel>
   showCandidate: boolean
 }) {
   const [isPending, startTransition] = useTransition()
@@ -97,7 +99,8 @@ function RequestRow({
   }
 
   const date = req.timestamp ? new Date(req.timestamp).toLocaleDateString("ru-RU") : "—"
-  const candidateLabel = profileTitles.get(req.candidateId) ?? `#${req.candidateId.slice(0, 8)}`
+  const candidate = profileLabels.get(req.candidateId)
+  const candidateName = candidate?.name ?? `#${req.candidateId.slice(0, 8)}`
   const cols = showCandidate ? "sm:grid-cols-4" : "sm:grid-cols-3"
 
   return (
@@ -112,7 +115,8 @@ function RequestRow({
         {showCandidate && (
           <div className="min-w-0">
             <p className="text-xs text-muted-foreground">Кандидат</p>
-            <p className="text-sm truncate">{candidateLabel}</p>
+            <p className="text-sm font-medium truncate">{candidateName}</p>
+            {candidate?.title && <p className="text-xs text-muted-foreground truncate">{candidate.title}</p>}
           </div>
         )}
 

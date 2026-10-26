@@ -92,7 +92,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         archivedStreamsSection = component "ArchivedStreamsSection" "Отдельная схлопнутая секция страницы стримов («Архивные стримы (N)», закрыта по умолчанию, null если архивных нет) — не часть строки, как ReleaseDeleteButton, а весь блок целиком. Упрощённая read-only таблица (без inline-редактирования — архивный стрим не редактируется, только восстанавливается): ID/Название/Тип/Кандидаты/Подписчики/Описание + кнопка «Восстановить» (unarchiveStream(id), без подтверждения). Та же раскрываемая история рассылок на строку, что в StreamsTable." "React Client Component" "UI"
 
-        contactRequestsSection = component "ContactRequestsSection" "Список запросов с цветными бейджами и выпадающим статусом. Разделён на «Общие запросы» и «По кандидатам»." "React Client Component" "UI"
+        contactRequestsSection = component "ContactRequestsSection" "Список запросов с цветными бейджами и выпадающим статусом. Разделён на «Общие запросы» и «По кандидатам». Колонка «Кандидат» — имя (жирным) + роль под ним (мелко, если есть); раньше показывала только роль через profileTitles (title || name), из-за чего двух кандидатов с одинаковой ролью было не различить — теперь profileLabels несёт оба поля. Имена резолвятся через getCandidates() (все статусы), не getActiveCandidates() — историческая ссылка в запросе не должна пропадать, если кандидат позже сменил статус (та же логика, что в TASK-42)." "React Client Component" "UI"
 
         generalInquiryButton = component "GeneralInquiryButton" "Кнопка «Связаться с нами» в блоке «Не нашли подходящих». Пишет в Contact Requests без candidateId." "React Client Component" "UI"
 
