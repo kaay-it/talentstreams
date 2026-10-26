@@ -10,7 +10,7 @@ export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, confirmedEmployersForStream, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
 import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, deleteAddressBook, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 import { previewCandidatesImport as previewImport, importCandidatesFromSheet, type ImportPreview, type ImportResult } from "@/lib/sheets-import"
 export type { ImportPreview, ImportResult, ImportRow, ImportSkipped } from "@/lib/sheets-import"
@@ -554,11 +554,20 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   try {
     campaign = await createCampaign(bookId, subject, html, campaignName)
   } catch (err) {
-    // No campaign got created, so nothing references this throwaway book yet — safe to clean up
-    // right away (unlike the success path below: confirmed by testing that SendPulse refuses to
-    // delete a book that's attached to a pending/moderation campaign, so trying here would just
-    // silently fail anyway).
-    if (adhocBookId !== null) await deleteAddressBook(adhocBookId, token)
+    // Deliberately NOT deleting the ad-hoc book here (unlike earlier versions of this code).
+    // Real incident: a brand-new SendPulse contact (never added to any book before) kept
+    // failing error_code 798 across 3-4 manual retries over several minutes, each exhausting
+    // all 3 in-process retries — SendPulse's own indexing can apparently take far longer than
+    // a few seconds for a genuinely new contact, nowhere near coverable by an in-request retry
+    // (let alone the 10s Vercel Hobby cap). Deleting the book on every failed attempt forced
+    // each manual retry to recreate it from scratch, discarding whatever indexing progress
+    // SendPulse had already made on the previous attempt's identical contact. Leaving the book
+    // in place means the next manual "Отправить" click (getOrCreateBook finds this same book,
+    // addToAddressBook on an already-present email is a no-op) benefits from however much time
+    // has passed since the contact was first added, instead of resetting the clock.
+    // Known gap: if this release is deleted before ever sending successfully, this book has no
+    // automatic cleanup path (the daily cron below only looks at already-sent releases) — left
+    // as-is deliberately, simpler than the alternative right now.
     throw err
   }
   // Campaign created successfully — deliberately NOT deleting the ad-hoc book here. SendPulse
