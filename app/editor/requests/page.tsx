@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation"
 import { Info } from "lucide-react"
 import { getContactRequests } from "@/lib/db/contact-requests"
-import { getActiveCandidates } from "@/lib/db/candidates"
+import { getCandidates } from "@/lib/db/candidates"
 import { ContactRequestsSection } from "@/components/contact-requests-section"
 
 export const dynamic = "force-dynamic"
@@ -16,9 +16,12 @@ export default async function RequestsPage({
 
   if (editorSecret && secret !== editorSecret) notFound()
 
-  const [requests, profiles] = await Promise.all([getContactRequests(), getActiveCandidates()])
+  const [requests, profiles] = await Promise.all([getContactRequests(), getCandidates()])
 
-  const profileTitles = new Map(profiles.map((p) => [p.id, p.title || p.name || p.id]))
+  // Все статусы, не только getActiveCandidates() — запрос ссылается на кандидата по его
+  // состоянию на момент отправки, которое не должно пропадать из подписи, если кандидат позже
+  // сменил статус (та же логика, что уже применена к mailingListEntries, см. TASK-42).
+  const profileLabels = new Map(profiles.map((p) => [p.id, { name: p.name || p.id, title: p.title }]))
 
   const newCount = requests.filter((r) => r.status === "Новый запрос").length
 
@@ -46,7 +49,7 @@ export default async function RequestsPage({
         </p>
       </div>
 
-      <ContactRequestsSection requests={requests} profileTitles={profileTitles} />
+      <ContactRequestsSection requests={requests} profileLabels={profileLabels} editorSecret={secret} />
     </div>
   )
 }

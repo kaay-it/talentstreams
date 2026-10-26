@@ -112,11 +112,13 @@ function CandidateRow({
   streams,
   files,
   links,
+  editorSecret,
 }: {
   candidate: Candidate
   streams: string[]
   files: ResumeVersion[]
   links: ResumeVersion[]
+  editorSecret?: string
 }) {
   const [isPending, startTransition] = useTransition()
   const [localStatus, setLocalStatus] = useState<"approved" | "rejected" | "disabled" | "deleted" | null>(null)
@@ -158,7 +160,7 @@ function CandidateRow({
         <td className="px-4 py-3">
           <div className="flex items-center gap-2 flex-wrap">
             <a
-              href={`/profile/${candidate.id}`}
+              href={`/profile/${candidate.id}${editorSecret ? `?secret=${editorSecret}` : ""}`}
               target="_blank"
               rel="noopener noreferrer"
               className="font-medium text-sm text-card-foreground hover:text-primary hover:underline"
@@ -330,10 +332,12 @@ export function CandidateSection({
   candidates,
   streams,
   resumeHistory,
+  editorSecret,
 }: {
   candidates: Candidate[]
   streams: string[]
   resumeHistory: Record<string, ResumeVersion[]>
+  editorSecret?: string
 }) {
   const [search, setSearch] = useState("")
   const [status, setStatus] = useState<CandidateStatus | "">("")
@@ -468,6 +472,7 @@ export function CandidateSection({
                       streams={streams}
                       files={history.filter((v) => v.kind === "file")}
                       links={history.filter((v) => v.kind === "link")}
+                      editorSecret={editorSecret}
                     />
                   )
                 })}

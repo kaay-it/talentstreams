@@ -39,7 +39,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         mailingListPage = component "MailingListPage (/list/[listId])" "Страница подборки: анонимные карточки кандидатов (без имён и контактов), теги, summary, disclaimer. Noindex. Доступ: ?e=[token] → персонализированная подборка с фильтрацией; ?secret=[EDITOR_SECRET] → все кандидаты; без параметров → 404." "Next.js Server Component" "Page"
 
-        profilePage = component "ProfilePage (/profile/[id])" "Полный профиль кандидата. Недоступна со страниц подборок (работодателю не показывается) и не запрашивает EDITOR_SECRET — доступна всем, у кого есть id (getCandidateById(id) не фильтрует по статусу). Единственная точка входа — имя кандидата в /editor/candidates, ссылка ведёт сюда. Noindex." "Next.js Server Component" "Page"
+        profilePage = component "ProfilePage (/profile/[id])" "Профиль кандидата. Недоступна со страниц подборок (работодателю не показывается прямой ссылкой). Доступна всем, у кого есть id (getCandidateById(id) не фильтрует по статусу), но isEditor = !EDITOR_SECRET || secret === EDITOR_SECRET (тот же паттерн, что /editor/*) решает, что рендерить: полную карточку или анонимизированную (имя/контакты/резюме заменены плейсхолдерами ещё на сервере, не CSS-блюром поверх настоящих данных). Точки входа — имя кандидата в /editor/candidates и в /editor/requests, обе передают ?secret=. Noindex." "Next.js Server Component" "Page"
 
         editorLayout = component "EditorLayout (/editor/*)" "Общий макет редактора: боковое меню с разделами. Каждый подмаршрут независимо защищён EDITOR_SECRET." "Next.js Layout" "Page"
 
@@ -60,7 +60,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         candidateModal = component "CandidateRegistrationModal" "Форма регистрации кандидата: имя, email, телефон, сопроводительное письмо. Резюме — загрузить файл (PDF/DOC/DOCX/RTF/ODT, до 5 МБ) или указать URL — альтернативные варианты. Загрузка файла происходит при сабмите формы через POST /api/upload. Передаёт, для файла, resumeFilename (тип 'file'/'link' сервер определяет сам по URL, не по клиенту) — первая версия резюме попадает в историю (TASK-32), так как id кандидата генерируется этой же формой синхронно (crypto.randomUUID()), не внешним скриптом." "React Client Component" "UI"
 
-        profileView = component "ProfileView" "Полная карточка профиля: имя, роль, контакты (email/телефон), теги стримов. Кнопка «назад»." "React Client Component" "UI"
+        profileView = component "ProfileView" "Карточка профиля: имя, роль, контакты (email/телефон), резюме, теги стримов. Кнопка «назад». Проп isEditor переключает рендер: true — всё настоящее и кликабельно; false — имя заменено плейсхолдером «Имя Фамилия» (blur-sm — чисто визуальный эффект на плейсхолдере), контакты/резюме — статичными подписями без href; реальные значения в анонимном режиме не передаются в JSX вовсе." "React Server Component" "UI"
 
         contactButton = component "ContactButton" "Кнопка «Хочу связаться» на карточке подборки. Вызывает `submitContactRequest`, записывает запрос в лист «Contact Requests». Без токена — неактивна." "React Client Component" "UI"
 
@@ -92,7 +92,7 @@ workspace "TalentStreams" "Платформа подборки проверен�
 
         archivedStreamsSection = component "ArchivedStreamsSection" "Отдельная схлопнутая секция страницы стримов («Архивные стримы (N)», закрыта по умолчанию, null если архивных нет) — не часть строки, как ReleaseDeleteButton, а весь блок целиком. Упрощённая read-only таблица (без inline-редактирования — архивный стрим не редактируется, только восстанавливается): ID/Название/Тип/Кандидаты/Подписчики/Описание + кнопка «Восстановить» (unarchiveStream(id), без подтверждения). Та же раскрываемая история рассылок на строку, что в StreamsTable." "React Client Component" "UI"
 
-        contactRequestsSection = component "ContactRequestsSection" "Список запросов с цветными бейджами и выпадающим статусом. Разделён на «Общие запросы» и «По кандидатам»." "React Client Component" "UI"
+        contactRequestsSection = component "ContactRequestsSection" "Список запросов с цветными бейджами и выпадающим статусом. Разделён на «Общие запросы» и «По кандидатам». Колонка «Кандидат» — имя (жирным, ссылка на ProfilePage в новой вкладке с ?secret= из editorSecret-пропа) + роль под ним (мелко, если есть); раньше показывала только роль через profileTitles (title || name), из-за чего двух кандидатов с одинаковой ролью было не различить — теперь profileLabels несёт оба поля. Имена резолвятся через getCandidates() (все статусы), не getActiveCandidates() — историческая ссылка в запросе не должна пропадать, если кандидат позже сменил статус (та же логика, что в TASK-42)." "React Client Component" "UI"
 
         generalInquiryButton = component "GeneralInquiryButton" "Кнопка «Связаться с нами» в блоке «Не нашли подходящих». Пишет в Contact Requests без candidateId." "React Client Component" "UI"
 
@@ -234,6 +234,7 @@ searchCompanies(query) (TASK-36) — тонкая обёртка над lib/db/c
     talentStreams.webApp.requestsPage -> talentStreams.webApp.dbLib "getContactRequests()"
     talentStreams.webApp.requestsPage -> talentStreams.webApp.dbLib "getActiveCandidates()"
     talentStreams.webApp.requestsPage -> talentStreams.webApp.contactRequestsSection "Рендерит"
+    talentStreams.webApp.contactRequestsSection -> talentStreams.webApp.profilePage "Имя кандидата — ссылка (новая вкладка, ?secret= из editorSecret)"
     talentStreams.webApp.streamsPage -> talentStreams.webApp.dbLib "getStreamsDetailed() / getEmployers() — подсчёт подтверждённых подписчиков на стрим / getMailingLists() + история рассылок по streamId"
     talentStreams.webApp.streamsPage -> talentStreams.webApp.dbLib "getActiveCandidates() — подсчёт подходящих кандидатов на стрим (TASK-27)"
     talentStreams.webApp.streamsPage -> talentStreams.webApp.sendPulseLib "getCampaigns() — какие выпуски стрима реально отправлены"
