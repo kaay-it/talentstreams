@@ -31,7 +31,7 @@ export default async function CandidatesPage({
         </span>
       </div>
 
-      <CandidateSection candidates={candidates} streams={streams} resumeHistory={resumeHistory} />
+      <CandidateSection candidates={candidates} streams={streams} resumeHistory={resumeHistory} editorSecret={secret} />
     </div>
   )
 }

@@ -49,7 +49,7 @@ export default async function RequestsPage({
         </p>
       </div>
 
-      <ContactRequestsSection requests={requests} profileLabels={profileLabels} />
+      <ContactRequestsSection requests={requests} profileLabels={profileLabels} editorSecret={secret} />
     </div>
   )
 }

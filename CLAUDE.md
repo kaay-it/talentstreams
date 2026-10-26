@@ -43,7 +43,7 @@ app/
   actions.ts                        # ВСЕ Server Actions
   page.tsx                          # Главная: лендинг + формы регистрации
   list/[listId]/page.tsx            # Подборка (требует ?e= или ?secret=)
-  profile/[id]/page.tsx             # Полный профиль кандидата
+  profile/[id]/page.tsx             # Профиль кандидата — полный (isEditor) или анонимизированный (имя/контакты/резюме заблюрены и не попадают в HTML), по тому же паттерну `?secret=`, что `/editor/*`
   editor/
     layout.tsx / page.tsx           # Выпуски (Releases)
     employers/page.tsx
@@ -82,7 +82,7 @@ components/
   home-page-content.tsx             # Вёрстка главной страницы (клиентский компонент — нужен для переключения языка)
   candidate-registration-modal.tsx  # Форма кандидата (публичная), мультиязычная (lib/i18n/candidate-form.ts)
   candidate-form-modal.tsx          # Одна модалка на добавление и редактирование кандидата через необязательный проп candidate (тот же приём, что release-detail-modal.tsx) — контакты, резюме, уровень, стримы, страны, дата активности (с кнопкой «Очистить»); история резюме/рассылок и «Исключённые компании»/«Исключённые стримы» — только в режиме редактирования
-  candidate-section.tsx             # Фильтры (поиск/статус/стрим/уровень) + список + Pencil + пагинация
+  candidate-section.tsx             # Фильтры (поиск/статус/стрим/уровень) + список + Pencil + пагинация; ссылка на `/profile/[id]` несёт `?secret=`, иначе менеджер увидел бы анонимную версию своего же кандидата
   employer-registration-modal.tsx   # Экспортирует константы (страны/стримы/способы связи) для переиспользования; мультиязычная (lib/i18n/employer-form.ts), сами значения констант не переводятся
   employer-edit-modal.tsx           # Редактирование работодателя — форма как у регистрации, без чекбокса согласия
   employer-create-modal.tsx         # Быстрое добавление работодателя из редактора (переиспользует registerEmployer)
@@ -91,12 +91,12 @@ components/
   company-autocomplete-input.tsx    # Поле «Компания» с автодополнением (searchCompanies); используется во всех 3 формах работодателя (TASK-36)
   companies-section.tsx             # Список компаний с раскрытием по клику — показывает людей внутри компании (TASK-36)
   streams-table.tsx                 # Inline-редактор стримов + счётчик подходящих кандидатов (TASK-27)
-  contact-requests-section.tsx
+  contact-requests-section.tsx      # Имя кандидата (не только роль) кликабельно → `/profile/[id]?secret=...` в новой вкладке
   editor-nav.tsx                    # Разделы: Выпуски/Работодатели/Компании/Кандидаты/Запросы/Стримы/Настройки
   publish-button.tsx
   contact-button.tsx
   general-inquiry-button.tsx
-  profile-view.tsx                  # Полная карточка профиля кандидата
+  profile-view.tsx                  # Карточка профиля кандидата, флаг `isEditor` переключает полный/анонимизированный рендер (имя/контакты/резюме — реальные значения в анонимном режиме не попадают в JSX вовсе, не просто CSS-блюр)
   campaign-history.tsx              # История отправленных кампаний на странице выпусков
   import-candidates-button.tsx      # Кнопка на /editor/settings: проверить таблицу → превью → подтвердить импорт (TASK-39)
   release-create-modal.tsx          # Модалка создания выпуска: кандидаты стрима + переключатель «Все подписчики стрима»/«Выбранные получатели» (дефолт — TASK-41) — список работодателей, сгруппированный по компании, тройное состояние чекбокса группы (TASK-40). CandidateRow/EmployerPickerRow/CompanyGroup экспортируются с readOnly-пропом — переиспользуются release-detail-modal.tsx (TASK-41)

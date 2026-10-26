@@ -37,9 +37,11 @@ type ProfileLabel = { name: string; title: string }
 export function ContactRequestsSection({
   requests,
   profileLabels,
+  editorSecret,
 }: {
   requests: ContactRequest[]
   profileLabels: Map<string, ProfileLabel>
+  editorSecret?: string
 }) {
   const candidateRequests = requests.filter((r) => r.candidateId)
   const generalInquiries = requests.filter((r) => !r.candidateId)
@@ -56,7 +58,7 @@ export function ContactRequestsSection({
           <div className="rounded-xl border bg-card overflow-hidden">
             <div className="divide-y">
               {generalInquiries.map((req) => (
-                <RequestRow key={req.id} req={req} statuses={INQUIRY_STATUSES} profileLabels={profileLabels} showCandidate={false} />
+                <RequestRow key={req.id} req={req} statuses={INQUIRY_STATUSES} profileLabels={profileLabels} editorSecret={editorSecret} showCandidate={false} />
               ))}
             </div>
           </div>
@@ -69,7 +71,7 @@ export function ContactRequestsSection({
           <div className="rounded-xl border bg-card overflow-hidden">
             <div className="divide-y">
               {candidateRequests.map((req) => (
-                <RequestRow key={req.id} req={req} statuses={CANDIDATE_STATUSES} profileLabels={profileLabels} showCandidate />
+                <RequestRow key={req.id} req={req} statuses={CANDIDATE_STATUSES} profileLabels={profileLabels} editorSecret={editorSecret} showCandidate />
               ))}
             </div>
           </div>
@@ -83,11 +85,13 @@ function RequestRow({
   req,
   statuses,
   profileLabels,
+  editorSecret,
   showCandidate,
 }: {
   req: ContactRequest
   statuses: ContactRequestStatus[]
   profileLabels: Map<string, ProfileLabel>
+  editorSecret?: string
   showCandidate: boolean
 }) {
   const [isPending, startTransition] = useTransition()
@@ -115,7 +119,14 @@ function RequestRow({
         {showCandidate && (
           <div className="min-w-0">
             <p className="text-xs text-muted-foreground">Кандидат</p>
-            <p className="text-sm font-medium truncate">{candidateName}</p>
+            <a
+              href={`/profile/${req.candidateId}${editorSecret ? `?secret=${editorSecret}` : ""}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block truncate text-sm font-medium text-card-foreground hover:text-primary hover:underline"
+            >
+              {candidateName}
+            </a>
             {candidate?.title && <p className="text-xs text-muted-foreground truncate">{candidate.title}</p>}
           </div>
         )}
