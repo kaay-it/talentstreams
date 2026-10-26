@@ -94,6 +94,12 @@ export function ProfileView({
               </div>
             )}
 
+            {profile.summary && (
+              <p className="mt-4 text-sm leading-relaxed text-card-foreground whitespace-pre-line">
+                {profile.summary}
+              </p>
+            )}
+
             {contacts.length > 0 && (
               <div className="mt-8 grid gap-2">
                 {contacts.map((c, i) => (
