@@ -1,11 +1,18 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 import { X, Check, AlertCircle, AlertTriangle, Pencil, Eye, Users } from "lucide-react"
-import { updateMailingList, getMailingListRecipients } from "@/app/actions"
+import {
+  updateMailingList, getMailingListRecipients, getMailingListDetail,
+  createPersonalSelection, updatePersonalSelection, deletePersonalSelection,
+} from "@/app/actions"
 import type { EmployerPickOption } from "@/lib/db/employers"
-import { CandidateRow, EmployerPickerRow, CompanyGroup, type EligibleCandidate } from "@/components/release-create-modal"
+import type { MailingList } from "@/lib/db/mailing-lists"
+import {
+  CandidateRow, CompanyGroup, RosterTable, PersonalSelectionBlock,
+  type EligibleCandidate, type DraftSelection, type RosterRow, type RosterKind,
+} from "@/components/release-create-modal"
 
 const inputCls =
   "w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -19,12 +26,19 @@ function fromRuDate(ruDate: string): string {
   return `${y}-${mo}-${d}`
 }
 
+function selectionsToDrafts(list: MailingList): DraftSelection[] {
+  return list.personal.map((s) => ({
+    key: s.selectionId,
+    selectionId: s.selectionId,
+    candidateIds: new Set(s.entries.map((e) => e.profile.id)),
+    employerTokens: new Set(s.employerTokens),
+  }))
+}
+
 export function ReleaseDetailModal({
   listId,
   stream,
   date,
-  candidateIds,
-  candidateNames,
   eligible,
   paused,
   employersForStream,
@@ -33,8 +47,6 @@ export function ReleaseDetailModal({
   listId: string
   stream: string
   date: string
-  candidateIds: string[]
-  candidateNames: string[]
   eligible: EligibleCandidate[]
   paused: EligibleCandidate[]
   employersForStream: EmployerPickOption[]
@@ -44,27 +56,37 @@ export function ReleaseDetailModal({
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
   const [errorMsg, setErrorMsg] = useState("")
 
+  const [detailLoaded, setDetailLoaded] = useState(false)
   const [editDate, setEditDate] = useState(() => fromRuDate(date))
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(candidateIds))
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [personalSelections, setPersonalSelections] = useState<DraftSelection[]>([])
+  const originalSelectionIds = useRef<Set<string>>(new Set())
+
   const [recipientMode, setRecipientMode] = useState<"all" | "selected">("all")
   const [selectedEmployerTokens, setSelectedEmployerTokens] = useState<Set<string>>(new Set())
-  const [recipientsLoaded, setRecipientsLoaded] = useState(false)
   const [currentRecipients, setCurrentRecipients] = useState<EmployerPickOption[]>([])
 
   useEffect(() => {
-    if (!open || recipientsLoaded) return
+    if (!open || detailLoaded) return
     let cancelled = false
-    getMailingListRecipients(listId).then((recipients) => {
+    Promise.all([getMailingListDetail(listId), getMailingListRecipients(listId)]).then(([detail, recipients]) => {
       if (cancelled) return
+      if (detail) {
+        setEditDate(fromRuDate(date))
+        setSelectedIds(new Set(detail.default?.entries.map((e) => e.profile.id) ?? []))
+        const drafts = selectionsToDrafts(detail)
+        setPersonalSelections(drafts)
+        originalSelectionIds.current = new Set(drafts.map((d) => d.selectionId!))
+      }
       setCurrentRecipients(recipients)
       setSelectedEmployerTokens(new Set(recipients.map((e) => e.token)))
       setRecipientMode(recipients.length ? "selected" : "all")
-      setRecipientsLoaded(true)
+      setDetailLoaded(true)
     })
     return () => {
       cancelled = true
     }
-  }, [open, recipientsLoaded, listId])
+  }, [open, detailLoaded, listId, date])
 
   const employerGroups = useMemo(() => {
     const byCompany = new Map<string, EmployerPickOption[]>()
@@ -86,6 +108,26 @@ export function ReleaseDetailModal({
     return [...byCompany.entries()].sort((a, b) => a[0].localeCompare(b[0], "ru"))
   }, [currentRecipients])
 
+  // Audience this release's send actually reaches — mirrors PublishButton/getEmployersWithoutSelection's
+  // logic client-side for an instant roster, not a separate source of truth.
+  const audience = recipientMode === "selected" ? currentRecipientsOrPicked() : employersForStream
+  function currentRecipientsOrPicked(): EmployerPickOption[] {
+    if (readOnly) return currentRecipients.length ? currentRecipients : employersForStream
+    return employersForStream.filter((e) => selectedEmployerTokens.has(e.token))
+  }
+  const hasDefault = selectedIds.size > 0
+  const rosterRows: RosterRow[] = useMemo(
+    () =>
+      audience.map((employer) => {
+        const personalMatch = personalSelections.find((s) => s.employerTokens.has(employer.token))
+        const kind: RosterKind = personalMatch ? "personal" : hasDefault ? "default" : "missing"
+        const viewHref = personalMatch?.selectionId ? `/selection/${personalMatch.selectionId}` : undefined
+        return { employer, kind, viewHref }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [audience, personalSelections, hasDefault],
+  )
+
   function toggleCandidate(id: string) {
     setSelectedIds((prev) => {
       const next = new Set(prev)
@@ -95,9 +137,6 @@ export function ReleaseDetailModal({
     })
   }
 
-  // Only ever touches eligible (by-date) candidates — paused ones stay manual-only,
-  // so a bulk select/deselect never silently adds or removes a candidate the editor
-  // chose to include/exclude by hand despite the pause.
   function selectAllEligible() {
     setSelectedIds((prev) => new Set([...prev, ...eligible.map((c) => c.id)]))
   }
@@ -129,15 +168,62 @@ export function ReleaseDetailModal({
     })
   }
 
+  function addPersonalSelection() {
+    setPersonalSelections((prev) => [...prev, { key: crypto.randomUUID(), candidateIds: new Set(), employerTokens: new Set() }])
+  }
+
+  function removePersonalSelection(key: string) {
+    setPersonalSelections((prev) => prev.filter((s) => s.key !== key))
+  }
+
+  function togglePersonalCandidate(key: string, id: string) {
+    setPersonalSelections((prev) =>
+      prev.map((s) => {
+        if (s.key !== key) return s
+        const next = new Set(s.candidateIds)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return { ...s, candidateIds: next }
+      }),
+    )
+  }
+
+  function togglePersonalEmployer(key: string, token: string) {
+    setPersonalSelections((prev) =>
+      prev.map((s) => {
+        if (s.key !== key) return s
+        const next = new Set(s.employerTokens)
+        if (next.has(token)) next.delete(token)
+        else next.add(token)
+        return { ...s, employerTokens: next }
+      }),
+    )
+  }
+
+  function togglePersonalCompany(key: string, tokens: string[], checkAll: boolean) {
+    setPersonalSelections((prev) =>
+      prev.map((s) => {
+        if (s.key !== key) return s
+        const next = new Set(s.employerTokens)
+        for (const t of tokens) {
+          if (checkAll) next.add(t)
+          else next.delete(t)
+        }
+        return { ...s, employerTokens: next }
+      }),
+    )
+  }
+
   function handleClose() {
     setOpen(false)
     setStatus("idle")
     setErrorMsg("")
+    setDetailLoaded(false)
     setEditDate(fromRuDate(date))
-    setSelectedIds(new Set(candidateIds))
+    setSelectedIds(new Set())
+    setPersonalSelections([])
     setRecipientMode("all")
     setSelectedEmployerTokens(new Set())
-    setRecipientsLoaded(false)
     setCurrentRecipients([])
   }
 
@@ -151,6 +237,24 @@ export function ReleaseDetailModal({
         candidateIds: [...selectedIds],
         employerTokens: recipientMode === "selected" ? [...selectedEmployerTokens] : [],
       })
+
+      const currentIds = new Set(personalSelections.filter((s) => s.selectionId).map((s) => s.selectionId!))
+      for (const removedId of originalSelectionIds.current) {
+        if (!currentIds.has(removedId)) await deletePersonalSelection(removedId, listId)
+      }
+      for (const draft of personalSelections) {
+        const hasContent = draft.candidateIds.size > 0 && draft.employerTokens.size > 0
+        if (draft.selectionId) {
+          if (hasContent) {
+            await updatePersonalSelection(draft.selectionId, listId, { candidateIds: [...draft.candidateIds], employerTokens: [...draft.employerTokens] })
+          } else {
+            await deletePersonalSelection(draft.selectionId, listId)
+          }
+        } else if (hasContent) {
+          await createPersonalSelection(listId, { candidateIds: [...draft.candidateIds], employerTokens: [...draft.employerTokens] })
+        }
+      }
+
       setStatus("success")
     } catch (err) {
       setStatus("error")
@@ -159,7 +263,8 @@ export function ReleaseDetailModal({
   }
 
   const canSubmit = Boolean(
-    editDate.trim() && selectedIds.size > 0 &&
+    editDate.trim() &&
+    (selectedIds.size > 0 || personalSelections.some((s) => s.candidateIds.size > 0 && s.employerTokens.size > 0)) &&
     (recipientMode === "all" || selectedEmployerTokens.size > 0),
   )
 
@@ -210,6 +315,8 @@ export function ReleaseDetailModal({
                     Закрыть
                   </button>
                 </div>
+              ) : !detailLoaded ? (
+                <p className="px-6 py-12 text-center text-sm text-muted-foreground">Загрузка…</p>
               ) : (
                 <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5">
                   <div className="space-y-5">
@@ -232,11 +339,9 @@ export function ReleaseDetailModal({
 
                     <div className="space-y-1.5">
                       <p className="text-xs font-medium text-muted-foreground">
-                        Получатели {readOnly && !recipientsLoaded ? "" : recipientMode === "all" ? "— весь стрим" : `(${selectedEmployerTokens.size} выбрано)`}
+                        Получатели письма {recipientMode === "all" ? "— весь стрим" : `(${selectedEmployerTokens.size} выбрано)`}
                       </p>
-                      {!recipientsLoaded ? (
-                        <p className="text-sm text-muted-foreground">Загрузка…</p>
-                      ) : readOnly ? (
+                      {readOnly ? (
                         currentRecipients.length === 0 ? (
                           <p className="text-sm text-muted-foreground">Весь стрим «{stream}» (все подтверждённые подписчики).</p>
                         ) : (
@@ -300,7 +405,7 @@ export function ReleaseDetailModal({
                       <div className="flex items-center justify-between">
                         <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                           <Users className="size-3.5" />
-                          Кандидаты ({readOnly ? candidateNames.length : selectedIds.size})
+                          Подборка по умолчанию — видна всем без личной ({selectedIds.size})
                         </p>
                         {!readOnly && eligible.length > 0 && (
                           <div className="flex gap-2 text-xs">
@@ -314,11 +419,15 @@ export function ReleaseDetailModal({
                         )}
                       </div>
                       {readOnly ? (
-                        <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                          {candidateNames.map((name) => (
-                            <p key={name} className="px-3 py-2 text-sm text-foreground">{name}</p>
-                          ))}
-                        </div>
+                        selectedIds.size === 0 ? (
+                          <p className="text-sm text-muted-foreground">Нет подборки по умолчанию — у всех получателей была личная.</p>
+                        ) : (
+                          <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
+                            {[...eligible, ...paused].filter((c) => selectedIds.has(c.id)).map((c) => (
+                              <CandidateRow key={c.id} candidate={c} checked onToggle={() => {}} readOnly />
+                            ))}
+                          </div>
+                        )
                       ) : (
                         <>
                           {eligible.length > 0 && (selectedIds.size < 6 || selectedIds.size > 10) && (
@@ -348,6 +457,43 @@ export function ReleaseDetailModal({
                         </>
                       )}
                     </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium text-muted-foreground">Личные подборки — видны только выбранным работодателям, без гео-фильтра</p>
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={addPersonalSelection}
+                            className="text-xs font-medium text-primary hover:underline"
+                          >
+                            + Личная подборка
+                          </button>
+                        )}
+                      </div>
+                      {personalSelections.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Личных подборок нет.</p>
+                      ) : (
+                        personalSelections.map((draft, i) => (
+                          <PersonalSelectionBlock
+                            key={draft.key}
+                            draft={draft}
+                            index={i}
+                            eligible={eligible}
+                            paused={paused}
+                            employerGroups={employerGroups}
+                            onToggleCandidate={(id) => togglePersonalCandidate(draft.key, id)}
+                            onToggleEmployer={(token) => togglePersonalEmployer(draft.key, token)}
+                            onToggleCompany={(tokens, checkAll) => togglePersonalCompany(draft.key, tokens, checkAll)}
+                            onRemove={() => removePersonalSelection(draft.key)}
+                            viewHref={draft.selectionId ? `/selection/${draft.selectionId}` : undefined}
+                            readOnly={readOnly}
+                          />
+                        ))
+                      )}
+                    </div>
+
+                    <RosterTable rows={rosterRows} />
                   </div>
 
                   {status === "error" && (

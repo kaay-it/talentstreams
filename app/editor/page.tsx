@@ -181,11 +181,18 @@ export default async function ReleasesPage({
                         Посмотреть рассылку {list.listId}
                       </a>
                     </div>
-                    {list.recipientLabel && (
-                      <div className="mt-1.5">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/20 dark:text-violet-400">
-                          Ограниченная рассылка: {list.recipientLabel}
-                        </span>
+                    {(list.recipientLabel || list.personalSelectionCount > 0) && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {list.recipientLabel && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/20 dark:text-violet-400">
+                            Ограниченная рассылка: {list.recipientLabel}
+                          </span>
+                        )}
+                        {list.personalSelectionCount > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">
+                            {list.personalSelectionCount} личных подборок
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -195,8 +202,6 @@ export default async function ReleasesPage({
                       listId={list.listId}
                       stream={list.stream}
                       date={list.date}
-                      candidateIds={list.candidateIds}
-                      candidateNames={candidateNames}
                       eligible={eligibleByStream[list.stream] ?? []}
                       paused={pausedByStream[list.stream] ?? []}
                       employersForStream={employersByStream[list.stream] ?? []}

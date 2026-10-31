@@ -1,12 +1,12 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, CalendarDays, MapPin, Send } from "lucide-react"
-import { getMailingList, type MailingListEntry } from "@/lib/db/mailing-lists"
+import { ArrowLeft, CalendarDays, Send } from "lucide-react"
+import { getMailingList, resolveMailingListForEmployer, type MailingListEntry } from "@/lib/db/mailing-lists"
 import { getEmployerByToken, filterCandidatesForEmployer } from "@/lib/db/employers"
 import { getStreamsDetailed } from "@/lib/db/streams"
 import { telegramConnectUrl } from "@/lib/sendpulse"
-import { ContactButton } from "@/components/contact-button"
+import { CandidateEntryCard } from "@/components/candidate-entry-card"
 import { GeneralInquiryButton } from "@/components/general-inquiry-button"
 
 export const dynamic = "force-dynamic"
@@ -46,16 +46,32 @@ export default async function MailingListPage({
   if (!mailingList) notFound()
 
   const streamTypes = new Map(streams.map((s) => [s.name.trim().toLowerCase(), s.type]))
-
-  let entries: MailingListEntry[] = mailingList.entries
   const { date } = mailingList
 
-  if (!isEditor && employerToken) {
+  // A real employer token ALWAYS resolves "as that employer" — personal selection unfiltered if
+  // one targets them, else the default with the usual geo/exclusion filter — regardless of
+  // whether ?secret= is also present. secret alone (no token) is the editor's own baseline view:
+  // the default selection, unfiltered, or the "подборка не готова" state if there isn't one.
+  let entries: MailingListEntry[] = []
+  let ready = true
+
+  if (employerToken) {
     const employer = await getEmployerByToken(employerToken)
     if (!employer) notFound()
-    const filtered = filterCandidatesForEmployer(entries.map((e) => e.profile), employer)
-    const filteredIds = new Set(filtered.map((p) => p.id))
-    entries = entries.filter((e) => filteredIds.has(e.profile.id))
+    const resolved = resolveMailingListForEmployer(mailingList, employerToken)
+    if (!resolved) {
+      ready = false
+    } else if (resolved.isPersonal) {
+      entries = resolved.entries
+    } else {
+      const filtered = filterCandidatesForEmployer(resolved.entries.map((e) => e.profile), employer)
+      const filteredIds = new Set(filtered.map((p) => p.id))
+      entries = resolved.entries.filter((e) => filteredIds.has(e.profile.id))
+    }
+  } else if (mailingList.default) {
+    entries = mailingList.default.entries
+  } else {
+    ready = false
   }
 
   // Shown only to an identified employer — the link binds their bot subscription to their token.
@@ -79,33 +95,45 @@ export default async function MailingListPage({
               ? `Выпуск ${mailingList.stream} Talent Stream подготовлен специально для вас.`
               : "Выпуск Talent Stream подготовлен специально для вас."}
           </h1>
-          <p className="mt-3 text-pretty leading-relaxed text-muted-foreground">
-            В него вошли проверенные кандидаты, отобранные нашей командой за последнюю неделю.
-          </p>
-          <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-            {date && (
-              <span className="inline-flex items-center gap-1.5">
-                <CalendarDays className="size-4" />
-                {date}
-              </span>
-            )}
-            <span>
-              {entries.length} {plural(entries.length, "кандидат", "кандидата", "кандидатов")}
-            </span>
-          </div>
+          {ready && (
+            <>
+              <p className="mt-3 text-pretty leading-relaxed text-muted-foreground">
+                В него вошли проверенные кандидаты, отобранные нашей командой за последнюю неделю.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                {date && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <CalendarDays className="size-4" />
+                    {date}
+                  </span>
+                )}
+                <span>
+                  {entries.length} {plural(entries.length, "кандидат", "кандидата", "кандидатов")}
+                </span>
+              </div>
+            </>
+          )}
         </header>
 
-        <p className="mb-6 rounded-xl border bg-muted/40 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
-          Контакты кандидатов не публикуются напрямую. Если вас заинтересовал кандидат, нажмите
-          кнопку «Хочу связаться». Мы уточним у кандидата его интерес — и только после его
-          подтверждения передадим вам контакты.
-        </p>
+        {!ready ? (
+          <div className="rounded-2xl border border-dashed p-10 text-center text-muted-foreground">
+            Подборка для вас пока не готова — загляните чуть позже.
+          </div>
+        ) : (
+          <>
+            <p className="mb-6 rounded-xl border bg-muted/40 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+              Контакты кандидатов не публикуются напрямую. Если вас заинтересовал кандидат, нажмите
+              кнопку «Хочу связаться». Мы уточним у кандидата его интерес — и только после его
+              подтверждения передадим вам контакты.
+            </p>
 
-        <div className="grid gap-4">
-          {entries.map((entry) => (
-            <EntryCard key={entry.profile.id} entry={entry} listId={listId} employerToken={employerToken} streamTypes={streamTypes} />
-          ))}
-        </div>
+            <div className="grid gap-4">
+              {entries.map((entry) => (
+                <CandidateEntryCard key={entry.profile.id} entry={entry} listId={listId} employerToken={employerToken} streamTypes={streamTypes} />
+              ))}
+            </div>
+          </>
+        )}
 
         {employerToken && (
           <div className="mt-8 rounded-2xl border bg-card p-6">
@@ -138,90 +166,6 @@ export default async function MailingListPage({
         )}
       </div>
     </main>
-  )
-}
-
-function EntryCard({
-  entry,
-  listId,
-  employerToken,
-  streamTypes,
-}: {
-  entry: MailingListEntry
-  listId: string
-  employerToken?: string
-  streamTypes: Map<string, string>
-}) {
-  const { profile } = entry
-
-  // Industry/Function tags are derived from the candidate's Stream membership
-  // (TASK-27) via each stream's type, rather than separate Profile fields.
-  const industryTags = profile.stream.filter((s) => streamTypes.get(s.trim().toLowerCase()) === "Industry")
-  const funcTags = profile.stream.filter((s) => streamTypes.get(s.trim().toLowerCase()) === "Functional")
-
-  const country = [
-    profile.countryPrimary,
-    profile.countryDesired ? `→ ${profile.countryDesired}` : "",
-  ]
-    .filter(Boolean)
-    .join("  ")
-
-  return (
-    <article className="rounded-2xl border bg-card p-6 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          {(profile.title || profile.level) && (
-            <div className="flex flex-wrap items-center gap-2">
-              {profile.title && (
-                <p className="font-semibold text-card-foreground">{profile.title}</p>
-              )}
-              {profile.level && (
-                <span className="inline-flex items-center rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700 dark:bg-teal-900/20 dark:text-teal-400">
-                  {profile.level}
-                </span>
-              )}
-            </div>
-          )}
-          {country && (
-            <p className="mt-1 inline-flex items-center gap-1 text-sm text-muted-foreground">
-              <MapPin className="size-3.5 shrink-0" />
-              {country}
-            </p>
-          )}
-        </div>
-
-        {(industryTags.length > 0 || funcTags.length > 0) && (
-          <div className="flex flex-wrap gap-1.5">
-            {industryTags.map((tag) => (
-              <span
-                key={`industry-${tag}`}
-                className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-              >
-                {tag}
-              </span>
-            ))}
-            {funcTags.map((tag) => (
-              <span
-                key={`func-${tag}`}
-                className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {profile.summary && (
-        <p className="mt-4 text-sm leading-relaxed text-card-foreground whitespace-pre-line">
-          {profile.summary}
-        </p>
-      )}
-
-      <div className="mt-5 border-t pt-4">
-        <ContactButton candidateId={profile.id} listId={listId} employerToken={employerToken} />
-      </div>
-    </article>
   )
 }
 
