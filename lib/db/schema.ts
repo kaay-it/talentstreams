@@ -79,18 +79,27 @@ export const mailingListEntries = pgTable("mailingListEntries", {
   candidateId: text("candidateId").notNull().references(() => candidates.id, { onDelete: "cascade" }),
 })
 
-// A "подборка" — one content set within a release (mailingLists row). A release can have at
-// most one selection with no selectionEmployers rows (the default, shown to anyone without a
+// A "подборка" — a reusable content set, prepared ahead of time for a stream in /editor/selections
+// (built independently of any release), then picked (not authored) when creating/editing a
+// release. listId is null while sitting in the pool; attaching it to a release sets it, detaching
+// clears it back to null (ON DELETE SET NULL — deleting a release returns its selections to the
+// pool rather than destroying them, same as an explicit detach). A release can have at most one
+// ATTACHED selection with no selectionEmployers rows (the default, shown to anyone without a
 // personal override) and any number with ≥1 selectionEmployers row (personal, shown only to
 // those employers, bypassing filterCandidatesForEmployer entirely — the manager hand-picked
 // these candidates for these employers on purpose, no geo/exclusion second-guessing). A release
-// legitimately has zero default selections if every subscriber got a personal one.
+// legitimately has zero default selections if every subscriber got a personal one. Composition
+// (candidates/employers) is only ever edited in /editor/selections, never from a release's own
+// UI, attached or not — the release side is purely a picker.
 export const selections = pgTable("selections", {
-  id:     text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  listId: text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
+  id:       text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // Which stream this подборка was prepared for — the only thing that still makes sense before
+  // it's ever attached to a release (a release's own streamId isn't available yet at that point).
+  streamId: integer("streamId").notNull().references(() => streams.id, { onDelete: "cascade" }),
+  listId:   text("listId").references(() => mailingLists.id, { onDelete: "set null" }),
   // Manager-facing label only (e.g. company names) — never the source of truth for default vs
   // personal, that's whether selectionEmployers has any rows for this selection.
-  label:  text("label").notNull().default(""),
+  label:    text("label").notNull().default(""),
 })
 
 export const selectionEntries = pgTable("selectionEntries", {

@@ -1,5 +1,5 @@
 import "server-only"
-import { eq, inArray } from "drizzle-orm"
+import { eq, inArray, isNotNull } from "drizzle-orm"
 import { db } from "./index"
 import { mailingLists, mailingListRecipients, selections, selectionEntries, selectionEmployers, streams } from "./schema"
 import { getStreamIdByName } from "./streams"
@@ -47,6 +47,20 @@ export type MailingListSummary = {
   personalSelectionCount: number
 }
 
+/** A подборка ("selection") as managed in /editor/selections — a reusable pool item, prepared for
+ * a stream ahead of any release. listId is null while unattached (in the pool); non-null once
+ * picked into a release (attachSelectionsToMailingList()) until detached again (detachSelection()
+ * or the release itself is deleted — both return it to the pool, never destroy it). Composition
+ * (candidateIds/employerTokens/label) is only ever edited here, never from a release's own UI. */
+export type SelectionSummary = {
+  selectionId: string
+  streamId: number
+  label: string
+  employerTokens: string[]
+  candidateIds: string[]
+  listId: string | null
+}
+
 /** Formats an ISO "YYYY-MM-DD" date as ru-RU text ("21.07.2026") — the display format everywhere
  * this app already shows a mailing-list date (SendPulse campaign names, email body, editor UI). */
 export function isoToRu(iso: string): string {
@@ -73,11 +87,11 @@ export function campaignNameFor(stream: string, date: string, recipientLabel: st
 }
 
 /**
- * Fetch a mailing list by its ID: header (stream/date) plus every selection ("подборка") that
- * belongs to it, resolved into full Candidate profiles — the default (if one exists) and every
+ * Fetch a mailing list by its ID: header (stream/date) plus every selection ("подборка") CURRENTLY
+ * ATTACHED to it, resolved into full Candidate profiles — the default (if one exists) and every
  * personal one, each tagged with the employer tokens it's scoped to. Returns null only if the
- * release itself doesn't exist; a release with no selections at all (shouldn't normally happen —
- * creation requires at least one) comes back with default: null, personal: [].
+ * release itself doesn't exist; a release with nothing attached comes back with default: null,
+ * personal: [].
  */
 export async function getMailingList(listId: string): Promise<MailingList | null> {
   const header = await db
@@ -160,12 +174,14 @@ export function resolveMailingListForEmployer(
 }
 
 /** Lightweight metadata-only lookup — no candidate/Profile join. Use this instead of
- * getMailingList() wherever only the stream/date are needed (campaign naming, sent-release checks). */
+ * getMailingList() wherever only the stream/date are needed (campaign naming, sent-release checks,
+ * validating a selection picker's choices against the release's own stream). */
 export async function getMailingListMeta(
   listId: string,
-): Promise<{ listId: string; stream: string; date: string; recipientLabel: string; sentCampaignId: number | null } | null> {
+): Promise<{ listId: string; streamId: number | null; stream: string; date: string; recipientLabel: string; sentCampaignId: number | null } | null> {
   const rows = await db
     .select({
+      streamId: mailingLists.streamId,
       streamName: streams.name,
       targetDate: mailingLists.targetDate,
       recipientLabel: mailingLists.recipientLabel,
@@ -179,6 +195,7 @@ export async function getMailingListMeta(
   return row
     ? {
         listId,
+        streamId: row.streamId,
         stream: row.streamName ?? "",
         date: timestampToRu(row.targetDate),
         recipientLabel: row.recipientLabel,
@@ -187,11 +204,12 @@ export async function getMailingListMeta(
     : null
 }
 
-/** Union of candidate IDs across EVERY selection (default + all personal) of a release — used by
- * publishMailingList() to apply the publication-pause rule (TASK-05) to exactly the candidates
- * touched by this send, and for the "N кандидатов" count shown in the Telegram notification.
- * Deliberately a union, not a sum: a candidate counts once per release even if they appear in
- * more than one selection (decided with the user — one send event, one pause-counter tick). */
+/** Union of candidate IDs across EVERY selection (default + all personal) ATTACHED to a release —
+ * used by publishMailingList() to apply the publication-pause rule (TASK-05) to exactly the
+ * candidates touched by this send, and for the "N кандидатов" count shown in the Telegram
+ * notification. Deliberately a union, not a sum: a candidate counts once per release even if they
+ * appear in more than one selection (decided with the user — one send event, one pause-counter
+ * tick). */
 export async function getAllSelectionCandidateIds(listId: string): Promise<string[]> {
   const selectionRows = await db.select({ id: selections.id }).from(selections).where(eq(selections.listId, listId))
   if (!selectionRows.length) return []
@@ -200,21 +218,6 @@ export async function getAllSelectionCandidateIds(listId: string): Promise<strin
     .from(selectionEntries)
     .where(inArray(selectionEntries.selectionId, selectionRows.map((r) => r.id)))
   return [...new Set(rows.map((r) => r.candidateId))]
-}
-
-/** Finds the id of a release's default selection (the one with no selectionEmployers rows), or
- * null if it has none — a release legitimately has no default if every subscriber got a personal
- * selection instead. */
-async function findDefaultSelectionId(listId: string): Promise<string | null> {
-  const rows = await db.select({ id: selections.id }).from(selections).where(eq(selections.listId, listId))
-  if (!rows.length) return null
-  const ids = rows.map((r) => r.id)
-  const employerRows = await db
-    .select({ selectionId: selectionEmployers.selectionId })
-    .from(selectionEmployers)
-    .where(inArray(selectionEmployers.selectionId, ids))
-  const withEmployers = new Set(employerRows.map((r) => r.selectionId))
-  return ids.find((id) => !withEmployers.has(id)) ?? null
 }
 
 /** Fetch all mailing lists grouped by List ID (no profile data, fast), newest date first. */
@@ -232,12 +235,18 @@ export async function getMailingLists(): Promise<MailingListSummary[]> {
       .from(mailingLists)
       .leftJoin(streams, eq(mailingLists.streamId, streams.id))
 
-    const selectionRows = await db.select({ id: selections.id, listId: selections.listId }).from(selections)
+    // Only attached selections — the selections table also holds unattached pool items
+    // (/editor/selections), which have nothing to do with any particular release's summary.
+    const selectionRows = await db
+      .select({ id: selections.id, listId: selections.listId })
+      .from(selections)
+      .where(isNotNull(selections.listId))
     const selectionIdsByList = new Map<string, string[]>()
     for (const row of selectionRows) {
-      const arr = selectionIdsByList.get(row.listId) ?? []
+      const listId = row.listId!
+      const arr = selectionIdsByList.get(listId) ?? []
       arr.push(row.id)
-      selectionIdsByList.set(row.listId, arr)
+      selectionIdsByList.set(listId, arr)
     }
     const allSelectionIds = selectionRows.map((r) => r.id)
 
@@ -297,19 +306,14 @@ export async function getMailingLists(): Promise<MailingListSummary[]> {
 }
 
 /**
- * Creates a new mailing list ("release"): a header row + (if candidateIds is non-empty) a default
- * selection. `candidateIds` may be empty — a release can start with no default if the manager
- * means to cover the stream entirely with personal selections (added separately via
- * createPersonalSelection()); the "at least one selection total" rule is enforced by
- * createMailingList() in app/actions.ts, which sees both the default and any personal selections
- * being created alongside it. `date` is ISO "YYYY-MM-DD" (straight from an <input type="date">).
- * `recipientLabel` — company names of a narrowed release's recipients, "" or omitted = whole
- * stream (the default).
+ * Creates a new mailing list ("release") header row — no content of its own; подборки are always
+ * picked from the pool and attached separately (attachSelectionsToMailingList()), never authored
+ * inline here. `date` is ISO "YYYY-MM-DD" (straight from an <input type="date">). `recipientLabel`
+ * — company names of a narrowed release's recipients, "" or omitted = whole stream (the default).
  */
 export async function createMailingListRows(data: {
   stream: string
   date: string
-  candidateIds: string[]
   recipientLabel?: string
 }): Promise<{ listId: string }> {
   const streamId = await getStreamIdByName(data.stream)
@@ -322,11 +326,6 @@ export async function createMailingListRows(data: {
     targetDate: `${data.date}T00:00:00`,
     recipientLabel: data.recipientLabel ?? "",
   })
-  if (data.candidateIds.length) {
-    const selectionId = crypto.randomUUID()
-    await db.insert(selections).values({ id: selectionId, listId, label: "" })
-    await db.insert(selectionEntries).values(data.candidateIds.map((candidateId) => ({ selectionId, candidateId })))
-  }
 
   return { listId }
 }
@@ -346,9 +345,10 @@ export async function markMailingListSent(listId: string, campaignId: number): P
   await db.update(mailingLists).set({ sentCampaignId: campaignId }).where(eq(mailingLists.id, listId))
 }
 
-/** Deletes a release's header row — ON DELETE CASCADE on mailingListRecipients.listId and
- * selections.listId (which in turn cascades selectionEntries/selectionEmployers) takes care of
- * every child row, no separate cleanup needed. Callers must ensure the release was never sent
+/** Deletes a release's header row — ON DELETE CASCADE on mailingListRecipients.listId takes care
+ * of its rows; selections.listId is ON DELETE SET NULL, so every подборка attached to this
+ * release is returned to its stream's pool instead of being destroyed (same outcome as an
+ * explicit detachSelection() on each of them). Callers must ensure the release was never sent
  * (app/actions.ts checks mailingLists.sentCampaignId). */
 export async function deleteMailingListRows(listId: string): Promise<void> {
   await db.delete(mailingLists).where(eq(mailingLists.id, listId))
@@ -356,9 +356,10 @@ export async function deleteMailingListRows(listId: string): Promise<void> {
 
 export type CandidateMailingHistoryEntry = { listId: string; stream: string; date: string; sentCampaignId: number | null }
 
-/** Every release a candidate has ever been included in (via any selection, default or personal),
- * newest first (TASK-05 groundwork — visibility into publication history before any pause-rule
- * enforcement is built on top of it). */
+/** Every release a candidate has ever been included in (via any selection ATTACHED to it, default
+ * or personal), newest first (TASK-05 groundwork — visibility into publication history before any
+ * pause-rule enforcement is built on top of it). Selections currently sitting unattached in the
+ * pool don't count — they're not part of any release yet. */
 export async function getMailingListsForCandidate(candidateId: string): Promise<CandidateMailingHistoryEntry[]> {
   if (!candidateId) return []
 
@@ -373,7 +374,7 @@ export async function getMailingListsForCandidate(candidateId: string): Promise<
     .select({ listId: selections.listId })
     .from(selections)
     .where(inArray(selections.id, selectionIds))
-  const listIds = [...new Set(selectionRows.map((r) => r.listId))]
+  const listIds = [...new Set(selectionRows.map((r) => r.listId).filter((id): id is string => id !== null))]
   if (!listIds.length) return []
 
   const headers = await db
@@ -431,25 +432,6 @@ export async function getMailingListRecipientTokens(listId: string): Promise<str
   return rows.map((r) => r.employerToken)
 }
 
-/** Fully replaces a release's DEFAULT selection — deletes its current selectionEntries and
- * inserts the new set. An empty candidateIds deletes the default selection row entirely (cascade
- * takes its entries with it), making "no default" an explicit, valid state — not just an empty
- * one — consistent with how a release can be built entirely out of personal selections. Creates
- * the default selection row if this release doesn't have one yet and candidateIds is non-empty. */
-export async function replaceDefaultSelectionEntries(listId: string, candidateIds: string[]): Promise<void> {
-  const existingId = await findDefaultSelectionId(listId)
-
-  if (!candidateIds.length) {
-    if (existingId) await db.delete(selections).where(eq(selections.id, existingId))
-    return
-  }
-
-  const selectionId = existingId ?? crypto.randomUUID()
-  if (!existingId) await db.insert(selections).values({ id: selectionId, listId, label: "" })
-  await db.delete(selectionEntries).where(eq(selectionEntries.selectionId, selectionId))
-  await db.insert(selectionEntries).values(candidateIds.map((candidateId) => ({ selectionId, candidateId })))
-}
-
 /** Fully replaces a release's recipient override and keeps the header's recipientLabel in sync
  * with it (the two must always agree) — switching back to "whole stream" also goes through this
  * (employerTokens: [], recipientLabel: "" clears the old rows and the label together). */
@@ -466,75 +448,136 @@ export async function replaceMailingListRecipients(
   await db.update(mailingLists).set({ recipientLabel }).where(eq(mailingLists.id, listId))
 }
 
-/** Creates a new personal ("личная") selection for a release — its own candidate set, visible
- * only to the given employers, never filtered by filterCandidatesForEmployer (the manager
- * hand-picked these candidates for these specific employers; no geo/exclusion second-guessing). */
-export async function createPersonalSelection(
-  listId: string,
+/** Every подборка prepared for a stream — pool items (listId null) and ones currently attached to
+ * some release alike, each with enough to render /editor/selections (status, label, counts) and a
+ * release's attach/detach picker. The sole read path for the "Подборки" section. */
+export async function getSelectionsForStream(streamId: number): Promise<SelectionSummary[]> {
+  const rows = await db
+    .select({ id: selections.id, listId: selections.listId, label: selections.label })
+    .from(selections)
+    .where(eq(selections.streamId, streamId))
+  if (!rows.length) return []
+
+  const ids = rows.map((r) => r.id)
+  const employerRows = await db
+    .select({ selectionId: selectionEmployers.selectionId, employerToken: selectionEmployers.employerToken })
+    .from(selectionEmployers)
+    .where(inArray(selectionEmployers.selectionId, ids))
+  const employersBySelection = new Map<string, string[]>()
+  for (const row of employerRows) {
+    const arr = employersBySelection.get(row.selectionId) ?? []
+    arr.push(row.employerToken)
+    employersBySelection.set(row.selectionId, arr)
+  }
+
+  const entryRows = await db
+    .select({ selectionId: selectionEntries.selectionId, candidateId: selectionEntries.candidateId })
+    .from(selectionEntries)
+    .where(inArray(selectionEntries.selectionId, ids))
+  const candidatesBySelection = new Map<string, Set<string>>()
+  for (const row of entryRows) {
+    if (!candidatesBySelection.has(row.selectionId)) candidatesBySelection.set(row.selectionId, new Set())
+    candidatesBySelection.get(row.selectionId)!.add(row.candidateId)
+  }
+
+  return rows.map((r) => ({
+    selectionId: r.id,
+    streamId,
+    label: r.label,
+    listId: r.listId,
+    employerTokens: employersBySelection.get(r.id) ?? [],
+    candidateIds: [...(candidatesBySelection.get(r.id) ?? [])],
+  }))
+}
+
+/** Creates a new подборка in the pool for a stream — not attached to any release yet. `label` is
+ * display-only (company names for a personal one, "" for a default-shaped one). */
+export async function createSelection(
+  streamId: number,
   candidateIds: string[],
   employerTokens: string[],
   label: string,
 ): Promise<{ selectionId: string }> {
-  if (!candidateIds.length) throw new Error("Выберите хотя бы одного кандидата для личной подборки")
-  if (!employerTokens.length) throw new Error("Выберите хотя бы одного работодателя для личной подборки")
+  if (!candidateIds.length) throw new Error("Выберите хотя бы одного кандидата")
 
   const selectionId = crypto.randomUUID()
-  await db.insert(selections).values({ id: selectionId, listId, label })
+  await db.insert(selections).values({ id: selectionId, streamId, listId: null, label })
   await db.insert(selectionEntries).values(candidateIds.map((candidateId) => ({ selectionId, candidateId })))
-  await db
-    .insert(selectionEmployers)
-    .values([...new Set(employerTokens)].map((employerToken) => ({ selectionId, employerToken })))
+  if (employerTokens.length) {
+    await db.insert(selectionEmployers).values([...new Set(employerTokens)].map((employerToken) => ({ selectionId, employerToken })))
+  }
   return { selectionId }
 }
 
-/** Fully replaces a personal selection's candidates and target employers (and its label) — same
- * "delete rows, reinsert" pattern as replaceDefaultSelectionEntries/replaceMailingListRecipients. */
-export async function updatePersonalSelection(
+/** Fully replaces a подборка's candidates/employers/label — same "delete rows, reinsert" pattern
+ * as replaceMailingListRecipients(). Works the same whether the подборка is currently in the pool
+ * or attached to an unsent release (composition is only ever edited from /editor/selections,
+ * never from the release side — callers there must check the attached release isn't sent). */
+export async function updateSelection(
   selectionId: string,
   candidateIds: string[],
   employerTokens: string[],
   label: string,
 ): Promise<void> {
-  if (!candidateIds.length) throw new Error("Выберите хотя бы одного кандидата для личной подборки")
-  if (!employerTokens.length) throw new Error("Выберите хотя бы одного работодателя для личной подборки")
+  if (!candidateIds.length) throw new Error("Выберите хотя бы одного кандидата")
 
   await db.update(selections).set({ label }).where(eq(selections.id, selectionId))
   await db.delete(selectionEntries).where(eq(selectionEntries.selectionId, selectionId))
   await db.insert(selectionEntries).values(candidateIds.map((candidateId) => ({ selectionId, candidateId })))
   await db.delete(selectionEmployers).where(eq(selectionEmployers.selectionId, selectionId))
-  await db
-    .insert(selectionEmployers)
-    .values([...new Set(employerTokens)].map((employerToken) => ({ selectionId, employerToken })))
+  if (employerTokens.length) {
+    await db.insert(selectionEmployers).values([...new Set(employerTokens)].map((employerToken) => ({ selectionId, employerToken })))
+  }
 }
 
-/** Deletes a personal selection — cascade takes its selectionEntries/selectionEmployers with it.
- * Unlike the default selection, a personal one is never implicitly removed by emptying its
- * candidate list; it's always an explicit action (see release-detail-modal.tsx's "Удалить личную
- * подборку"). */
-export async function deletePersonalSelection(selectionId: string): Promise<void> {
+/** Deletes a подборка outright — cascade takes its selectionEntries/selectionEmployers with it.
+ * Callers must ensure it isn't attached to an already-sent release (same guard as editing). */
+export async function deleteSelection(selectionId: string): Promise<void> {
   await db.delete(selections).where(eq(selections.id, selectionId))
 }
 
-/** Reads one selection directly by id, regardless of default/personal — used by the standalone
+/** Attaches pool подборки to a release, picking them (not creating them) — the only way a release
+ * gets any content. Callers (app/actions.ts) must already have validated that every id belongs to
+ * the release's own stream, is currently unattached (or already attached to this same listId —
+ * updateMailingList()'s diff can call this redundantly-safely), and that at most one of the
+ * resulting attached set has no employerTokens (the "one default" invariant). */
+export async function attachSelectionsToMailingList(listId: string, selectionIds: string[]): Promise<void> {
+  if (!selectionIds.length) return
+  await db.update(selections).set({ listId }).where(inArray(selections.id, selectionIds))
+}
+
+/** Detaches a подборка from its release, returning it to its stream's pool (listId -> null) —
+ * reusable in a future release. Callers must ensure the release hasn't been sent (same guard as
+ * every other edit of an unsent release). */
+export async function detachSelection(selectionId: string): Promise<void> {
+  await db.update(selections).set({ listId: null }).where(eq(selections.id, selectionId))
+}
+
+/** Reads one selection directly by id, attached or still in the pool — used by the standalone
  * "Просмотреть подборку" page (app/selection/[selectionId]/page.tsx), which lets an editor inspect
- * any подборка's content without going through a specific employer's token. Never filtered (the
- * page itself never applies filterCandidatesForEmployer — see that page for why). */
+ * any подборка's content directly. Never filtered (the page itself never applies
+ * filterCandidatesForEmployer — see that page for why). stream/date are "" when the подборка is
+ * still unattached (listId null — no release to read them from yet). */
 export async function getSelectionById(
   selectionId: string,
-): Promise<{ selectionId: string; listId: string; label: string; stream: string; date: string; employerTokens: string[]; entries: MailingListEntry[] } | null> {
+): Promise<{ selectionId: string; listId: string | null; label: string; stream: string; date: string; employerTokens: string[]; entries: MailingListEntry[] } | null> {
   const rows = await db.select({ id: selections.id, listId: selections.listId, label: selections.label }).from(selections).where(eq(selections.id, selectionId)).limit(1)
   const row = rows[0]
   if (!row) return null
 
-  const header = await db
-    .select({ streamName: streams.name, targetDate: mailingLists.targetDate })
-    .from(mailingLists)
-    .leftJoin(streams, eq(mailingLists.streamId, streams.id))
-    .where(eq(mailingLists.id, row.listId))
-    .limit(1)
-  const h = header[0]
-  const stream = h?.streamName ?? ""
-  const date = h ? timestampToRu(h.targetDate) : ""
+  let stream = ""
+  let date = ""
+  if (row.listId) {
+    const header = await db
+      .select({ streamName: streams.name, targetDate: mailingLists.targetDate })
+      .from(mailingLists)
+      .leftJoin(streams, eq(mailingLists.streamId, streams.id))
+      .where(eq(mailingLists.id, row.listId))
+      .limit(1)
+    const h = header[0]
+    stream = h?.streamName ?? ""
+    date = h ? timestampToRu(h.targetDate) : ""
+  }
 
   const employerRows = await db.select({ employerToken: selectionEmployers.employerToken }).from(selectionEmployers).where(eq(selectionEmployers.selectionId, selectionId))
   const employerTokens = employerRows.map((r) => r.employerToken)

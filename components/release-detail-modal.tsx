@@ -1,18 +1,13 @@
 "use client"
 
-import { useState, useMemo, useEffect, useRef } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, AlertCircle, AlertTriangle, Pencil, Eye, Users } from "lucide-react"
-import {
-  updateMailingList, getMailingListRecipients, getMailingListDetail,
-  createPersonalSelection, updatePersonalSelection, deletePersonalSelection,
-} from "@/app/actions"
+import { X, Check, AlertCircle, Pencil, Eye } from "lucide-react"
+import { updateMailingList, getMailingListRecipients, getMailingListDetail, getSelectionsForStream } from "@/app/actions"
 import type { EmployerPickOption } from "@/lib/db/employers"
-import type { MailingList } from "@/lib/db/mailing-lists"
-import {
-  CandidateRow, CompanyGroup, RosterTable, PersonalSelectionBlock,
-  type EligibleCandidate, type DraftSelection, type RosterRow, type RosterKind,
-} from "@/components/release-create-modal"
+import type { SelectionSummary } from "@/lib/db/mailing-lists"
+import { CompanyGroup } from "@/components/picker-rows"
+import { RosterTable, SelectionPickerRow, type RosterRow, type RosterKind } from "@/components/release-create-modal"
 
 const inputCls =
   "w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -26,29 +21,16 @@ function fromRuDate(ruDate: string): string {
   return `${y}-${mo}-${d}`
 }
 
-function selectionsToDrafts(list: MailingList): DraftSelection[] {
-  return list.personal.map((s) => ({
-    key: s.selectionId,
-    selectionId: s.selectionId,
-    candidateIds: new Set(s.entries.map((e) => e.profile.id)),
-    employerTokens: new Set(s.employerTokens),
-  }))
-}
-
 export function ReleaseDetailModal({
   listId,
   stream,
   date,
-  eligible,
-  paused,
   employersForStream,
   readOnly,
 }: {
   listId: string
   stream: string
   date: string
-  eligible: EligibleCandidate[]
-  paused: EligibleCandidate[]
   employersForStream: EmployerPickOption[]
   readOnly: boolean
 }) {
@@ -56,37 +38,59 @@ export function ReleaseDetailModal({
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
   const [errorMsg, setErrorMsg] = useState("")
 
-  const [detailLoaded, setDetailLoaded] = useState(false)
+  const [dataLoaded, setDataLoaded] = useState(false)
   const [editDate, setEditDate] = useState(() => fromRuDate(date))
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [personalSelections, setPersonalSelections] = useState<DraftSelection[]>([])
-  const originalSelectionIds = useRef<Set<string>>(new Set())
+  // Both pickable (pool) and currently-attached подборки of this release's own stream, pre-checked
+  // where attached — composition is never shown/editable here, see SelectionPickerRow/picker-rows.
+  const [pickableSelections, setPickableSelections] = useState<SelectionSummary[]>([])
+  const [selectedSelectionIds, setSelectedSelectionIds] = useState<Set<string>>(new Set())
 
   const [recipientMode, setRecipientMode] = useState<"all" | "selected">("all")
   const [selectedEmployerTokens, setSelectedEmployerTokens] = useState<Set<string>>(new Set())
   const [currentRecipients, setCurrentRecipients] = useState<EmployerPickOption[]>([])
 
   useEffect(() => {
-    if (!open || detailLoaded) return
+    if (!open || dataLoaded) return
     let cancelled = false
-    Promise.all([getMailingListDetail(listId), getMailingListRecipients(listId)]).then(([detail, recipients]) => {
+
+    async function load() {
+      const recipients = await getMailingListRecipients(listId)
       if (cancelled) return
-      if (detail) {
-        setEditDate(fromRuDate(date))
-        setSelectedIds(new Set(detail.default?.entries.map((e) => e.profile.id) ?? []))
-        const drafts = selectionsToDrafts(detail)
-        setPersonalSelections(drafts)
-        originalSelectionIds.current = new Set(drafts.map((d) => d.selectionId!))
-      }
       setCurrentRecipients(recipients)
       setSelectedEmployerTokens(new Set(recipients.map((e) => e.token)))
       setRecipientMode(recipients.length ? "selected" : "all")
-      setDetailLoaded(true)
-    })
+
+      if (readOnly) {
+        const detail = await getMailingListDetail(listId)
+        if (cancelled || !detail) return
+        const attached = [detail.default, ...detail.personal].filter((s): s is NonNullable<typeof s> => s !== null)
+        setPickableSelections(
+          attached.map((s) => ({
+            selectionId: s.selectionId,
+            streamId: 0,
+            label: s.label,
+            employerTokens: s.employerTokens,
+            candidateIds: s.entries.map((e) => e.profile.id),
+            listId,
+          })),
+        )
+        setSelectedSelectionIds(new Set(attached.map((s) => s.selectionId)))
+      } else {
+        const all = await getSelectionsForStream(stream)
+        if (cancelled) return
+        const pickable = all.filter((s) => s.listId === null || s.listId === listId)
+        setPickableSelections(pickable)
+        setSelectedSelectionIds(new Set(pickable.filter((s) => s.listId === listId).map((s) => s.selectionId)))
+      }
+
+      setDataLoaded(true)
+    }
+    load()
+
     return () => {
       cancelled = true
     }
-  }, [open, detailLoaded, listId, date])
+  }, [open, dataLoaded, listId, stream, readOnly])
 
   const employerGroups = useMemo(() => {
     const byCompany = new Map<string, EmployerPickOption[]>()
@@ -108,43 +112,12 @@ export function ReleaseDetailModal({
     return [...byCompany.entries()].sort((a, b) => a[0].localeCompare(b[0], "ru"))
   }, [currentRecipients])
 
-  // Audience this release's send actually reaches — mirrors PublishButton/getEmployersWithoutSelection's
-  // logic client-side for an instant roster, not a separate source of truth.
-  const audience = recipientMode === "selected" ? currentRecipientsOrPicked() : employersForStream
-  function currentRecipientsOrPicked(): EmployerPickOption[] {
-    if (readOnly) return currentRecipients.length ? currentRecipients : employersForStream
-    return employersForStream.filter((e) => selectedEmployerTokens.has(e.token))
-  }
-  const hasDefault = selectedIds.size > 0
-  const rosterRows: RosterRow[] = useMemo(
-    () =>
-      audience.map((employer) => {
-        const personalMatch = personalSelections.find((s) => s.employerTokens.has(employer.token))
-        const kind: RosterKind = personalMatch ? "personal" : hasDefault ? "default" : "missing"
-        const viewHref = personalMatch?.selectionId ? `/selection/${personalMatch.selectionId}` : undefined
-        return { employer, kind, viewHref }
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [audience, personalSelections, hasDefault],
-  )
-
-  function toggleCandidate(id: string) {
-    setSelectedIds((prev) => {
+  function toggleSelection(selectionId: string) {
+    setSelectedSelectionIds((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(selectionId)) next.delete(selectionId)
+      else next.add(selectionId)
       return next
-    })
-  }
-
-  function selectAllEligible() {
-    setSelectedIds((prev) => new Set([...prev, ...eligible.map((c) => c.id)]))
-  }
-
-  function deselectAllEligible() {
-    setSelectedIds((prev) => {
-      const eligibleIds = new Set(eligible.map((c) => c.id))
-      return new Set([...prev].filter((id) => !eligibleIds.has(id)))
     })
   }
 
@@ -168,60 +141,14 @@ export function ReleaseDetailModal({
     })
   }
 
-  function addPersonalSelection() {
-    setPersonalSelections((prev) => [...prev, { key: crypto.randomUUID(), candidateIds: new Set(), employerTokens: new Set() }])
-  }
-
-  function removePersonalSelection(key: string) {
-    setPersonalSelections((prev) => prev.filter((s) => s.key !== key))
-  }
-
-  function togglePersonalCandidate(key: string, id: string) {
-    setPersonalSelections((prev) =>
-      prev.map((s) => {
-        if (s.key !== key) return s
-        const next = new Set(s.candidateIds)
-        if (next.has(id)) next.delete(id)
-        else next.add(id)
-        return { ...s, candidateIds: next }
-      }),
-    )
-  }
-
-  function togglePersonalEmployer(key: string, token: string) {
-    setPersonalSelections((prev) =>
-      prev.map((s) => {
-        if (s.key !== key) return s
-        const next = new Set(s.employerTokens)
-        if (next.has(token)) next.delete(token)
-        else next.add(token)
-        return { ...s, employerTokens: next }
-      }),
-    )
-  }
-
-  function togglePersonalCompany(key: string, tokens: string[], checkAll: boolean) {
-    setPersonalSelections((prev) =>
-      prev.map((s) => {
-        if (s.key !== key) return s
-        const next = new Set(s.employerTokens)
-        for (const t of tokens) {
-          if (checkAll) next.add(t)
-          else next.delete(t)
-        }
-        return { ...s, employerTokens: next }
-      }),
-    )
-  }
-
   function handleClose() {
     setOpen(false)
     setStatus("idle")
     setErrorMsg("")
-    setDetailLoaded(false)
+    setDataLoaded(false)
     setEditDate(fromRuDate(date))
-    setSelectedIds(new Set())
-    setPersonalSelections([])
+    setPickableSelections([])
+    setSelectedSelectionIds(new Set())
     setRecipientMode("all")
     setSelectedEmployerTokens(new Set())
     setCurrentRecipients([])
@@ -234,27 +161,9 @@ export function ReleaseDetailModal({
     try {
       await updateMailingList(listId, {
         date: editDate,
-        candidateIds: [...selectedIds],
         employerTokens: recipientMode === "selected" ? [...selectedEmployerTokens] : [],
+        selectionIds: [...selectedSelectionIds],
       })
-
-      const currentIds = new Set(personalSelections.filter((s) => s.selectionId).map((s) => s.selectionId!))
-      for (const removedId of originalSelectionIds.current) {
-        if (!currentIds.has(removedId)) await deletePersonalSelection(removedId, listId)
-      }
-      for (const draft of personalSelections) {
-        const hasContent = draft.candidateIds.size > 0 && draft.employerTokens.size > 0
-        if (draft.selectionId) {
-          if (hasContent) {
-            await updatePersonalSelection(draft.selectionId, listId, { candidateIds: [...draft.candidateIds], employerTokens: [...draft.employerTokens] })
-          } else {
-            await deletePersonalSelection(draft.selectionId, listId)
-          }
-        } else if (hasContent) {
-          await createPersonalSelection(listId, { candidateIds: [...draft.candidateIds], employerTokens: [...draft.employerTokens] })
-        }
-      }
-
       setStatus("success")
     } catch (err) {
       setStatus("error")
@@ -262,9 +171,21 @@ export function ReleaseDetailModal({
     }
   }
 
+  const chosenSelections = pickableSelections.filter((s) => selectedSelectionIds.has(s.selectionId))
+  const hasDefault = chosenSelections.some((s) => s.employerTokens.length === 0)
+  const audience = recipientMode === "selected" ? employersForStream.filter((e) => selectedEmployerTokens.has(e.token)) : employersForStream
+  const rosterRows: RosterRow[] = useMemo(
+    () =>
+      audience.map((employer) => {
+        const personalMatch = chosenSelections.find((s) => s.employerTokens.includes(employer.token))
+        const kind: RosterKind = personalMatch ? "personal" : hasDefault ? "default" : "missing"
+        return { employer, kind }
+      }),
+    [audience, chosenSelections, hasDefault],
+  )
+
   const canSubmit = Boolean(
-    editDate.trim() &&
-    (selectedIds.size > 0 || personalSelections.some((s) => s.candidateIds.size > 0 && s.employerTokens.size > 0)) &&
+    editDate.trim() && selectedSelectionIds.size > 0 &&
     (recipientMode === "all" || selectedEmployerTokens.size > 0),
   )
 
@@ -315,7 +236,7 @@ export function ReleaseDetailModal({
                     Закрыть
                   </button>
                 </div>
-              ) : !detailLoaded ? (
+              ) : !dataLoaded ? (
                 <p className="px-6 py-12 text-center text-sm text-muted-foreground">Загрузка…</p>
               ) : (
                 <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5">
@@ -339,7 +260,7 @@ export function ReleaseDetailModal({
 
                     <div className="space-y-1.5">
                       <p className="text-xs font-medium text-muted-foreground">
-                        Получатели письма {recipientMode === "all" ? "— весь стрим" : `(${selectedEmployerTokens.size} выбрано)`}
+                        Кому отправлено письмо {recipientMode === "all" ? "— весь стрим" : `(${selectedEmployerTokens.size} выбрано)`}
                       </p>
                       {readOnly ? (
                         currentRecipients.length === 0 ? (
@@ -403,93 +324,31 @@ export function ReleaseDetailModal({
 
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                          <Users className="size-3.5" />
-                          Подборка по умолчанию — видна всем без личной ({selectedIds.size})
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Подборки выпуска ({selectedSelectionIds.size})
                         </p>
-                        {!readOnly && eligible.length > 0 && (
-                          <div className="flex gap-2 text-xs">
-                            <button type="button" onClick={selectAllEligible} className="text-primary hover:underline">
-                              Выбрать всех
-                            </button>
-                            <button type="button" onClick={deselectAllEligible} className="text-muted-foreground hover:underline">
-                              Снять выделение
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      {readOnly ? (
-                        selectedIds.size === 0 ? (
-                          <p className="text-sm text-muted-foreground">Нет подборки по умолчанию — у всех получателей была личная.</p>
-                        ) : (
-                          <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                            {[...eligible, ...paused].filter((c) => selectedIds.has(c.id)).map((c) => (
-                              <CandidateRow key={c.id} candidate={c} checked onToggle={() => {}} readOnly />
-                            ))}
-                          </div>
-                        )
-                      ) : (
-                        <>
-                          {eligible.length > 0 && (selectedIds.size < 6 || selectedIds.size > 10) && (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
-                              <AlertTriangle className="size-3" />
-                              {selectedIds.size < 6 ? "Мало кандидатов (менее 6)" : "Много кандидатов (более 10)"}
-                            </span>
-                          )}
-                          <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                            {eligible.map((c) => (
-                              <CandidateRow
-                                key={c.id}
-                                candidate={c}
-                                checked={selectedIds.has(c.id)}
-                                onToggle={() => toggleCandidate(c.id)}
-                              />
-                            ))}
-                            {paused.map((c) => (
-                              <CandidateRow
-                                key={c.id}
-                                candidate={c}
-                                checked={selectedIds.has(c.id)}
-                                onToggle={() => toggleCandidate(c.id)}
-                              />
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-medium text-muted-foreground">Личные подборки — видны только выбранным работодателям, без гео-фильтра</p>
                         {!readOnly && (
-                          <button
-                            type="button"
-                            onClick={addPersonalSelection}
-                            className="text-xs font-medium text-primary hover:underline"
-                          >
-                            + Личная подборка
-                          </button>
+                          <a href="/editor/selections" className="text-xs font-medium text-primary hover:underline">
+                            Подготовить ещё →
+                          </a>
                         )}
                       </div>
-                      {personalSelections.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">Личных подборок нет.</p>
+                      {pickableSelections.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          {readOnly ? "Нет ни одной подборки." : "Нет подготовленных подборок для этого стрима — сначала создайте их в разделе «Подборки»."}
+                        </p>
                       ) : (
-                        personalSelections.map((draft, i) => (
-                          <PersonalSelectionBlock
-                            key={draft.key}
-                            draft={draft}
-                            index={i}
-                            eligible={eligible}
-                            paused={paused}
-                            employerGroups={employerGroups}
-                            onToggleCandidate={(id) => togglePersonalCandidate(draft.key, id)}
-                            onToggleEmployer={(token) => togglePersonalEmployer(draft.key, token)}
-                            onToggleCompany={(tokens, checkAll) => togglePersonalCompany(draft.key, tokens, checkAll)}
-                            onRemove={() => removePersonalSelection(draft.key)}
-                            viewHref={draft.selectionId ? `/selection/${draft.selectionId}` : undefined}
-                            readOnly={readOnly}
-                          />
-                        ))
+                        <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
+                          {pickableSelections.map((s) => (
+                            <SelectionPickerRow
+                              key={s.selectionId}
+                              selection={s}
+                              checked={selectedSelectionIds.has(s.selectionId)}
+                              onToggle={() => toggleSelection(s.selectionId)}
+                              readOnly={readOnly}
+                            />
+                          ))}
+                        </div>
                       )}
                     </div>
 
