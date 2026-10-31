@@ -69,15 +69,40 @@ export const mailingLists = pgTable("mailingLists", {
   sentCampaignId: integer("sentCampaignId"),
 })
 
+// Legacy content table — superseded by selections/selectionEntries below (every release's
+// candidates now live in its default selection instead). Kept only until the backfill into
+// selections is verified on real data and this table is dropped in a follow-up migration;
+// no code reads or writes it anymore.
 export const mailingListEntries = pgTable("mailingListEntries", {
   id:          text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   listId:      text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
-  // CASCADE, not SET NULL — a row here only ever means "this candidate was part of this
-  // release"; once the candidate is gone there's nothing identifiable left to keep (every
-  // reader of this table already filters out a null candidateId before computing
-  // candidateCount/candidateIds, so SET NULL bought no actual visible history, just a
-  // dangling row inflating raw COUNT(*) against what the app shows).
   candidateId: text("candidateId").notNull().references(() => candidates.id, { onDelete: "cascade" }),
+})
+
+// A "подборка" — one content set within a release (mailingLists row). A release can have at
+// most one selection with no selectionEmployers rows (the default, shown to anyone without a
+// personal override) and any number with ≥1 selectionEmployers row (personal, shown only to
+// those employers, bypassing filterCandidatesForEmployer entirely — the manager hand-picked
+// these candidates for these employers on purpose, no geo/exclusion second-guessing). A release
+// legitimately has zero default selections if every subscriber got a personal one.
+export const selections = pgTable("selections", {
+  id:     text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  listId: text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
+  // Manager-facing label only (e.g. company names) — never the source of truth for default vs
+  // personal, that's whether selectionEmployers has any rows for this selection.
+  label:  text("label").notNull().default(""),
+})
+
+export const selectionEntries = pgTable("selectionEntries", {
+  id:          text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  selectionId: text("selectionId").notNull().references(() => selections.id, { onDelete: "cascade" }),
+  candidateId: text("candidateId").notNull().references(() => candidates.id, { onDelete: "cascade" }),
+})
+
+export const selectionEmployers = pgTable("selectionEmployers", {
+  id:            text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  selectionId:   text("selectionId").notNull().references(() => selections.id, { onDelete: "cascade" }),
+  employerToken: text("employerToken").notNull().references(() => employers.token, { onDelete: "cascade" }),
 })
 
 // Recipient override for a release — presence of any row for a listId means "narrowed to these

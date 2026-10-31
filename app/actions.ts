@@ -3,7 +3,16 @@
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
 import { getCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
-import { getMailingLists, getMailingListMeta, getMailingListCandidateIds, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent, createMailingListRecipientRows, getMailingListRecipientTokens, replaceMailingListEntries, replaceMailingListRecipients, campaignNameFor, isoToRu } from "@/lib/db/mailing-lists"
+import {
+  getMailingLists, getMailingListMeta, getMailingList, getAllSelectionCandidateIds, createMailingListRows,
+  deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent,
+  createMailingListRecipientRows, getMailingListRecipientTokens, replaceDefaultSelectionEntries,
+  replaceMailingListRecipients, getEmployersWithoutSelection,
+  createPersonalSelection as createPersonalSelectionRows,
+  updatePersonalSelection as updatePersonalSelectionRows,
+  deletePersonalSelection as deletePersonalSelectionRows,
+  campaignNameFor, isoToRu,
+} from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
@@ -159,9 +168,20 @@ export async function createMailingList(data: {
   date: string
   candidateIds: string[]
   employerTokens?: string[]
+  /** Personal ("личные") selections to create alongside the default — each needs its own
+   * candidates and its own target employers. Entries missing either are silently dropped (the
+   * UI never submits an incomplete one; this is just defensive). */
+  personalSelections?: { candidateIds: string[]; employerTokens: string[] }[]
 }): Promise<{ listId: string }> {
   if (!data.stream.trim()) throw new Error("Выберите стрим")
   if (!data.date.trim()) throw new Error("Укажите дату рассылки")
+
+  const personalSelections = (data.personalSelections ?? []).filter(
+    (s) => s.candidateIds.length && s.employerTokens.length,
+  )
+  if (!data.candidateIds.length && !personalSelections.length) {
+    throw new Error("Добавьте хотя бы одну подборку — по умолчанию или личную")
+  }
 
   let recipientLabel = ""
   if (data.employerTokens?.length) {
@@ -174,6 +194,11 @@ export async function createMailingList(data: {
   if (data.employerTokens?.length) {
     await createMailingListRecipientRows(result.listId, data.employerTokens)
   }
+  for (const selection of personalSelections) {
+    const employers = (await Promise.all(selection.employerTokens.map((t) => getEmployerByToken(t))))
+      .filter((e): e is Employer => Boolean(e))
+    await createPersonalSelectionRows(result.listId, selection.candidateIds, selection.employerTokens, recipientLabelFor(employers))
+  }
   revalidatePath("/editor")
   return result
 }
@@ -181,7 +206,10 @@ export async function createMailingList(data: {
 /** Edits a release that hasn't been sent yet — stream is fixed at creation and not editable here
  * (changing it would orphan the candidate/recipient selections, which are stream-specific; a
  * different stream means a new release). sentCampaignId is re-checked fresh on the server, not
- * trusted from whatever state the edit form was opened with — same guard as deleteMailingList(). */
+ * trusted from whatever state the edit form was opened with — same guard as deleteMailingList().
+ * `candidateIds` may be empty — that's a valid "no default selection" state (see
+ * replaceDefaultSelectionEntries()) as long as the release still has at least one personal
+ * selection; this function is the one place that enforces "not completely empty". */
 export async function updateMailingList(
   listId: string,
   data: { date: string; candidateIds: string[]; employerTokens?: string[] },
@@ -191,8 +219,15 @@ export async function updateMailingList(
   if (list.sentCampaignId !== null) throw new Error("Эта рассылка уже отправлена — редактирование недоступно")
   if (!data.date.trim()) throw new Error("Укажите дату рассылки")
 
+  if (!data.candidateIds.length) {
+    const current = await getMailingList(listId)
+    if (!current?.personal.length) {
+      throw new Error("У рассылки должна быть хотя бы одна подборка — по умолчанию или личная")
+    }
+  }
+
   await updateMailingListTimestamp(listId, `${data.date}T00:00:00`)
-  await replaceMailingListEntries(listId, data.candidateIds)
+  await replaceDefaultSelectionEntries(listId, data.candidateIds)
 
   let recipientLabel = ""
   if (data.employerTokens?.length) {
@@ -204,6 +239,70 @@ export async function updateMailingList(
 
   revalidatePath("/editor")
 }
+
+/** Full detail of a release — default + every personal selection, each resolved to real
+ * Candidate profiles — used by ReleaseCreateModal/ReleaseDetailModal to seed the roster table and
+ * the "Личные подборки" editing list. */
+export async function getMailingListDetail(listId: string) {
+  return getMailingList(listId)
+}
+
+/** Creates a personal selection for an unsent release — same sentCampaignId guard as
+ * updateMailingList(). company names are derived server-side the same way as the narrowed-send
+ * recipientLabel (recipientLabelFor()), purely for display in the roster/UI. */
+export async function createPersonalSelection(
+  listId: string,
+  data: { candidateIds: string[]; employerTokens: string[] },
+): Promise<void> {
+  const list = await getMailingListMeta(listId)
+  if (!list) throw new Error(`Подборка не найдена: ${listId}`)
+  if (list.sentCampaignId !== null) throw new Error("Эта рассылка уже отправлена — редактирование недоступно")
+
+  const employers = (await Promise.all(data.employerTokens.map((t) => getEmployerByToken(t))))
+    .filter((e): e is Employer => Boolean(e))
+  await createPersonalSelectionRows(listId, data.candidateIds, data.employerTokens, recipientLabelFor(employers))
+  revalidatePath("/editor")
+}
+
+/** Edits an existing personal selection of an unsent release. */
+export async function updatePersonalSelection(
+  selectionId: string,
+  listId: string,
+  data: { candidateIds: string[]; employerTokens: string[] },
+): Promise<void> {
+  const list = await getMailingListMeta(listId)
+  if (!list) throw new Error(`Подборка не найдена: ${listId}`)
+  if (list.sentCampaignId !== null) throw new Error("Эта рассылка уже отправлена — редактирование недоступно")
+
+  const employers = (await Promise.all(data.employerTokens.map((t) => getEmployerByToken(t))))
+    .filter((e): e is Employer => Boolean(e))
+  await updatePersonalSelectionRows(selectionId, data.candidateIds, data.employerTokens, recipientLabelFor(employers))
+  revalidatePath("/editor")
+}
+
+/** Deletes a personal selection of an unsent release — the default selection has no equivalent
+ * delete action, emptying its candidate list via updateMailingList() already removes it (see
+ * replaceDefaultSelectionEntries()). */
+export async function deletePersonalSelection(selectionId: string, listId: string): Promise<void> {
+  const list = await getMailingListMeta(listId)
+  if (!list) throw new Error(`Подборка не найдена: ${listId}`)
+  if (list.sentCampaignId !== null) throw new Error("Эта рассылка уже отправлена — удаление подборки недоступно")
+
+  await deletePersonalSelectionRows(selectionId)
+  revalidatePath("/editor")
+}
+
+export type EmployerWithoutSelection = { token: string; name: string; company: string }
+
+/** Employers of a release's actual send audience who have neither a personal selection nor a
+ * default to fall back on — used both by the roster table's live warning (recomputed client-side
+ * from in-progress form state, this action just mirrors it for an already-saved release) and as
+ * the list shown in PublishButton's confirmation dialog before a release with gaps is sent. */
+export async function getMissingSelectionEmployers(listId: string): Promise<EmployerWithoutSelection[]> {
+  const missing = await getEmployersWithoutSelection(listId)
+  return missing.map((e) => ({ token: e.token, name: e.name, company: e.company }))
+}
+
 
 /** Resolves a release's recipient-override tokens into displayable employer data — used by the
  * edit modal (to seed the current selection) and the view modal (to show who it actually went
@@ -233,11 +332,9 @@ export async function deleteMailingList(listId: string): Promise<void> {
   revalidatePath("/editor")
 }
 
-export type PublishResult = {
-  listId: string
-  stream: string
-  campaignId: number
-}
+export type PublishResult =
+  | { listId: string; stream: string; campaignId: number }
+  | { requiresConfirmation: true; missingEmployers: EmployerWithoutSelection[] }
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -483,9 +580,20 @@ async function applyPublicationPauseRules(candidateIds: string[]): Promise<void>
   )
 }
 
-export async function publishMailingList(listId: string): Promise<PublishResult> {
+export async function publishMailingList(listId: string, confirmed = false): Promise<PublishResult> {
   const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
+
+  // Authoritative gate — the roster table's warning in the editor UI mirrors this client-side for
+  // an instant heads-up while the manager is still building the release, but this server check is
+  // what actually blocks a send with gaps; a manager who confirms once gets a real send (and never
+  // re-confirms on a resend that still has the exact same gap, see the alreadySent branch below).
+  if (!confirmed) {
+    const missing = await getEmployersWithoutSelection(listId)
+    if (missing.length) {
+      return { requiresConfirmation: true, missingEmployers: missing.map((e) => ({ token: e.token, name: e.name, company: e.company })) }
+    }
+  }
 
   const alreadySent = list.sentCampaignId !== null
 
@@ -577,7 +685,7 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   // cleanup-adhoc-books cron (vercel.json) deletes it once SendPulse reports the campaign fully
   // processed.
 
-  const candidateIds = await getMailingListCandidateIds(listId)
+  const candidateIds = await getAllSelectionCandidateIds(listId)
 
   // TASK-35, часть 2 — same recipients the email just went to, also pinged on Telegram (whoever
   // connected the bot; sendTelegramToEmployer() never throws, just no-ops for anyone who hasn't —
