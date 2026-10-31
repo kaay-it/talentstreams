@@ -1,19 +1,12 @@
 "use client"
 
-import { useState, useMemo, useRef, useEffect } from "react"
+import { useState, useMemo } from "react"
 import { createPortal } from "react-dom"
-import { X, Check, AlertCircle, AlertTriangle, Plus, Users, ExternalLink, ChevronDown, ChevronUp } from "lucide-react"
+import { X, Check, AlertCircle, AlertTriangle, Plus, ExternalLink } from "lucide-react"
 import { createMailingList } from "@/app/actions"
 import type { EmployerPickOption } from "@/lib/db/employers"
-
-export type EligibleCandidate = {
-  id: string
-  name: string
-  title: string
-  level: string
-  /** ru-RU text ("21.07.2026") or "" if never set (always eligible). */
-  activeSince: string
-}
+import type { SelectionSummary } from "@/lib/db/mailing-lists"
+import { CompanyGroup, candidatePlural, subscriberPlural } from "@/components/picker-rows"
 
 const inputCls =
   "w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -48,25 +41,69 @@ function Field({
   )
 }
 
-function candidatePlural(n: number): string {
-  const mod10 = n % 10
-  const mod100 = n % 100
-  if (mod10 === 1 && mod100 !== 11) return "кандидат"
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "кандидата"
-  return "кандидатов"
+export type RosterKind = "default" | "personal" | "missing"
+export type RosterRow = { employer: EmployerPickOption; kind: RosterKind; viewHref?: string }
+
+const ROSTER_BADGE: Record<RosterKind, string> = {
+  default: "bg-muted text-muted-foreground",
+  personal: "bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400",
+  missing: "bg-destructive/10 text-destructive",
+}
+const ROSTER_LABEL: Record<RosterKind, string> = {
+  default: "Общая подборка",
+  personal: "Ограниченная подборка",
+  missing: "⚠ Нет подборки",
 }
 
-export function CandidateRow({
-  candidate,
+/** Always-visible roster of who gets what — not a conditional warning banner, the table itself
+ * doubles as one (a "missing" row is visually flagged right where it is). Used identically by
+ * ReleaseCreateModal (built from the подборки being picked) and ReleaseDetailModal (edit and
+ * readOnly modes alike). */
+export function RosterTable({ rows }: { rows: RosterRow[] }) {
+  if (!rows.length) return null
+  const missingCount = rows.filter((r) => r.kind === "missing").length
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-medium text-muted-foreground">
+        Кому что попадёт ({rows.length}){missingCount > 0 && <span className="ml-1 font-semibold text-destructive">— {missingCount} без подборки</span>}
+      </p>
+      <div className="max-h-56 overflow-y-auto rounded-lg border divide-y">
+        {rows.map((r) => (
+          <div key={r.employer.token} className={`flex items-center justify-between gap-2 px-3 py-2 text-sm ${r.kind === "missing" ? "bg-destructive/5" : ""}`}>
+            <span className="min-w-0 truncate">
+              <span className="font-medium text-foreground">{r.employer.name}</span>
+              <span className="text-muted-foreground"> · {r.employer.company}</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${ROSTER_BADGE[r.kind]}`}>{ROSTER_LABEL[r.kind]}</span>
+              {r.viewHref && (
+                <a href={r.viewHref} target="_blank" rel="noopener noreferrer" className="text-[11px] font-medium text-primary hover:underline">
+                  Просмотреть →
+                </a>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** One row of the подборка picker — ticking it attaches/detaches that pool подборка to the
+ * release being built/edited. Composition is never shown or editable here, only in
+ * /editor/selections — this is purely a picker, see SelectionDetailLink for inspecting one. */
+export function SelectionPickerRow({
+  selection,
   checked,
   onToggle,
   readOnly,
 }: {
-  candidate: EligibleCandidate
+  selection: SelectionSummary
   checked: boolean
   onToggle: () => void
   readOnly?: boolean
 }) {
+  const isDefault = selection.employerTokens.length === 0
   return (
     <label className={`flex items-center gap-2.5 px-3 py-2 text-sm ${readOnly ? "" : "cursor-pointer hover:bg-muted/40"}`}>
       <input
@@ -76,121 +113,41 @@ export function CandidateRow({
         disabled={readOnly}
         className="size-4 shrink-0 accent-primary"
       />
-      <span className="min-w-0 flex-1 truncate">
-        <span className="font-medium text-foreground">{candidate.name || candidate.id}</span>
-        {candidate.title && <span className="text-muted-foreground"> · {candidate.title}</span>}
+      <span
+        className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${isDefault ? "bg-muted text-muted-foreground" : "bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400"}`}
+      >
+        {isDefault ? "Общая" : "Ограниченная"}
       </span>
-      {candidate.level && (
-        <span className="shrink-0 rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:bg-teal-900/20 dark:text-teal-400">
-          {candidate.level}
-        </span>
-      )}
-      {candidate.activeSince && (
-        <span className="shrink-0 text-[11px] text-muted-foreground">Активен с {candidate.activeSince}</span>
-      )}
-    </label>
-  )
-}
-
-function subscriberPlural(n: number): string {
-  const mod10 = n % 10
-  const mod100 = n % 100
-  if (mod10 === 1 && mod100 !== 11) return "подписчик"
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "подписчика"
-  return "подписчиков"
-}
-
-export function EmployerPickerRow({
-  employer,
-  checked,
-  onToggle,
-  readOnly,
-}: {
-  employer: EmployerPickOption
-  checked: boolean
-  onToggle: () => void
-  readOnly?: boolean
-}) {
-  return (
-    <label className={`flex items-center gap-2.5 px-3 py-2 pl-9 text-sm ${readOnly ? "" : "cursor-pointer hover:bg-muted/40"}`}>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={readOnly ? undefined : onToggle}
-        disabled={readOnly}
-        className="size-4 shrink-0 accent-primary"
-      />
-      <span className="min-w-0 flex-1 truncate">
-        <span className="font-medium text-foreground">{employer.name}</span>
-        <span className="text-muted-foreground"> · {employer.email}</span>
+      <span className="min-w-0 flex-1 truncate text-foreground">
+        {selection.label || (isDefault ? "Подборка по умолчанию" : `${selection.employerTokens.length} ${subscriberPlural(selection.employerTokens.length)}`)}
       </span>
+      <span className="shrink-0 text-xs text-muted-foreground">
+        {selection.candidateIds.length} {candidatePlural(selection.candidateIds.length)}
+      </span>
+      <a
+        href={`/selection/${selection.selectionId}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="shrink-0 text-[11px] font-medium text-primary hover:underline"
+      >
+        Просмотреть →
+      </a>
     </label>
-  )
-}
-
-export function CompanyGroup({
-  company,
-  employers,
-  selectedTokens,
-  onToggleEmployer,
-  onToggleCompany,
-  readOnly,
-}: {
-  company: string
-  employers: EmployerPickOption[]
-  selectedTokens: Set<string>
-  onToggleEmployer: (token: string) => void
-  onToggleCompany: (tokens: string[], checkAll: boolean) => void
-  readOnly?: boolean
-}) {
-  const tokens = employers.map((e) => e.token)
-  const selectedCount = tokens.filter((t) => selectedTokens.has(t)).length
-  const allSelected = selectedCount === tokens.length
-  const checkboxRef = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (checkboxRef.current) checkboxRef.current.indeterminate = selectedCount > 0 && !allSelected
-  }, [selectedCount, allSelected])
-
-  return (
-    <>
-      <div className="flex items-center gap-2.5 bg-muted/30 px-3 py-1.5 text-sm">
-        <input
-          ref={checkboxRef}
-          type="checkbox"
-          checked={allSelected}
-          onChange={readOnly ? undefined : () => onToggleCompany(tokens, !allSelected)}
-          disabled={readOnly}
-          className="size-4 shrink-0 accent-primary"
-        />
-        <span className="font-semibold text-foreground">{company}</span>
-        <span className="text-xs text-muted-foreground">({selectedCount}/{tokens.length})</span>
-      </div>
-      {employers.map((e) => (
-        <EmployerPickerRow
-          key={e.token}
-          employer={e}
-          checked={selectedTokens.has(e.token)}
-          onToggle={() => onToggleEmployer(e.token)}
-          readOnly={readOnly}
-        />
-      ))}
-    </>
   )
 }
 
 export function ReleaseCreateModal({
   streams,
-  eligibleByStream,
-  pausedByStream,
   subscriberCountByStream,
   employersByStream,
+  selectionsByStream,
   editorSecret,
 }: {
   streams: string[]
-  eligibleByStream: Record<string, EligibleCandidate[]>
-  pausedByStream: Record<string, EligibleCandidate[]>
   subscriberCountByStream: Record<string, number>
   employersByStream: Record<string, EmployerPickOption[]>
+  selectionsByStream: Record<string, SelectionSummary[]>
   editorSecret?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -200,15 +157,16 @@ export function ReleaseCreateModal({
 
   const [stream, setStream] = useState("")
   const [date, setDate] = useState(todayISO())
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [pausedOpen, setPausedOpen] = useState(false)
   const [recipientMode, setRecipientMode] = useState<"all" | "selected">("selected")
   const [selectedEmployerTokens, setSelectedEmployerTokens] = useState<Set<string>>(new Set())
+  const [selectedSelectionIds, setSelectedSelectionIds] = useState<Set<string>>(new Set())
 
-  const eligible = stream ? eligibleByStream[stream] ?? [] : []
-  const paused = stream ? pausedByStream[stream] ?? [] : []
   const subscriberCount = stream ? subscriberCountByStream[stream] ?? 0 : 0
   const employersForStream = stream ? employersByStream[stream] ?? [] : []
+  const availableSelections = useMemo(
+    () => (stream ? (selectionsByStream[stream] ?? []).filter((s) => s.listId === null) : []),
+    [stream, selectionsByStream],
+  )
   const employerGroups = useMemo(() => {
     const byCompany = new Map<string, EmployerPickOption[]>()
     for (const e of employersForStream) {
@@ -221,32 +179,17 @@ export function ReleaseCreateModal({
 
   function handleStreamChange(next: string) {
     setStream(next)
-    setSelectedIds(new Set((eligibleByStream[next] ?? []).map((c) => c.id)))
-    setPausedOpen(false)
     setRecipientMode("selected")
     setSelectedEmployerTokens(new Set())
+    setSelectedSelectionIds(new Set())
   }
 
-  function toggleCandidate(id: string) {
-    setSelectedIds((prev) => {
+  function toggleSelection(selectionId: string) {
+    setSelectedSelectionIds((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(selectionId)) next.delete(selectionId)
+      else next.add(selectionId)
       return next
-    })
-  }
-
-  // Only ever touches eligible (by-date) candidates — paused ones stay manual-only,
-  // so a bulk select/deselect never silently adds or removes a candidate the editor
-  // chose to include/exclude by hand despite the pause.
-  function selectAllEligible() {
-    setSelectedIds((prev) => new Set([...prev, ...eligible.map((c) => c.id)]))
-  }
-
-  function deselectAllEligible() {
-    setSelectedIds((prev) => {
-      const eligibleIds = new Set(eligible.map((c) => c.id))
-      return new Set([...prev].filter((id) => !eligibleIds.has(id)))
     })
   }
 
@@ -277,10 +220,9 @@ export function ReleaseCreateModal({
     setCreatedListId("")
     setStream("")
     setDate(todayISO())
-    setSelectedIds(new Set())
-    setPausedOpen(false)
     setRecipientMode("selected")
     setSelectedEmployerTokens(new Set())
+    setSelectedSelectionIds(new Set())
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -291,8 +233,8 @@ export function ReleaseCreateModal({
       const result = await createMailingList({
         stream,
         date,
-        candidateIds: [...selectedIds],
         employerTokens: recipientMode === "selected" ? [...selectedEmployerTokens] : [],
+        selectionIds: [...selectedSelectionIds],
       })
       setCreatedListId(result.listId)
       setStatus("success")
@@ -302,9 +244,28 @@ export function ReleaseCreateModal({
     }
   }
 
+  const chosenSelections = availableSelections.filter((s) => selectedSelectionIds.has(s.selectionId))
+  const totalCandidateCount = useMemo(
+    () => new Set(chosenSelections.flatMap((s) => s.candidateIds)).size,
+    [chosenSelections],
+  )
   const canSubmit = Boolean(
-    stream.trim() && date.trim() && selectedIds.size > 0 &&
+    stream.trim() && date.trim() && selectedSelectionIds.size > 0 &&
     (recipientMode === "all" || selectedEmployerTokens.size > 0),
+  )
+
+  // Audience this release would actually be sent to — crossed with the подборки being picked,
+  // so a gap (nobody covers this employer) is visible before saving.
+  const audience = recipientMode === "selected" ? employersForStream.filter((e) => selectedEmployerTokens.has(e.token)) : employersForStream
+  const hasDefault = chosenSelections.some((s) => s.employerTokens.length === 0)
+  const rosterRows: RosterRow[] = useMemo(
+    () =>
+      audience.map((employer) => {
+        const personalMatch = chosenSelections.find((s) => s.employerTokens.includes(employer.token))
+        const kind: RosterKind = personalMatch ? "personal" : hasDefault ? "default" : "missing"
+        return { employer, kind }
+      }),
+    [audience, chosenSelections, hasDefault],
   )
 
   return (
@@ -347,7 +308,7 @@ export function ReleaseCreateModal({
                   </span>
                   <h3 className="mt-4 text-lg font-semibold text-card-foreground">Выпуск создан</h3>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    {selectedIds.size} {candidatePlural(selectedIds.size)} добавлено в выпуск «{stream}» на {toRuDate(date)}.
+                    {totalCandidateCount} {candidatePlural(totalCandidateCount)} в выпуске «{stream}» на {toRuDate(date)}.
                   </p>
                   <div className="mt-6 flex gap-2">
                     <a
@@ -417,7 +378,7 @@ export function ReleaseCreateModal({
                     {stream && recipientMode === "selected" && (
                       <div className="space-y-1.5">
                         <p className="text-xs font-medium text-muted-foreground">
-                          Получатели выпуска ({selectedEmployerTokens.size} выбрано)
+                          Кому отправить письмо ({selectedEmployerTokens.size} выбрано)
                         </p>
                         {employerGroups.length === 0 ? (
                           <p className="text-sm text-muted-foreground">
@@ -442,20 +403,9 @@ export function ReleaseCreateModal({
 
                     {stream && (
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
-                        <span className="inline-flex items-center gap-1.5">
-                          <Users className="size-3.5 text-muted-foreground" />
-                          {eligible.length} {candidatePlural(eligible.length)} подходит
-                        </span>
-                        <span className="text-muted-foreground">·</span>
                         <span className="text-muted-foreground">
                           {subscriberCount} {subscriberPlural(subscriberCount)}
                         </span>
-                        {selectedIds.size > 0 && (selectedIds.size < 6 || selectedIds.size > 10) && (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
-                            <AlertTriangle className="size-3" />
-                            {selectedIds.size < 6 ? "Мало кандидатов (менее 6)" : "Много кандидатов (более 10)"}
-                          </span>
-                        )}
                         {subscriberCount === 0 && (
                           <span className="inline-flex items-center gap-1 text-xs font-medium text-destructive">
                             <AlertTriangle className="size-3" />
@@ -466,70 +416,35 @@ export function ReleaseCreateModal({
                     )}
 
                     {stream && (
-                      <div className="space-y-3">
-                        {eligible.length === 0 ? (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Подборки этого выпуска ({selectedSelectionIds.size} выбрано)
+                          </p>
+                          <a href={`/editor/selections${editorSecret ? `?secret=${editorSecret}` : ""}`} className="text-xs font-medium text-primary hover:underline">
+                            Подготовить ещё →
+                          </a>
+                        </div>
+                        {availableSelections.length === 0 ? (
                           <p className="text-sm text-muted-foreground">
-                            Нет подходящих кандидатов — активных, с уже наступившей датой «Активен с», по стриму «{stream}».
+                            Нет подготовленных подборок для стрима «{stream}» — сначала создайте их в разделе «Подборки».
                           </p>
                         ) : (
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <p className="text-xs font-medium text-muted-foreground">
-                                Кандидаты в выпуске ({selectedIds.size} из {eligible.length})
-                              </p>
-                              <div className="flex gap-2 text-xs">
-                                <button type="button" onClick={selectAllEligible} className="text-primary hover:underline">
-                                  Выбрать всех
-                                </button>
-                                <button type="button" onClick={deselectAllEligible} className="text-muted-foreground hover:underline">
-                                  Снять выделение
-                                </button>
-                              </div>
-                            </div>
-                            <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                              {eligible.map((c) => (
-                                <CandidateRow
-                                  key={c.id}
-                                  candidate={c}
-                                  checked={selectedIds.has(c.id)}
-                                  onToggle={() => toggleCandidate(c.id)}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {paused.length > 0 && (
-                          <div className="space-y-1.5">
-                            <button
-                              type="button"
-                              onClick={() => setPausedOpen((v) => !v)}
-                              className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                            >
-                              {pausedOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                              {pausedOpen ? "Скрыть кандидатов на паузе" : `Кандидаты на паузе, дата не наступила (${paused.length})`}
-                            </button>
-                            {pausedOpen && (
-                              <>
-                                <p className="text-xs text-muted-foreground">
-                                  Дата «Активен с» ещё не наступила — можно включить вручную, если подходящих кандидатов не хватает.
-                                </p>
-                                <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                                  {paused.map((c) => (
-                                    <CandidateRow
-                                      key={c.id}
-                                      candidate={c}
-                                      checked={selectedIds.has(c.id)}
-                                      onToggle={() => toggleCandidate(c.id)}
-                                    />
-                                  ))}
-                                </div>
-                              </>
-                            )}
+                          <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
+                            {availableSelections.map((s) => (
+                              <SelectionPickerRow
+                                key={s.selectionId}
+                                selection={s}
+                                checked={selectedSelectionIds.has(s.selectionId)}
+                                onToggle={() => toggleSelection(s.selectionId)}
+                              />
+                            ))}
                           </div>
                         )}
                       </div>
                     )}
+
+                    {stream && <RosterTable rows={rosterRows} />}
                   </div>
 
                   {status === "error" && (
@@ -544,7 +459,7 @@ export function ReleaseCreateModal({
                     disabled={status === "submitting" || !canSubmit}
                     className="mt-5 w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {status === "submitting" ? "Создаём…" : `Создать рассылку${selectedIds.size ? ` (${selectedIds.size})` : ""}`}
+                    {status === "submitting" ? "Создаём…" : `Создать рассылку${totalCandidateCount ? ` (${totalCandidateCount})` : ""}`}
                   </button>
                 </form>
               )}

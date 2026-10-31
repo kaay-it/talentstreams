@@ -1,15 +1,15 @@
 import { notFound } from "next/navigation"
 import { CalendarDays, Users, Info, CheckCircle2, AlertTriangle, ExternalLink } from "lucide-react"
-import { getCandidates, getActiveCandidates, getEligibleCandidatesForRelease, getPausedCandidatesForRelease } from "@/lib/db/candidates"
-import { getMailingLists, campaignNameFor } from "@/lib/db/mailing-lists"
-import { getStreams } from "@/lib/db/streams"
+import { getCandidates } from "@/lib/db/candidates"
+import { getMailingLists, campaignNameFor, getSelectionsForStream, type SelectionSummary } from "@/lib/db/mailing-lists"
+import { getStreams, getStreamsDetailed } from "@/lib/db/streams"
 import { getEmployers, confirmedEmployersForStream, type Employer, type EmployerPickOption } from "@/lib/db/employers"
 import { getCampaigns, getToken, getBookEmailCount, type Campaign } from "@/lib/sendpulse"
 import { PublishButton } from "@/components/publish-button"
 import { ReleaseDeleteButton } from "@/components/release-delete-button"
 import { ReleaseDetailModal } from "@/components/release-detail-modal"
 import { CampaignHistory } from "@/components/campaign-history"
-import { ReleaseCreateModal, type EligibleCandidate } from "@/components/release-create-modal"
+import { ReleaseCreateModal } from "@/components/release-create-modal"
 
 export const dynamic = "force-dynamic"
 
@@ -25,39 +25,16 @@ export default async function ReleasesPage({
     notFound()
   }
 
-  const [lists, campaigns, streams, candidates, allCandidates, allEmployers] = await Promise.all([
+  const [lists, campaigns, streams, streamsDetailed, allCandidates, allEmployers] = await Promise.all([
     getMailingLists(),
     getCampaigns(),
     getStreams(),
-    getActiveCandidates(),
+    getStreamsDetailed(),
     getCandidates(),
     getEmployers(),
   ])
 
-  const eligibleByStream: Record<string, EligibleCandidate[]> = Object.fromEntries(
-    streams.map((name) => [
-      name,
-      getEligibleCandidatesForRelease(candidates, { name }).map((c) => ({
-        id: c.id,
-        name: c.name,
-        title: c.title,
-        level: c.level,
-        activeSince: c.activeSince,
-      })),
-    ]),
-  )
-  const pausedByStream: Record<string, EligibleCandidate[]> = Object.fromEntries(
-    streams.map((name) => [
-      name,
-      getPausedCandidatesForRelease(candidates, { name }).map((c) => ({
-        id: c.id,
-        name: c.name,
-        title: c.title,
-        level: c.level,
-        activeSince: c.activeSince,
-      })),
-    ]),
-  )
+  const streamIdByName = new Map(streamsDetailed.map((s) => [s.name, s.id]))
   const confirmedByStream: Record<string, Employer[]> = Object.fromEntries(
     streams.map((name) => [name, confirmedEmployersForStream(allEmployers, { name })]),
   )
@@ -70,6 +47,14 @@ export default async function ReleasesPage({
       confirmedByStream[name].map((e) => ({ token: e.token, name: e.name, email: e.email, company: e.company })),
     ]),
   )
+  const selectionsByStream: Record<string, SelectionSummary[]> = Object.fromEntries(
+    await Promise.all(
+      streams.map(async (name) => {
+        const streamId = streamIdByName.get(name)
+        return [name, streamId !== undefined ? await getSelectionsForStream(streamId) : []] as const
+      }),
+    ),
+  )
 
   const campaignsByTitle = new Map<string, Campaign[]>()
   for (const c of campaigns) {
@@ -79,10 +64,8 @@ export default async function ReleasesPage({
   }
 
   // All statuses, not just getActiveCandidates() — a release's historical membership (candidate
-  // names in ReleaseDetailModal / CampaignHistory) must survive a candidate's status changing
-  // after the fact (e.g. TASK-05's pause/retirement to "Не публиковать" right after this exact
-  // send). candidates (active-only) is reserved for eligibleByStream/pausedByStream above, the
-  // real pool for creating a NEW release.
+  // names in CampaignHistory) must survive a candidate's status changing after the fact (e.g.
+  // TASK-05's pause/retirement to "Не публиковать" right after this exact send).
   const candidateById = new Map(allCandidates.map((c) => [c.id, c]))
 
   const token = await getToken()
@@ -106,10 +89,9 @@ export default async function ReleasesPage({
           </span>
           <ReleaseCreateModal
             streams={streams}
-            eligibleByStream={eligibleByStream}
-            pausedByStream={pausedByStream}
             subscriberCountByStream={subscriberCountByStream}
             employersByStream={employersByStream}
+            selectionsByStream={selectionsByStream}
             editorSecret={editorSecret}
           />
         </div>
@@ -118,8 +100,8 @@ export default async function ReleasesPage({
       <div className="mb-6 flex items-start gap-2 rounded-xl border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
         <p>
-          Кнопка «Создать рассылку» собирает выпуск сама — активные кандидаты стрима с уже наступившей датой «Активен с», список можно поправить перед созданием.
-          Кнопка «Отправить» создаёт кампанию в SendPulse и рассылает письмо всем работодателям стрима.
+          Выпуск собирается из уже подготовленных подборок (раздел «Подборки») — выберите стрим, получателей письма и подборки, которые в него войдут.
+          Кнопка «Отправить» создаёт кампанию в SendPulse и рассылает письмо.
         </p>
       </div>
 
@@ -181,11 +163,18 @@ export default async function ReleasesPage({
                         Посмотреть рассылку {list.listId}
                       </a>
                     </div>
-                    {list.recipientLabel && (
-                      <div className="mt-1.5">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/20 dark:text-violet-400">
-                          Ограниченная рассылка: {list.recipientLabel}
-                        </span>
+                    {(list.recipientLabel || list.personalSelectionCount > 0) && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {list.recipientLabel && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/20 dark:text-violet-400">
+                            Ограниченная рассылка: {list.recipientLabel}
+                          </span>
+                        )}
+                        {list.personalSelectionCount > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">
+                            {list.personalSelectionCount} личных подборок
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -195,10 +184,6 @@ export default async function ReleasesPage({
                       listId={list.listId}
                       stream={list.stream}
                       date={list.date}
-                      candidateIds={list.candidateIds}
-                      candidateNames={candidateNames}
-                      eligible={eligibleByStream[list.stream] ?? []}
-                      paused={pausedByStream[list.stream] ?? []}
                       employersForStream={employersByStream[list.stream] ?? []}
                       readOnly={alreadySent}
                     />

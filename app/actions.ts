@@ -3,7 +3,19 @@
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
 import { getCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
-import { getMailingLists, getMailingListMeta, getMailingListCandidateIds, createMailingListRows, deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent, createMailingListRecipientRows, getMailingListRecipientTokens, replaceMailingListEntries, replaceMailingListRecipients, campaignNameFor, isoToRu } from "@/lib/db/mailing-lists"
+import {
+  getMailingLists, getMailingListMeta, getMailingList, getAllSelectionCandidateIds, createMailingListRows,
+  deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent,
+  createMailingListRecipientRows, getMailingListRecipientTokens,
+  replaceMailingListRecipients, getEmployersWithoutSelection, attachSelectionsToMailingList, getSelectionById,
+  getSelectionsForStream as getSelectionsForStreamRows,
+  getAllSelections as getAllSelectionsRows,
+  createSelection as createSelectionRows,
+  updateSelection as updateSelectionRows,
+  deleteSelection as deleteSelectionRows,
+  detachSelection as detachSelectionRows,
+  campaignNameFor, isoToRu,
+} from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
@@ -154,14 +166,44 @@ function recipientLabelFor(employers: Employer[]): string {
   return `${companies.slice(0, 3).join(", ")} и ещё ${companies.length - 3}`
 }
 
+/** Validates that every chosen selectionId belongs to the given stream and is available to
+ * attach — either currently unattached (sitting in the pool) or already attached to `ownListId`
+ * (updateMailingList() re-submits its own currently-attached ids as part of the picker's state;
+ * re-attaching them to themselves must not be rejected as "already used elsewhere"). Also
+ * enforces the "at most one default" invariant across the resulting attached set. */
+async function validateSelectionChoice(
+  streamId: number,
+  selectionIds: string[],
+  ownListId?: string,
+): Promise<void> {
+  if (!selectionIds.length) throw new Error("Выберите хотя бы одну подборку")
+
+  const available = await getSelectionsForStreamRows(streamId)
+  const chosen = available.filter((s) => selectionIds.includes(s.selectionId))
+  if (chosen.length !== selectionIds.length) {
+    throw new Error("Выбранная подборка не найдена или относится к другому стриму")
+  }
+  if (chosen.some((s) => s.listId !== null && s.listId !== ownListId)) {
+    throw new Error("Выбранная подборка уже используется в другом выпуске")
+  }
+  if (chosen.filter((s) => s.employerTokens.length === 0).length > 1) {
+    throw new Error("Можно выбрать только одну подборку по умолчанию")
+  }
+}
+
 export async function createMailingList(data: {
   stream: string
   date: string
-  candidateIds: string[]
   employerTokens?: string[]
+  /** Existing подборки (from /editor/selections) to attach — picked, never authored here. */
+  selectionIds: string[]
 }): Promise<{ listId: string }> {
   if (!data.stream.trim()) throw new Error("Выберите стрим")
   if (!data.date.trim()) throw new Error("Укажите дату рассылки")
+
+  const streamId = await getStreamIdByName(data.stream)
+  if (streamId === null) throw new Error(`Стрим не найден: ${data.stream}`)
+  await validateSelectionChoice(streamId, data.selectionIds)
 
   let recipientLabel = ""
   if (data.employerTokens?.length) {
@@ -170,29 +212,46 @@ export async function createMailingList(data: {
     recipientLabel = recipientLabelFor(employers)
   }
 
-  const result = await createMailingListRows({ ...data, recipientLabel })
+  const result = await createMailingListRows({ stream: data.stream, date: data.date, recipientLabel })
   if (data.employerTokens?.length) {
     await createMailingListRecipientRows(result.listId, data.employerTokens)
   }
+  await attachSelections(result.listId, data.selectionIds)
   revalidatePath("/editor")
   return result
 }
 
+/** Attaches exactly the given selectionIds to a release and detaches any currently-attached one
+ * that isn't in that set — shared by createMailingList() (nothing attached yet, every id is new)
+ * and updateMailingList() (diffs against what's already attached). */
+async function attachSelections(listId: string, selectionIds: string[]): Promise<void> {
+  const list = await getMailingList(listId)
+  const currentlyAttached = list ? [list.default, ...list.personal].filter((s): s is NonNullable<typeof s> => s !== null).map((s) => s.selectionId) : []
+  const toAttach = selectionIds.filter((id) => !currentlyAttached.includes(id))
+  const toDetach = currentlyAttached.filter((id) => !selectionIds.includes(id))
+  if (toAttach.length) await attachSelectionsToMailingList(listId, toAttach)
+  for (const id of toDetach) await detachSelectionRows(id)
+}
+
 /** Edits a release that hasn't been sent yet — stream is fixed at creation and not editable here
- * (changing it would orphan the candidate/recipient selections, which are stream-specific; a
- * different stream means a new release). sentCampaignId is re-checked fresh on the server, not
- * trusted from whatever state the edit form was opened with — same guard as deleteMailingList(). */
+ * (changing it would orphan the attached подборки, which are stream-specific; a different stream
+ * means a new release). sentCampaignId is re-checked fresh on the server, not trusted from
+ * whatever state the edit form was opened with — same guard as deleteMailingList(). `selectionIds`
+ * is the FULL desired attached set (not a delta) — newly-added ones get attached, ones that were
+ * attached but are no longer listed get detached back to the pool (never deleted). */
 export async function updateMailingList(
   listId: string,
-  data: { date: string; candidateIds: string[]; employerTokens?: string[] },
+  data: { date: string; employerTokens?: string[]; selectionIds: string[] },
 ): Promise<void> {
   const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
   if (list.sentCampaignId !== null) throw new Error("Эта рассылка уже отправлена — редактирование недоступно")
   if (!data.date.trim()) throw new Error("Укажите дату рассылки")
+  if (list.streamId === null) throw new Error("У выпуска не определён стрим")
+  await validateSelectionChoice(list.streamId, data.selectionIds, listId)
 
   await updateMailingListTimestamp(listId, `${data.date}T00:00:00`)
-  await replaceMailingListEntries(listId, data.candidateIds)
+  await attachSelections(listId, data.selectionIds)
 
   let recipientLabel = ""
   if (data.employerTokens?.length) {
@@ -204,6 +263,104 @@ export async function updateMailingList(
 
   revalidatePath("/editor")
 }
+
+/** Full detail of a release — default + every personal selection currently attached, each
+ * resolved to real Candidate profiles — used by ReleaseCreateModal/ReleaseDetailModal to render
+ * the roster table and the (read-only) list of attached подборки. */
+export async function getMailingListDetail(listId: string) {
+  return getMailingList(listId)
+}
+
+/** Every подборка prepared for a stream — pool items and ones attached elsewhere alike — used by
+ * /editor/selections and by the release create/edit pickers (which show, per подборка, whether
+ * it's free to attach, already attached to this release, or taken by another one). */
+export async function getSelectionsForStream(stream: string) {
+  const streamId = await getStreamIdByName(stream)
+  if (streamId === null) return []
+  return getSelectionsForStreamRows(streamId)
+}
+
+/** Every подборка across every stream — the default view of /editor/selections. */
+export async function getAllSelections() {
+  return getAllSelectionsRows()
+}
+
+/** Creates a new подборка in the pool for a stream (/editor/selections) — never attached to a
+ * release at creation; that only happens later, when a release picks it. */
+export async function createSelection(
+  stream: string,
+  data: { date: string; candidateIds: string[]; employerTokens: string[] },
+): Promise<void> {
+  const streamId = await getStreamIdByName(stream)
+  if (streamId === null) throw new Error(`Стрим не найден: ${stream}`)
+  if (!data.date.trim()) throw new Error("Укажите дату подборки")
+
+  const employers = (await Promise.all(data.employerTokens.map((t) => getEmployerByToken(t))))
+    .filter((e): e is Employer => Boolean(e))
+  await createSelectionRows(streamId, data.date, data.candidateIds, data.employerTokens, recipientLabelFor(employers))
+  revalidatePath("/editor/selections")
+}
+
+async function assertSelectionEditable(selectionId: string): Promise<{ listId: string | null }> {
+  const current = await getSelectionById(selectionId)
+  if (!current) throw new Error(`Подборка не найдена: ${selectionId}`)
+  if (current.listId) {
+    const list = await getMailingListMeta(current.listId)
+    if (list && list.sentCampaignId !== null) {
+      throw new Error("Эта подборка уже отправлена в составе выпуска — изменения недоступны")
+    }
+  }
+  return { listId: current.listId }
+}
+
+/** Edits a подборка's composition — only from /editor/selections, never from a release's own UI,
+ * whether it's currently in the pool or attached to an unsent release. Blocked if it's attached
+ * to an already-sent release (editing history isn't allowed). */
+export async function updateSelection(
+  selectionId: string,
+  data: { date: string; candidateIds: string[]; employerTokens: string[] },
+): Promise<void> {
+  await assertSelectionEditable(selectionId)
+  if (!data.date.trim()) throw new Error("Укажите дату подборки")
+
+  const employers = (await Promise.all(data.employerTokens.map((t) => getEmployerByToken(t))))
+    .filter((e): e is Employer => Boolean(e))
+  await updateSelectionRows(selectionId, data.date, data.candidateIds, data.employerTokens, recipientLabelFor(employers))
+  revalidatePath("/editor/selections")
+  revalidatePath("/editor")
+}
+
+/** Deletes a подборка outright — same guard as updateSelection(); one attached to an unsent
+ * release can still be deleted directly (equivalent to detaching it first). */
+export async function deleteSelection(selectionId: string): Promise<void> {
+  await assertSelectionEditable(selectionId)
+
+  await deleteSelectionRows(selectionId)
+  revalidatePath("/editor/selections")
+  revalidatePath("/editor")
+}
+
+/** Detaches a подборка from its release directly (from /editor/selections) — returns it to the
+ * pool, reusable in a future release. Same guard as updateSelection(). */
+export async function detachSelection(selectionId: string): Promise<void> {
+  const { listId } = await assertSelectionEditable(selectionId)
+  if (!listId) return
+  await detachSelectionRows(selectionId)
+  revalidatePath("/editor/selections")
+  revalidatePath("/editor")
+}
+
+export type EmployerWithoutSelection = { token: string; name: string; company: string }
+
+/** Employers of a release's actual send audience who have neither a personal selection nor a
+ * default to fall back on — used both by the roster table's live warning (recomputed client-side
+ * from in-progress form state, this action just mirrors it for an already-saved release) and as
+ * the list shown in PublishButton's confirmation dialog before a release with gaps is sent. */
+export async function getMissingSelectionEmployers(listId: string): Promise<EmployerWithoutSelection[]> {
+  const missing = await getEmployersWithoutSelection(listId)
+  return missing.map((e) => ({ token: e.token, name: e.name, company: e.company }))
+}
+
 
 /** Resolves a release's recipient-override tokens into displayable employer data — used by the
  * edit modal (to seed the current selection) and the view modal (to show who it actually went
@@ -233,11 +390,9 @@ export async function deleteMailingList(listId: string): Promise<void> {
   revalidatePath("/editor")
 }
 
-export type PublishResult = {
-  listId: string
-  stream: string
-  campaignId: number
-}
+export type PublishResult =
+  | { listId: string; stream: string; campaignId: number }
+  | { requiresConfirmation: true; missingEmployers: EmployerWithoutSelection[] }
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -483,9 +638,20 @@ async function applyPublicationPauseRules(candidateIds: string[]): Promise<void>
   )
 }
 
-export async function publishMailingList(listId: string): Promise<PublishResult> {
+export async function publishMailingList(listId: string, confirmed = false): Promise<PublishResult> {
   const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
+
+  // Authoritative gate — the roster table's warning in the editor UI mirrors this client-side for
+  // an instant heads-up while the manager is still building the release, but this server check is
+  // what actually blocks a send with gaps; a manager who confirms once gets a real send (and never
+  // re-confirms on a resend that still has the exact same gap, see the alreadySent branch below).
+  if (!confirmed) {
+    const missing = await getEmployersWithoutSelection(listId)
+    if (missing.length) {
+      return { requiresConfirmation: true, missingEmployers: missing.map((e) => ({ token: e.token, name: e.name, company: e.company })) }
+    }
+  }
 
   const alreadySent = list.sentCampaignId !== null
 
@@ -577,7 +743,7 @@ export async function publishMailingList(listId: string): Promise<PublishResult>
   // cleanup-adhoc-books cron (vercel.json) deletes it once SendPulse reports the campaign fully
   // processed.
 
-  const candidateIds = await getMailingListCandidateIds(listId)
+  const candidateIds = await getAllSelectionCandidateIds(listId)
 
   // TASK-35, часть 2 — same recipients the email just went to, also pinged on Telegram (whoever
   // connected the bot; sendTelegramToEmployer() never throws, just no-ops for anyone who hasn't —
