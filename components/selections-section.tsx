@@ -127,7 +127,10 @@ export function SelectionsSection({
             const isDefault = s.employerTokens.length === 0
             const release = s.listId ? releaseInfoByListId[s.listId] : undefined
             const employerByToken = new Map((employersByStream[s.stream] ?? []).map((e) => [e.token, e]))
-            const employerNames = s.employerTokens.map((t) => employerByToken.get(t)?.name ?? t)
+            const employerLabels = s.employerTokens.map((t) => {
+              const e = employerByToken.get(t)
+              return e ? `${e.name} (${e.company})` : t
+            })
             return (
               <div key={s.selectionId} className="flex items-center gap-4 px-5 py-3">
                 <div className="min-w-0 flex-1">
@@ -146,7 +149,7 @@ export function SelectionsSection({
                     </span>
                     {!isDefault && (
                       <span className="truncate text-xs text-muted-foreground">
-                        {employerNames.slice(0, 3).join(", ")}{employerNames.length > 3 ? ` и ещё ${employerNames.length - 3}` : ""}
+                        {employerLabels.slice(0, 3).join(", ")}{employerLabels.length > 3 ? ` и ещё ${employerLabels.length - 3}` : ""}
                       </span>
                     )}
                     <a
