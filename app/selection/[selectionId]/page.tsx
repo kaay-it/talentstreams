@@ -60,7 +60,7 @@ export default async function SelectionPage({
         <header className="mb-8">
           <p className="text-sm font-medium uppercase tracking-wide text-primary">Talent Stream · Подборка</p>
           <h1 className="mt-2 text-balance text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-            {selection.stream || "—"} {isPersonal ? "— личная подборка" : "— подборка по умолчанию"}
+            {selection.stream || "—"} {isPersonal ? "— ограниченная подборка" : "— подборка по умолчанию"}
           </h1>
           <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
             {selection.date && (

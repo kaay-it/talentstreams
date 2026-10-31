@@ -51,7 +51,7 @@ const ROSTER_BADGE: Record<RosterKind, string> = {
 }
 const ROSTER_LABEL: Record<RosterKind, string> = {
   default: "Общая подборка",
-  personal: "Личная подборка",
+  personal: "Ограниченная подборка",
   missing: "⚠ Нет подборки",
 }
 
@@ -116,7 +116,7 @@ export function SelectionPickerRow({
       <span
         className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${isDefault ? "bg-muted text-muted-foreground" : "bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400"}`}
       >
-        {isDefault ? "Общая" : "Личная"}
+        {isDefault ? "Общая" : "Ограниченная"}
       </span>
       <span className="min-w-0 flex-1 truncate text-foreground">
         {selection.label || (isDefault ? "Подборка по умолчанию" : `${selection.employerTokens.length} ${subscriberPlural(selection.employerTokens.length)}`)}

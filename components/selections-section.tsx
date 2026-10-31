@@ -9,35 +9,48 @@ import type { SelectionSummary } from "@/lib/db/mailing-lists"
 import { CandidateRow, CompanyGroup, candidatePlural, type EligibleCandidate } from "@/components/picker-rows"
 
 type ReleaseInfo = { date: string; sent: boolean }
+type SelectionRow = SelectionSummary & { stream: string }
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+function toIsoDate(ruDate: string): string {
+  const m = ruDate.trim().match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+  if (!m) return todayISO()
+  const [, d, mo, y] = m
+  return `${y}-${mo}-${d}`
+}
 
 export function SelectionsSection({
   streams,
+  allSelections,
   eligibleByStream,
   pausedByStream,
   employersByStream,
-  selectionsByStream,
   releaseInfoByListId,
   editorSecret,
 }: {
   streams: string[]
+  allSelections: SelectionRow[]
   eligibleByStream: Record<string, EligibleCandidate[]>
   pausedByStream: Record<string, EligibleCandidate[]>
   employersByStream: Record<string, EmployerPickOption[]>
-  selectionsByStream: Record<string, SelectionSummary[]>
   releaseInfoByListId: Record<string, ReleaseInfo>
   editorSecret?: string
 }) {
-  const [stream, setStream] = useState(streams[0] ?? "")
-  const [editing, setEditing] = useState<SelectionSummary | "new" | null>(null)
+  // "" = «Все» — по умолчанию видны подборки всех стримов разом, фильтр по стриму опционален.
+  const [streamFilter, setStreamFilter] = useState("")
+  const [editing, setEditing] = useState<SelectionRow | "new" | null>(null)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const selections = stream ? selectionsByStream[stream] ?? [] : []
-  const candidateById = useMemo(() => {
-    const all = [...(eligibleByStream[stream] ?? []), ...(pausedByStream[stream] ?? [])]
-    return new Map(all.map((c) => [c.id, c]))
-  }, [stream, eligibleByStream, pausedByStream])
-  const employerByToken = useMemo(() => new Map((employersByStream[stream] ?? []).map((e) => [e.token, e])), [stream, employersByStream])
+  const visibleSelections = useMemo(
+    () =>
+      (streamFilter ? allSelections.filter((s) => s.stream === streamFilter) : allSelections)
+        .slice()
+        .sort((a, b) => toIsoDate(b.date).localeCompare(toIsoDate(a.date))),
+    [allSelections, streamFilter],
+  )
 
   async function handleDetach(selectionId: string) {
     setPendingAction(selectionId)
@@ -68,27 +81,33 @@ export function SelectionsSection({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setStreamFilter("")}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              streamFilter === "" ? "bg-primary text-primary-foreground" : "border text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            Все
+          </button>
           {streams.map((s) => (
             <button
               key={s}
-              onClick={() => setStream(s)}
+              onClick={() => setStreamFilter(s)}
               className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                s === stream ? "bg-primary text-primary-foreground" : "border text-muted-foreground hover:bg-muted"
+                s === streamFilter ? "bg-primary text-primary-foreground" : "border text-muted-foreground hover:bg-muted"
               }`}
             >
               {s}
             </button>
           ))}
         </div>
-        {stream && (
-          <button
-            onClick={() => setEditing("new")}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            <Plus className="size-3.5" />
-            Подборка
-          </button>
-        )}
+        <button
+          onClick={() => setEditing("new")}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          <Plus className="size-3.5" />
+          Подборка
+        </button>
       </div>
 
       {actionError && (
@@ -98,27 +117,30 @@ export function SelectionsSection({
         </div>
       )}
 
-      {!stream ? (
-        <p className="text-sm text-muted-foreground">Нет активных стримов.</p>
-      ) : selections.length === 0 ? (
+      {visibleSelections.length === 0 ? (
         <div className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">
-          Для стрима «{stream}» пока нет подборок. Нажмите «Подборка», чтобы подготовить первую.
+          {streamFilter ? `Для стрима «${streamFilter}» пока нет подборок.` : "Подборок пока нет."} Нажмите «Подборка», чтобы подготовить первую.
         </div>
       ) : (
         <div className="rounded-xl border bg-card overflow-hidden divide-y">
-          {selections.map((s) => {
+          {visibleSelections.map((s) => {
             const isDefault = s.employerTokens.length === 0
             const release = s.listId ? releaseInfoByListId[s.listId] : undefined
+            const employerByToken = new Map((employersByStream[s.stream] ?? []).map((e) => [e.token, e]))
             const employerNames = s.employerTokens.map((t) => employerByToken.get(t)?.name ?? t)
             return (
               <div key={s.selectionId} className="flex items-center gap-4 px-5 py-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-medium text-primary">
+                      {s.stream || "—"}
+                    </span>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${isDefault ? "bg-muted text-muted-foreground" : "bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400"}`}
                     >
-                      {isDefault ? "Общая" : "Личная"}
+                      {isDefault ? "Общая" : "Ограниченная"}
                     </span>
+                    <span className="text-xs text-muted-foreground">{s.date}</span>
                     <span className="text-sm font-medium text-foreground">
                       {s.candidateIds.length} {candidatePlural(s.candidateIds.length)}
                     </span>
@@ -189,12 +211,12 @@ export function SelectionsSection({
 
       {editing && (
         <SelectionFormModal
-          stream={stream}
+          streams={streams}
+          defaultStream={streamFilter}
           selection={editing === "new" ? undefined : editing}
-          eligible={eligibleByStream[stream] ?? []}
-          paused={pausedByStream[stream] ?? []}
-          employersForStream={employersByStream[stream] ?? []}
-          candidateById={candidateById}
+          eligibleByStream={eligibleByStream}
+          pausedByStream={pausedByStream}
+          employersByStream={employersByStream}
           onClose={() => setEditing(null)}
         />
       )}
@@ -203,27 +225,39 @@ export function SelectionsSection({
 }
 
 function SelectionFormModal({
-  stream,
+  streams,
+  defaultStream,
   selection,
-  eligible,
-  paused,
-  employersForStream,
-  candidateById,
+  eligibleByStream,
+  pausedByStream,
+  employersByStream,
   onClose,
 }: {
-  stream: string
-  selection?: SelectionSummary
-  eligible: EligibleCandidate[]
-  paused: EligibleCandidate[]
-  employersForStream: EmployerPickOption[]
-  candidateById: Map<string, EligibleCandidate>
+  streams: string[]
+  defaultStream: string
+  selection?: SelectionRow
+  eligibleByStream: Record<string, EligibleCandidate[]>
+  pausedByStream: Record<string, EligibleCandidate[]>
+  employersByStream: Record<string, EmployerPickOption[]>
   onClose: () => void
 }) {
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
   const [errorMsg, setErrorMsg] = useState("")
+  // Как и у рассылок раньше — сначала стрим, потом дата, потом состав. Стрим зафиксирован при
+  // редактировании (смена стрима оторвала бы выбранных кандидатов/работодателей от смысла).
+  const [stream, setStream] = useState(selection?.stream ?? defaultStream ?? streams[0] ?? "")
+  const [date, setDate] = useState(selection ? toIsoDate(selection.date) : todayISO())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(selection?.candidateIds ?? []))
   const [selectedEmployerTokens, setSelectedEmployerTokens] = useState<Set<string>>(new Set(selection?.employerTokens ?? []))
   const [pausedOpen, setPausedOpen] = useState(false)
+
+  const eligible = eligibleByStream[stream] ?? []
+  const paused = pausedByStream[stream] ?? []
+  const employersForStream = employersByStream[stream] ?? []
+  const candidateById = useMemo(() => {
+    const all = [...eligible, ...paused]
+    return new Map(all.map((c) => [c.id, c]))
+  }, [eligible, paused])
 
   const employerGroups = useMemo(() => {
     const byCompany = new Map<string, EmployerPickOption[]>()
@@ -238,6 +272,12 @@ function SelectionFormModal({
   // The подборка may include candidates no longer in eligible/paused (status changed since) —
   // show them anyway so a save never silently drops them.
   const extraSelected = [...selectedIds].filter((id) => !candidateById.has(id))
+
+  function handleStreamChange(next: string) {
+    setStream(next)
+    setSelectedIds(new Set())
+    setSelectedEmployerTokens(new Set())
+  }
 
   function toggleCandidate(id: string) {
     setSelectedIds((prev) => {
@@ -273,7 +313,7 @@ function SelectionFormModal({
     setStatus("submitting")
     setErrorMsg("")
     try {
-      const data = { candidateIds: [...selectedIds], employerTokens: [...selectedEmployerTokens] }
+      const data = { date, candidateIds: [...selectedIds], employerTokens: [...selectedEmployerTokens] }
       if (selection) {
         await updateSelection(selection.selectionId, data)
       } else {
@@ -286,7 +326,7 @@ function SelectionFormModal({
     }
   }
 
-  const canSubmit = selectedIds.size > 0
+  const canSubmit = Boolean(stream.trim() && date.trim() && selectedIds.size > 0)
 
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -295,7 +335,7 @@ function SelectionFormModal({
         <div role="dialog" aria-modal="true" aria-labelledby="selection-form-title" className="relative w-full max-w-lg rounded-2xl border bg-card shadow-xl">
           <div className="flex items-center justify-between border-b px-6 py-4">
             <h2 id="selection-form-title" className="text-base font-semibold text-card-foreground">
-              {selection ? "Редактирование подборки" : "Новая подборка"}: {stream}
+              {selection ? "Редактирование подборки" : "Новая подборка"}
             </h2>
             <button onClick={onClose} className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Закрыть">
               <X className="size-4" />
@@ -315,61 +355,100 @@ function SelectionFormModal({
           ) : (
             <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5">
               <div className="space-y-5">
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    Видна только этим работодателям ({selectedEmployerTokens.size} выбрано) — оставьте пустым для общей подборки
-                  </p>
-                  {employerGroups.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Нет подтверждённых подписчиков стрима «{stream}».</p>
-                  ) : (
-                    <div className="max-h-48 overflow-y-auto rounded-lg border divide-y">
-                      {employerGroups.map(([company, employers]) => (
-                        <CompanyGroup
-                          key={company}
-                          company={company}
-                          employers={employers}
-                          selectedTokens={selectedEmployerTokens}
-                          onToggleEmployer={toggleEmployer}
-                          onToggleCompany={toggleCompany}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium text-muted-foreground">Кандидаты ({selectedIds.size})</p>
-                  {eligible.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Нет подходящих кандидатов — активных, с уже наступившей датой «Активен с», по стриму «{stream}».</p>
-                  ) : (
-                    <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                      {eligible.map((c) => (
-                        <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {paused.length > 0 && (
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <button type="button" onClick={() => setPausedOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
-                      {pausedOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                      {pausedOpen ? "Скрыть кандидатов на паузе" : `Кандидаты на паузе, дата не наступила (${paused.length})`}
-                    </button>
-                    {pausedOpen && (
-                      <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                        {paused.map((c) => (
-                          <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
+                    <label className="block text-sm font-medium text-card-foreground">
+                      Стрим <span className="ml-1 text-primary">*</span>
+                    </label>
+                    {selection ? (
+                      <p className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-foreground">{stream}</p>
+                    ) : (
+                      <select
+                        value={stream}
+                        onChange={(e) => handleStreamChange(e.target.value)}
+                        required
+                        className="w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      >
+                        <option value="">— выберите —</option>
+                        {streams.map((s) => (
+                          <option key={s} value={s}>{s}</option>
                         ))}
-                      </div>
+                      </select>
                     )}
                   </div>
-                )}
+                  <div className="space-y-1.5">
+                    <label className="block text-sm font-medium text-card-foreground">
+                      Дата <span className="ml-1 text-primary">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      required
+                      className="w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                </div>
 
-                {extraSelected.length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    Ещё {extraSelected.length} {candidatePlural(extraSelected.length)} в подборке не из списка выше (статус изменился) — останутся при сохранении.
-                  </p>
+                {stream && (
+                  <>
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Видна только этим работодателям ({selectedEmployerTokens.size} выбрано) — оставьте пустым для общей подборки
+                      </p>
+                      {employerGroups.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Нет подтверждённых подписчиков стрима «{stream}».</p>
+                      ) : (
+                        <div className="max-h-48 overflow-y-auto rounded-lg border divide-y">
+                          {employerGroups.map(([company, employers]) => (
+                            <CompanyGroup
+                              key={company}
+                              company={company}
+                              employers={employers}
+                              selectedTokens={selectedEmployerTokens}
+                              onToggleEmployer={toggleEmployer}
+                              onToggleCompany={toggleCompany}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">Кандидаты ({selectedIds.size})</p>
+                      {eligible.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Нет подходящих кандидатов — активных, с уже наступившей датой «Активен с», по стриму «{stream}».</p>
+                      ) : (
+                        <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
+                          {eligible.map((c) => (
+                            <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {paused.length > 0 && (
+                      <div className="space-y-1.5">
+                        <button type="button" onClick={() => setPausedOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
+                          {pausedOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                          {pausedOpen ? "Скрыть кандидатов на паузе" : `Кандидаты на паузе, дата не наступила (${paused.length})`}
+                        </button>
+                        {pausedOpen && (
+                          <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
+                            {paused.map((c) => (
+                              <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {extraSelected.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Ещё {extraSelected.length} {candidatePlural(extraSelected.length)} в подборке не из списка выше (статус изменился) — останутся при сохранении.
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
 

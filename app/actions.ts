@@ -9,6 +9,7 @@ import {
   createMailingListRecipientRows, getMailingListRecipientTokens,
   replaceMailingListRecipients, getEmployersWithoutSelection, attachSelectionsToMailingList, getSelectionById,
   getSelectionsForStream as getSelectionsForStreamRows,
+  getAllSelections as getAllSelectionsRows,
   createSelection as createSelectionRows,
   updateSelection as updateSelectionRows,
   deleteSelection as deleteSelectionRows,
@@ -279,18 +280,24 @@ export async function getSelectionsForStream(stream: string) {
   return getSelectionsForStreamRows(streamId)
 }
 
+/** Every подборка across every stream — the default view of /editor/selections. */
+export async function getAllSelections() {
+  return getAllSelectionsRows()
+}
+
 /** Creates a new подборка in the pool for a stream (/editor/selections) — never attached to a
  * release at creation; that only happens later, when a release picks it. */
 export async function createSelection(
   stream: string,
-  data: { candidateIds: string[]; employerTokens: string[] },
+  data: { date: string; candidateIds: string[]; employerTokens: string[] },
 ): Promise<void> {
   const streamId = await getStreamIdByName(stream)
   if (streamId === null) throw new Error(`Стрим не найден: ${stream}`)
+  if (!data.date.trim()) throw new Error("Укажите дату подборки")
 
   const employers = (await Promise.all(data.employerTokens.map((t) => getEmployerByToken(t))))
     .filter((e): e is Employer => Boolean(e))
-  await createSelectionRows(streamId, data.candidateIds, data.employerTokens, recipientLabelFor(employers))
+  await createSelectionRows(streamId, data.date, data.candidateIds, data.employerTokens, recipientLabelFor(employers))
   revalidatePath("/editor/selections")
 }
 
@@ -311,13 +318,14 @@ async function assertSelectionEditable(selectionId: string): Promise<{ listId: s
  * to an already-sent release (editing history isn't allowed). */
 export async function updateSelection(
   selectionId: string,
-  data: { candidateIds: string[]; employerTokens: string[] },
+  data: { date: string; candidateIds: string[]; employerTokens: string[] },
 ): Promise<void> {
   await assertSelectionEditable(selectionId)
+  if (!data.date.trim()) throw new Error("Укажите дату подборки")
 
   const employers = (await Promise.all(data.employerTokens.map((t) => getEmployerByToken(t))))
     .filter((e): e is Employer => Boolean(e))
-  await updateSelectionRows(selectionId, data.candidateIds, data.employerTokens, recipientLabelFor(employers))
+  await updateSelectionRows(selectionId, data.date, data.candidateIds, data.employerTokens, recipientLabelFor(employers))
   revalidatePath("/editor/selections")
   revalidatePath("/editor")
 }

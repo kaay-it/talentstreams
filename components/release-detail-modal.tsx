@@ -68,6 +68,7 @@ export function ReleaseDetailModal({
           attached.map((s) => ({
             selectionId: s.selectionId,
             streamId: 0,
+            date,
             label: s.label,
             employerTokens: s.employerTokens,
             candidateIds: s.entries.map((e) => e.profile.id),

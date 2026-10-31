@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation"
 import { getActiveCandidates, getEligibleCandidatesForRelease, getPausedCandidatesForRelease } from "@/lib/db/candidates"
-import { getStreams, getStreamsDetailed } from "@/lib/db/streams"
+import { getStreams } from "@/lib/db/streams"
 import { getEmployers, confirmedEmployersForStream, type EmployerPickOption } from "@/lib/db/employers"
-import { getSelectionsForStream, getMailingLists, type SelectionSummary } from "@/lib/db/mailing-lists"
+import { getAllSelections, getMailingLists } from "@/lib/db/mailing-lists"
 import { SelectionsSection } from "@/components/selections-section"
 import type { EligibleCandidate } from "@/components/picker-rows"
 
@@ -20,19 +20,17 @@ export default async function SelectionsPage({
     notFound()
   }
 
-  const [streams, streamsDetailed, candidates, allEmployers, mailingLists] = await Promise.all([
+  const [streams, candidates, allEmployers, mailingLists, allSelections] = await Promise.all([
     getStreams(),
-    getStreamsDetailed(),
     getActiveCandidates(),
     getEmployers(),
     getMailingLists(),
+    getAllSelections(),
   ])
 
   const releaseInfoByListId: Record<string, { date: string; sent: boolean }> = Object.fromEntries(
     mailingLists.map((l) => [l.listId, { date: l.date, sent: l.sentCampaignId !== null }]),
   )
-
-  const streamIdByName = new Map(streamsDetailed.map((s) => [s.name, s.id]))
 
   const eligibleByStream: Record<string, EligibleCandidate[]> = Object.fromEntries(
     streams.map((name) => [
@@ -64,14 +62,6 @@ export default async function SelectionsPage({
       confirmedEmployersForStream(allEmployers, { name }).map((e) => ({ token: e.token, name: e.name, email: e.email, company: e.company })),
     ]),
   )
-  const selectionsByStream: Record<string, SelectionSummary[]> = Object.fromEntries(
-    await Promise.all(
-      streams.map(async (name) => {
-        const streamId = streamIdByName.get(name)
-        return [name, streamId !== undefined ? await getSelectionsForStream(streamId) : []] as const
-      }),
-    ),
-  )
 
   return (
     <div className="px-6 py-8">
@@ -80,15 +70,15 @@ export default async function SelectionsPage({
       </div>
 
       <div className="mb-6 rounded-xl border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
-        Подборка — набор кандидатов, подготовленный заранее для стрима: общая (видна всем работодателям, у которых нет личной) или личная (видна только выбранным работодателям, без гео-фильтра и исключений). Подборку выбирают, когда создают выпуск в разделе «Выпуски» — там её не редактируют, только отмечают.
+        Подборка — набор кандидатов, подготовленный заранее для стрима и даты: общая (видна всем работодателям, у которых нет личной) или ограниченная — видна только выбранным работодателям, без гео-фильтра и исключений. Подборку выбирают, когда создают выпуск в разделе «Выпуски» — там её не редактируют, только отмечают.
       </div>
 
       <SelectionsSection
         streams={streams}
+        allSelections={allSelections}
         eligibleByStream={eligibleByStream}
         pausedByStream={pausedByStream}
         employersByStream={employersByStream}
-        selectionsByStream={selectionsByStream}
         releaseInfoByListId={releaseInfoByListId}
         editorSecret={editorSecret}
       />

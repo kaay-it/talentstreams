@@ -92,14 +92,20 @@ export const mailingListEntries = pgTable("mailingListEntries", {
 // (candidates/employers) is only ever edited in /editor/selections, never from a release's own
 // UI, attached or not — the release side is purely a picker.
 export const selections = pgTable("selections", {
-  id:       text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  id:         text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   // Which stream this подборка was prepared for — the only thing that still makes sense before
   // it's ever attached to a release (a release's own streamId isn't available yet at that point).
-  streamId: integer("streamId").notNull().references(() => streams.id, { onDelete: "cascade" }),
-  listId:   text("listId").references(() => mailingLists.id, { onDelete: "set null" }),
+  streamId:   integer("streamId").notNull().references(() => streams.id, { onDelete: "cascade" }),
+  listId:     text("listId").references(() => mailingLists.id, { onDelete: "set null" }),
+  // The подборка's own date — set at creation (same "stream, then date, then build the list" flow
+  // releases used to have), editable afterward, and independent of whichever release it later
+  // gets attached to (that release has its own targetDate for the actual send). mode: "string",
+  // same reasoning as mailingLists.targetDate/candidates.activeSince (avoids a JS Date timezone
+  // round-trip shifting the day).
+  targetDate: timestamp("targetDate", { mode: "string" }).notNull(),
   // Manager-facing label only (e.g. company names) — never the source of truth for default vs
   // personal, that's whether selectionEmployers has any rows for this selection.
-  label:    text("label").notNull().default(""),
+  label:      text("label").notNull().default(""),
 })
 
 export const selectionEntries = pgTable("selectionEntries", {
