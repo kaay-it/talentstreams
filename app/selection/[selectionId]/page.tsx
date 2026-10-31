@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, CalendarDays, Users } from "lucide-react"
+import { ArrowLeft, CalendarDays, Users, Building2 } from "lucide-react"
 import { getSelectionById } from "@/lib/db/mailing-lists"
 import { getEmployerByToken, type Employer } from "@/lib/db/employers"
 import { getStreamsDetailed } from "@/lib/db/streams"
@@ -45,6 +45,9 @@ export default async function SelectionPage({
   const employers = isPersonal
     ? (await Promise.all(selection.employerTokens.map((t) => getEmployerByToken(t)))).filter((e): e is Employer => Boolean(e))
     : []
+  // Full, untruncated list — selection.label is a display-only convenience string ("A, B и ещё
+  // N") meant for compact badges elsewhere, not accurate enough for this page.
+  const companies = [...new Set(employers.map((e) => e.company).filter(Boolean))]
 
   return (
     <main className="min-h-svh bg-background">
@@ -74,14 +77,25 @@ export default async function SelectionPage({
             </span>
           </div>
           {isPersonal && (
-            <div className="mt-4 rounded-xl border bg-muted/40 px-4 py-3">
-              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <Users className="size-3.5" />
-                Видна только этим работодателям
-              </p>
-              <p className="text-sm text-foreground">
-                {employers.length ? employers.map((e) => `${e.name} (${e.company})`).join(", ") : "работодатели больше не найдены"}
-              </p>
+            <div className="mt-4 space-y-3 rounded-xl border bg-muted/40 px-4 py-3">
+              <div>
+                <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Building2 className="size-3.5" />
+                  Компании
+                </p>
+                <p className="text-sm text-foreground">
+                  {companies.length ? companies.join(", ") : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Users className="size-3.5" />
+                  Видна только этим работодателям
+                </p>
+                <p className="text-sm text-foreground">
+                  {employers.length ? employers.map((e) => `${e.name} (${e.company})`).join(", ") : "работодатели больше не найдены"}
+                </p>
+              </div>
             </div>
           )}
         </header>
