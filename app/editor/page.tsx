@@ -172,7 +172,7 @@ export default async function ReleasesPage({
                         )}
                         {list.personalSelectionCount > 0 && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">
-                            {list.personalSelectionCount} личных подборок
+                            {list.personalSelectionCount} ограниченных подборок
                           </span>
                         )}
                       </div>
