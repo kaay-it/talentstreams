@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
 import { getCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
 import {
-  getMailingLists, getMailingListMeta, getMailingList, getAllSelectionCandidateIds, createMailingListRows,
+  getMailingLists, getMailingListMeta, getMailingList, getAllSelectionCandidateIds, resolveMailingListForEmployer, createMailingListRows,
   deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent,
   createMailingListRecipientRows, getMailingListRecipientTokens,
   replaceMailingListRecipients, getEmployersWithoutSelection, attachSelectionsToMailingList, getSelectionById,
@@ -20,7 +20,7 @@ import { appendContactRequest, updateContactRequestStatus, type ContactRequestSt
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
-import { getEmployers, getEmployerByToken, confirmedEmployersForStream, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
+import { getEmployers, getEmployerByToken, confirmedEmployersForStream, filterCandidatesForEmployer, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
 import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
@@ -750,27 +750,41 @@ export async function publishMailingList(listId: string, confirmed = false): Pro
   // best-effort, Telegram is a supplementary channel on top of email, not load-bearing). Fires on
   // every real send including a resend, mirroring createCampaign() above (also unconditional).
   // Candidate count shown here on purpose — unlike the email body (TASK-26's neutral phrasing,
-  // no exact count), this was an explicit request for the Telegram channel specifically.
-  await Promise.all(
-    notifyEmployers.map((employer) =>
-      sendTelegramToEmployer(
-        employer.token,
-        `<b>Новый выпуск Talent Stream уже готов!</b>\n\nВ поток ${escapeHtml(list.stream)} от ${escapeHtml(date)} вошли ${candidateIds.length} ${candidatePlural(candidateIds.length)}`,
-        {
-          button: { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}` },
-          // Telegram caches an external photo per exact URL (confirmed by testing — a file
-          // changed in place at the same URL kept showing the stale version). The filename is
-          // versioned on purpose: bump it (public/telegram-notify-vN.png) whenever the image
-          // itself changes, so Telegram is forced to fetch fresh instead of serving a cached miss.
-          // 640×180: SendPulse marks this send is_external_attachment: true, meaning Telegram
-          // renders it as a link-preview card, not a native uploaded photo, and crops/pads an
-          // off-ratio image to fit — this specific ratio (not the documented 1.91:1 Open Graph
-          // standard tried earlier) is the one confirmed clean on a real device, by eye.
-          photo: `${appUrl}/telegram-notify-v8.png`,
-        },
-      ),
-    ),
-  )
+  // no exact count), this was an explicit request for the Telegram channel specifically. Resolved
+  // PER EMPLOYER (TASK-44 made this necessary, not just the release-wide union in candidateIds
+  // above — that stays union-based for the pause counter, a different, deliberately coarser rule):
+  // a personal selection, or the default filtered the same way filterCandidatesForEmployer does on
+  // their own /list/[listId] page, so the number in the push always matches what they'll actually
+  // see when they tap the button. An employer resolving to nothing ("подборка не готова") gets no
+  // ping at all — nothing to point them at yet.
+  const fullList = await getMailingList(listId)
+  if (fullList) {
+    await Promise.all(
+      notifyEmployers.map((employer) => {
+        const resolved = resolveMailingListForEmployer(fullList, employer.token)
+        if (!resolved) return null
+        const count = resolved.isPersonal
+          ? resolved.entries.length
+          : filterCandidatesForEmployer(resolved.entries.map((e) => e.profile), employer).length
+        return sendTelegramToEmployer(
+          employer.token,
+          `<b>Новый выпуск Talent Stream уже готов!</b>\n\nВ поток ${escapeHtml(list.stream)} от ${escapeHtml(date)} вошли ${count} ${candidatePlural(count)}`,
+          {
+            button: { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}` },
+            // Telegram caches an external photo per exact URL (confirmed by testing — a file
+            // changed in place at the same URL kept showing the stale version). The filename is
+            // versioned on purpose: bump it (public/telegram-notify-vN.png) whenever the image
+            // itself changes, so Telegram is forced to fetch fresh instead of serving a cached miss.
+            // 640×180: SendPulse marks this send is_external_attachment: true, meaning Telegram
+            // renders it as a link-preview card, not a native uploaded photo, and crops/pads an
+            // off-ratio image to fit — this specific ratio (not the documented 1.91:1 Open Graph
+            // standard tried earlier) is the one confirmed clean on a real device, by eye.
+            photo: `${appUrl}/telegram-notify-v8.png`,
+          },
+        )
+      }),
+    )
+  }
 
   // Only on a genuine first send — a resend must not advance any candidate's pause window again.
   if (!alreadySent) {
