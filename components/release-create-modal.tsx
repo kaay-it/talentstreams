@@ -157,7 +157,7 @@ export function ReleaseCreateModal({
 
   const [stream, setStream] = useState("")
   const [date, setDate] = useState(todayISO())
-  const [recipientMode, setRecipientMode] = useState<"all" | "selected">("selected")
+  const [recipientMode, setRecipientMode] = useState<"all" | "selected">("all")
   const [selectedEmployerTokens, setSelectedEmployerTokens] = useState<Set<string>>(new Set())
   const [selectedSelectionIds, setSelectedSelectionIds] = useState<Set<string>>(new Set())
 
@@ -179,7 +179,7 @@ export function ReleaseCreateModal({
 
   function handleStreamChange(next: string) {
     setStream(next)
-    setRecipientMode("selected")
+    setRecipientMode("all")
     setSelectedEmployerTokens(new Set())
     setSelectedSelectionIds(new Set())
   }
@@ -220,7 +220,7 @@ export function ReleaseCreateModal({
     setCreatedListId("")
     setStream("")
     setDate(todayISO())
-    setRecipientMode("selected")
+    setRecipientMode("all")
     setSelectedEmployerTokens(new Set())
     setSelectedSelectionIds(new Set())
   }
@@ -360,17 +360,17 @@ export function ReleaseCreateModal({
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => setRecipientMode("selected")}
-                          className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "selected" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
-                        >
-                          Выбранные получатели
-                        </button>
-                        <button
-                          type="button"
                           onClick={() => setRecipientMode("all")}
                           className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "all" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
                         >
                           Все подписчики стрима
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRecipientMode("selected")}
+                          className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "selected" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
+                        >
+                          Выбранные получатели
                         </button>
                       </div>
                     )}

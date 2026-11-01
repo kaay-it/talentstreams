@@ -286,17 +286,17 @@ export function ReleaseDetailModal({
                           <div className="flex gap-2">
                             <button
                               type="button"
-                              onClick={() => setRecipientMode("selected")}
-                              className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "selected" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
-                            >
-                              Выбранные получатели
-                            </button>
-                            <button
-                              type="button"
                               onClick={() => setRecipientMode("all")}
                               className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "all" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
                             >
                               Все подписчики стрима
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRecipientMode("selected")}
+                              className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${recipientMode === "selected" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}
+                            >
+                              Выбранные получатели
                             </button>
                           </div>
                           {recipientMode === "selected" && (
