@@ -175,9 +175,10 @@ export async function updateCandidateStatus(
     .where(eq(candidates.id, id))
 }
 
-/** Permanently deletes a candidate. candidateResumes rows cascade-delete automatically (FK ON
- * DELETE CASCADE); mailingListEntries/contactRequests referencing this id are set to NULL (FK ON
- * DELETE SET NULL) — history is kept, just unlinked. Caller still handles Vercel Blob cleanup. */
+/** Permanently deletes a candidate. candidateResumes/selectionEntries rows cascade-delete
+ * automatically (FK ON DELETE CASCADE — a resume or a подборка membership means nothing without
+ * the candidate it belongs to); contactRequests referencing this id is set to NULL (FK ON DELETE
+ * SET NULL) — that history is kept, just unlinked. Caller still handles Vercel Blob cleanup. */
 export async function deleteCandidateRecord(id: string): Promise<void> {
   await db.delete(candidates).where(eq(candidates.id, id))
 }

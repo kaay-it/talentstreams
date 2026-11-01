@@ -69,16 +69,6 @@ export const mailingLists = pgTable("mailingLists", {
   sentCampaignId: integer("sentCampaignId"),
 })
 
-// Legacy content table — superseded by selections/selectionEntries below (every release's
-// candidates now live in its default selection instead). Kept only until the backfill into
-// selections is verified on real data and this table is dropped in a follow-up migration;
-// no code reads or writes it anymore.
-export const mailingListEntries = pgTable("mailingListEntries", {
-  id:          text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  listId:      text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
-  candidateId: text("candidateId").notNull().references(() => candidates.id, { onDelete: "cascade" }),
-})
-
 // A "подборка" — a reusable content set, prepared ahead of time for a stream in /editor/selections
 // (built independently of any release), then picked (not authored) when creating/editing a
 // release. listId is null while sitting in the pool; attaching it to a release sets it, detaching
