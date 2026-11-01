@@ -169,6 +169,13 @@
       "when": 1793455852258,
       "tag": "0023_pale_ezekiel",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793515876231,
+      "tag": "0024_living_human_torch",
+      "breakpoints": true
     }
   ]
 }

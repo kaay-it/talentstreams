@@ -1250,8 +1250,8 @@ export async function submitContactRequest(
 
 /** True if a stream has at least one release that was actually sent as a SendPulse campaign —
  * not just created. A stream in this state has its name baked into a permanent campaign title
- * and (via mailingListEntries.streamId) into real send history, so renaming/deleting it would
- * silently desync that history. Archiving is always safe instead — it doesn't touch the name. */
+ * and into real send history (mailingLists.streamId), so renaming/deleting it would silently
+ * desync that history. Archiving is always safe instead — it doesn't touch the name. */
 async function streamHasSentReleases(streamId: number): Promise<boolean> {
   const lists = await getMailingLists()
   return lists.some((l) => l.streamId === streamId && l.sentCampaignId !== null)
