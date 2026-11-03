@@ -22,7 +22,7 @@ export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, confirmedEmployersForStream, filterCandidatesForEmployer, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
 import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, enableTelegramContact, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 import { previewCandidatesImport as previewImport, importCandidatesFromSheet, type ImportPreview, type ImportResult } from "@/lib/sheets-import"
 export type { ImportPreview, ImportResult, ImportRow, ImportSkipped } from "@/lib/sheets-import"
@@ -1187,6 +1187,10 @@ export async function updateEmployer(
 export async function confirmEmployer(token: string, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "streams">): Promise<void> {
   await syncEmployerToSendPulse(employer)
   await updateEmployerFields(token, { status: "Подтверждён" })
+  // Re-enable first — a "На проверке"/"Отклонён" employer re-confirmed here may have been
+  // disabled by a previous rejectEmployer() call; without this, their Telegram contact stays
+  // disabled in SendPulse (manual fix required there) and the message below silently no-ops.
+  await enableTelegramContact(employer.token)
   // Only reaches employers who already subscribed to the bot; the rest get the link in the welcome email.
   await sendTelegramToEmployer(
     employer.token,
