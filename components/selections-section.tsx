@@ -252,6 +252,9 @@ function SelectionFormModal({
   const [date, setDate] = useState(selection ? toIsoDate(selection.date) : todayISO())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(selection?.candidateIds ?? []))
   const [selectedEmployerTokens, setSelectedEmployerTokens] = useState<Set<string>>(new Set(selection?.employerTokens ?? []))
+  // Уже выбранные работодатели (редактирование существующей ограниченной подборки) — секцию
+  // незачем держать развёрнутой, выбор уже сделан; с нуля — развёрнута, чтобы было что выбирать.
+  const [employersOpen, setEmployersOpen] = useState((selection?.employerTokens.length ?? 0) === 0)
   const [pausedOpen, setPausedOpen] = useState(false)
   const [candidateSearch, setCandidateSearch] = useState("")
 
@@ -281,6 +284,15 @@ function SelectionFormModal({
     return [...byCompany.entries()].sort((a, b) => a[0].localeCompare(b[0], "ru"))
   }, [employersForStream])
 
+  // Сжатая сводка выбранных работодателей — показывается вместо пикера, когда секция схлопнута.
+  const selectedEmployerLabels = useMemo(() => {
+    const byToken = new Map(employersForStream.map((e) => [e.token, e]))
+    return [...selectedEmployerTokens].map((t) => {
+      const e = byToken.get(t)
+      return e ? `${e.name} (${e.company})` : t
+    })
+  }, [employersForStream, selectedEmployerTokens])
+
   // The подборка may include candidates no longer in eligible/paused (status changed since) —
   // show them anyway so a save never silently drops them.
   const extraSelected = [...selectedIds].filter((id) => !candidateById.has(id))
@@ -289,6 +301,7 @@ function SelectionFormModal({
     setStream(next)
     setSelectedIds(new Set())
     setSelectedEmployerTokens(new Set())
+    setEmployersOpen(true)
     setCandidateSearch("")
   }
 
@@ -349,7 +362,7 @@ function SelectionFormModal({
           role="dialog"
           aria-modal="true"
           aria-labelledby="selection-form-title"
-          className={`relative flex w-full flex-col rounded-2xl border bg-card shadow-xl ${status === "success" ? "max-w-lg" : "h-[90vh] max-w-6xl"}`}
+          className={`relative flex w-full flex-col rounded-2xl border bg-card shadow-xl ${status === "success" ? "max-w-lg" : "h-[90vh] max-w-[95vw]"}`}
         >
           <div className="flex shrink-0 items-center justify-between border-b px-6 py-4">
             <h2 id="selection-form-title" className="text-base font-semibold text-card-foreground">
@@ -411,24 +424,38 @@ function SelectionFormModal({
                 {stream && (
                   <>
                     <div className="space-y-1.5">
-                      <p className="text-xs font-medium text-muted-foreground">
+                      <button
+                        type="button"
+                        onClick={() => setEmployersOpen((v) => !v)}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        {employersOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
                         Видна только этим работодателям ({selectedEmployerTokens.size} выбрано) — оставьте пустым для общей подборки
-                      </p>
-                      {employerGroups.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">Нет подтверждённых подписчиков стрима «{stream}».</p>
+                      </button>
+
+                      {employersOpen ? (
+                        employerGroups.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">Нет подтверждённых подписчиков стрима «{stream}».</p>
+                        ) : (
+                          <div className="max-h-48 overflow-y-auto rounded-lg border divide-y">
+                            {employerGroups.map(([company, employers]) => (
+                              <CompanyGroup
+                                key={company}
+                                company={company}
+                                employers={employers}
+                                selectedTokens={selectedEmployerTokens}
+                                onToggleEmployer={toggleEmployer}
+                                onToggleCompany={toggleCompany}
+                              />
+                            ))}
+                          </div>
+                        )
                       ) : (
-                        <div className="max-h-48 overflow-y-auto rounded-lg border divide-y">
-                          {employerGroups.map(([company, employers]) => (
-                            <CompanyGroup
-                              key={company}
-                              company={company}
-                              employers={employers}
-                              selectedTokens={selectedEmployerTokens}
-                              onToggleEmployer={toggleEmployer}
-                              onToggleCompany={toggleCompany}
-                            />
-                          ))}
-                        </div>
+                        <p className="rounded-lg border bg-muted/30 px-3 py-2 text-sm leading-relaxed text-foreground">
+                          {selectedEmployerLabels.length === 0
+                            ? "Общая подборка — работодатели не выбраны"
+                            : selectedEmployerLabels.join(", ")}
+                        </p>
                       )}
                     </div>
 
