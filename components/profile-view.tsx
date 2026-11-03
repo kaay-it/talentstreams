@@ -60,6 +60,10 @@ export function ProfileView({
   const hasHiddenInfo = contacts.length > 0 || resumes.length > 0
   const displayName = isEditor ? (profile.name || profile.id) : "Имя Фамилия"
 
+  // Менеджер вводит несколько ролей одной строкой через " / " (например "HR Director / Chief
+  // People Officer / Head of HR") — показываем их как отдельные роли, не единым текстом.
+  const roles = profile.title.split(" / ").map((r) => r.trim()).filter(Boolean)
+
   return (
     <main className="min-h-svh bg-background">
       <div className="mx-auto w-full max-w-2xl px-4 py-8 md:py-12">
@@ -79,7 +83,23 @@ export function ProfileView({
             >
               {displayName}
             </h1>
-            {profile.title && <p className="mt-1 text-pretty text-base text-muted-foreground">{profile.title}</p>}
+            {(roles.length > 0 || profile.level) && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {roles.map((role) => (
+                  <span
+                    key={role}
+                    className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-foreground"
+                  >
+                    {role}
+                  </span>
+                ))}
+                {profile.level && (
+                  <span className="inline-flex items-center rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700 dark:bg-teal-900/20 dark:text-teal-400">
+                    {profile.level}
+                  </span>
+                )}
+              </div>
+            )}
 
             {profile.stream.length > 0 && (
               <div className="mt-4 flex flex-wrap gap-2">

@@ -20,6 +20,10 @@ export function CandidateEntryCard({
 }) {
   const { profile } = entry
 
+  // Менеджер вводит несколько ролей одной строкой через " / " — показываем их как отдельные
+  // роли, не единым текстом (та же логика, что в profile-view.tsx).
+  const roles = profile.title.split(" / ").map((r) => r.trim()).filter(Boolean)
+
   // Industry/Function tags are derived from the candidate's Stream membership
   // (TASK-27) via each stream's type, rather than separate Profile fields.
   const industryTags = profile.stream.filter((s) => streamTypes.get(s.trim().toLowerCase()) === "Industry")
@@ -36,11 +40,16 @@ export function CandidateEntryCard({
     <article className="rounded-2xl border bg-card p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          {(profile.title || profile.level) && (
-            <div className="flex flex-wrap items-center gap-2">
-              {profile.title && (
-                <p className="font-semibold text-card-foreground">{profile.title}</p>
-              )}
+          {(roles.length > 0 || profile.level) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {roles.map((role) => (
+                <span
+                  key={role}
+                  className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-sm font-semibold text-card-foreground"
+                >
+                  {role}
+                </span>
+              ))}
               {profile.level && (
                 <span className="inline-flex items-center rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700 dark:bg-teal-900/20 dark:text-teal-400">
                   {profile.level}
