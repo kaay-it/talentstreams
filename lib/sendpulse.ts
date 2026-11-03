@@ -339,12 +339,16 @@ export async function getTelegramConnectionInfo(employerTokens: string[]): Promi
 /** POSTs the given action (enable/disable/delete) for every SendPulse Telegram contact record
  * matching the employer's token — regardless of the record's current status, unlike
  * findTelegramContactId(), since an admin action must still reach an already-disabled
- * contact. Best-effort: never throws, silently no-ops if the employer never connected. */
-async function setTelegramContactState(employerToken: string, action: "enable" | "disable" | "delete"): Promise<void> {
+ * contact. Returns true if at least one matching record had status !== 1 (not already active)
+ * before the action ran — enableTelegramContact() uses this to tell a genuine reactivation
+ * from a no-op (never connected, or already active). Best-effort: never throws, returns false
+ * and silently no-ops if the employer never connected or SendPulse auth fails. */
+async function setTelegramContactState(employerToken: string, action: "enable" | "disable" | "delete"): Promise<boolean> {
   try {
     const token = await getToken()
-    if (!token) return
+    if (!token) return false
     const records = await getTelegramContactRecords(employerToken, token)
+    const hadInactive = records.some((r) => r.status !== 1)
     await Promise.all(
       records.map(async (record) => {
         const res = await spPost(
@@ -357,8 +361,10 @@ async function setTelegramContactState(employerToken: string, action: "enable" |
         else console.warn(`[SendPulse] telegram ${action} status=${res.status}`, res.text)
       }),
     )
+    return hadInactive
   } catch (err) {
     console.error(`[SendPulse] telegram ${action} failed:`, err)
+    return false
   }
 }
 
@@ -366,9 +372,14 @@ async function setTelegramContactState(employerToken: string, action: "enable" |
  * disableTelegramContact(), called from confirmEmployer() so an employer who reconnects after
  * being rejected/disabled doesn't need the contact flipped back on manually in SendPulse. Must
  * run before sendTelegramToEmployer() in the same confirm — findTelegramContactId() only
- * matches status === 1 (active), so the welcome message would silently no-op otherwise. */
-export async function enableTelegramContact(employerToken: string): Promise<void> {
-  await setTelegramContactState(employerToken, "enable")
+ * matches status === 1 (active), so the welcome message would silently no-op otherwise.
+ * Returns true only when a genuinely disabled contact was found and reactivated — false if the
+ * employer never connected, or was already active (a true first-time confirm) — so
+ * confirmEmployer() can tell "reactivation" from "first connection" and skip re-sending the
+ * "approved" message on the former: the employer already got it once before being disabled,
+ * and got no "you were disabled" message either, so a silent reactivation is symmetric. */
+export async function enableTelegramContact(employerToken: string): Promise<boolean> {
+  return setTelegramContactState(employerToken, "enable")
 }
 
 /** Disables the employer's Telegram bot contact — campaigns/autoflows stop, but the contact

@@ -1190,12 +1190,18 @@ export async function confirmEmployer(token: string, employer: Pick<Employer, "t
   // Re-enable first — a "На проверке"/"Отклонён" employer re-confirmed here may have been
   // disabled by a previous rejectEmployer() call; without this, their Telegram contact stays
   // disabled in SendPulse (manual fix required there) and the message below silently no-ops.
-  await enableTelegramContact(employer.token)
-  // Only reaches employers who already subscribed to the bot; the rest get the link in the welcome email.
-  await sendTelegramToEmployer(
-    employer.token,
-    "Ваша заявка в TalentStreams одобрена! Первая подборка кандидатов придёт на email и сюда.",
-  )
+  const reactivated = await enableTelegramContact(employer.token)
+  // Reactivating a disabled contact is silent — the employer already got this exact message
+  // once before being disabled, and got no "you were disabled" message either, so sending it
+  // again here would be a non-symmetric, confusing notification. Only a genuine first-time
+  // connection (never disabled — reactivated === false) gets it. Only reaches employers who
+  // already subscribed to the bot; the rest get the link in the welcome email.
+  if (!reactivated) {
+    await sendTelegramToEmployer(
+      employer.token,
+      "Ваша заявка в TalentStreams одобрена! Первая подборка кандидатов придёт на email и сюда.",
+    )
+  }
   revalidatePath("/editor")
 }
 
