@@ -252,7 +252,11 @@ function SelectionFormModal({
   const [date, setDate] = useState(selection ? toIsoDate(selection.date) : todayISO())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(selection?.candidateIds ?? []))
   const [selectedEmployerTokens, setSelectedEmployerTokens] = useState<Set<string>>(new Set(selection?.employerTokens ?? []))
+  // Уже выбранные работодатели (редактирование существующей ограниченной подборки) — секцию
+  // незачем держать развёрнутой, выбор уже сделан; с нуля — развёрнута, чтобы было что выбирать.
+  const [employersOpen, setEmployersOpen] = useState((selection?.employerTokens.length ?? 0) === 0)
   const [pausedOpen, setPausedOpen] = useState(false)
+  const [candidateSearch, setCandidateSearch] = useState("")
 
   const eligible = eligibleByStream[stream] ?? []
   const paused = pausedByStream[stream] ?? []
@@ -261,6 +265,18 @@ function SelectionFormModal({
     const all = [...eligible, ...paused]
     return new Map(all.map((c) => [c.id, c]))
   }, [eligible, paused])
+
+  // Поиск по ФИО — применяется и к активному списку, и к списку «на паузе» (менеджер не всегда
+  // помнит, активен ли сейчас нужный кандидат). Если совпадение есть только в списке на паузе,
+  // он разворачивается автоматически — иначе результат поиска выглядел бы пустым.
+  const searchTerm = candidateSearch.trim().toLowerCase()
+  const filteredEligible = searchTerm ? eligible.filter((c) => c.name.toLowerCase().includes(searchTerm)) : eligible
+  const filteredPaused = searchTerm ? paused.filter((c) => c.name.toLowerCase().includes(searchTerm)) : paused
+  const pausedVisible = pausedOpen || (searchTerm !== "" && filteredPaused.length > 0)
+
+  // Свёрнутая секция работодателей освобождает заметно места — без этого список кандидатов
+  // оставался той же высоты, и под ним зиял пустой кусок модалки.
+  const candidateListMaxH = employersOpen ? "max-h-[32vh]" : "max-h-[50vh]"
 
   const employerGroups = useMemo(() => {
     const byCompany = new Map<string, EmployerPickOption[]>()
@@ -272,6 +288,15 @@ function SelectionFormModal({
     return [...byCompany.entries()].sort((a, b) => a[0].localeCompare(b[0], "ru"))
   }, [employersForStream])
 
+  // Сжатая сводка выбранных работодателей — показывается вместо пикера, когда секция схлопнута.
+  const selectedEmployerLabels = useMemo(() => {
+    const byToken = new Map(employersForStream.map((e) => [e.token, e]))
+    return [...selectedEmployerTokens].map((t) => {
+      const e = byToken.get(t)
+      return e ? `${e.name} (${e.company})` : t
+    })
+  }, [employersForStream, selectedEmployerTokens])
+
   // The подборка may include candidates no longer in eligible/paused (status changed since) —
   // show them anyway so a save never silently drops them.
   const extraSelected = [...selectedIds].filter((id) => !candidateById.has(id))
@@ -280,6 +305,8 @@ function SelectionFormModal({
     setStream(next)
     setSelectedIds(new Set())
     setSelectedEmployerTokens(new Set())
+    setEmployersOpen(true)
+    setCandidateSearch("")
   }
 
   function toggleCandidate(id: string) {
@@ -330,13 +357,21 @@ function SelectionFormModal({
   }
 
   const canSubmit = Boolean(stream.trim() && date.trim() && selectedIds.size > 0)
+  // Ничего выбирать, пока не выбран стрим, — незачем открывать модалку сразу во весь экран.
+  // Как только стрим выбран, появляется всё остальное (состав), и диалог расширяется под него.
+  const compact = status === "success" || !stream
 
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div className="flex min-h-full items-center justify-center p-4">
-        <div role="dialog" aria-modal="true" aria-labelledby="selection-form-title" className="relative w-full max-w-lg rounded-2xl border bg-card shadow-xl">
-          <div className="flex items-center justify-between border-b px-6 py-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="selection-form-title"
+          className={`relative flex w-full flex-col overflow-hidden rounded-2xl border bg-card shadow-xl transition-[max-width,height] duration-300 ease-out ${compact ? "max-w-lg" : "h-[90vh] max-w-[95vw]"}`}
+        >
+          <div className="flex shrink-0 items-center justify-between border-b px-6 py-4">
             <h2 id="selection-form-title" className="text-base font-semibold text-card-foreground">
               {selection ? "Редактирование подборки" : "Новая подборка"}
             </h2>
@@ -356,8 +391,8 @@ function SelectionFormModal({
               </button>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5">
-              <div className="space-y-5">
+            <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="block text-sm font-medium text-card-foreground">
@@ -396,34 +431,58 @@ function SelectionFormModal({
                 {stream && (
                   <>
                     <div className="space-y-1.5">
-                      <p className="text-xs font-medium text-muted-foreground">
+                      <button
+                        type="button"
+                        onClick={() => setEmployersOpen((v) => !v)}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        {employersOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
                         Видна только этим работодателям ({selectedEmployerTokens.size} выбрано) — оставьте пустым для общей подборки
-                      </p>
-                      {employerGroups.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">Нет подтверждённых подписчиков стрима «{stream}».</p>
+                      </button>
+
+                      {employersOpen ? (
+                        employerGroups.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">Нет подтверждённых подписчиков стрима «{stream}».</p>
+                        ) : (
+                          <div className="max-h-48 overflow-y-auto rounded-lg border divide-y">
+                            {employerGroups.map(([company, employers]) => (
+                              <CompanyGroup
+                                key={company}
+                                company={company}
+                                employers={employers}
+                                selectedTokens={selectedEmployerTokens}
+                                onToggleEmployer={toggleEmployer}
+                                onToggleCompany={toggleCompany}
+                              />
+                            ))}
+                          </div>
+                        )
                       ) : (
-                        <div className="max-h-48 overflow-y-auto rounded-lg border divide-y">
-                          {employerGroups.map(([company, employers]) => (
-                            <CompanyGroup
-                              key={company}
-                              company={company}
-                              employers={employers}
-                              selectedTokens={selectedEmployerTokens}
-                              onToggleEmployer={toggleEmployer}
-                              onToggleCompany={toggleCompany}
-                            />
-                          ))}
-                        </div>
+                        <p className="rounded-lg border bg-muted/30 px-3 py-2 text-sm leading-relaxed text-foreground">
+                          {selectedEmployerLabels.length === 0
+                            ? "Общая подборка — работодатели не выбраны"
+                            : selectedEmployerLabels.join(", ")}
+                        </p>
                       )}
                     </div>
 
                     <div className="space-y-1.5">
                       <p className="text-xs font-medium text-muted-foreground">Кандидаты ({selectedIds.size})</p>
+                      <input
+                        type="text"
+                        value={candidateSearch}
+                        onChange={(e) => setCandidateSearch(e.target.value)}
+                        placeholder="Поиск по ФИО…"
+                        className="w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+
                       {eligible.length === 0 ? (
                         <p className="text-sm text-muted-foreground">Нет подходящих кандидатов — активных, с уже наступившей датой «Активен с», по стриму «{stream}».</p>
+                      ) : filteredEligible.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Совпадений по «{candidateSearch.trim()}» не найдено.</p>
                       ) : (
-                        <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                          {eligible.map((c) => (
+                        <div className={`${candidateListMaxH} overflow-y-auto rounded-lg border divide-y`}>
+                          {filteredEligible.map((c) => (
                             <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
                           ))}
                         </div>
@@ -433,15 +492,19 @@ function SelectionFormModal({
                     {paused.length > 0 && (
                       <div className="space-y-1.5">
                         <button type="button" onClick={() => setPausedOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
-                          {pausedOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                          {pausedOpen ? "Скрыть кандидатов на паузе" : `Кандидаты на паузе, дата не наступила (${paused.length})`}
+                          {pausedVisible ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                          {pausedVisible ? "Скрыть кандидатов на паузе" : `Кандидаты на паузе, дата не наступила (${paused.length})`}
                         </button>
-                        {pausedOpen && (
-                          <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                            {paused.map((c) => (
-                              <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
-                            ))}
-                          </div>
+                        {pausedVisible && (
+                          filteredPaused.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">Совпадений по «{candidateSearch.trim()}» не найдено.</p>
+                          ) : (
+                            <div className={`${candidateListMaxH} overflow-y-auto rounded-lg border divide-y`}>
+                              {filteredPaused.map((c) => (
+                                <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
+                              ))}
+                            </div>
+                          )
                         )}
                       </div>
                     )}
@@ -455,20 +518,24 @@ function SelectionFormModal({
                 )}
               </div>
 
-              {status === "error" && (
-                <div className="mt-5 flex items-start gap-2.5 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
-                  <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
-                  <p className="text-sm font-medium text-destructive">{errorMsg}</p>
+              {stream && (
+                <div className="shrink-0 border-t px-6 py-4">
+                  {status === "error" && (
+                    <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
+                      <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+                      <p className="text-sm font-medium text-destructive">{errorMsg}</p>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={status === "submitting" || !canSubmit}
+                    className="mx-auto block w-full max-w-md rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {status === "submitting" ? "Сохраняем…" : "Сохранить"}
+                  </button>
                 </div>
               )}
-
-              <button
-                type="submit"
-                disabled={status === "submitting" || !canSubmit}
-                className="mt-5 w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {status === "submitting" ? "Сохраняем…" : "Сохранить"}
-              </button>
             </form>
           )}
         </div>

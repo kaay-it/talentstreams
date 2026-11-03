@@ -152,6 +152,10 @@ export const candidates = pgTable("candidates", {
   activeSince:           date("activeSince", { mode: "string" }),
   registrationTimestamp: timestamp("registrationTimestamp").defaultNow().notNull(),
   coverLetter:           text("coverLetter").notNull().default(""),
+  // Зарплатные ожидания — optional, nullable, no UI yet (groundwork only). No currency column:
+  // not needed until a form actually collects these.
+  salaryFrom:            integer("salaryFrom"),
+  salaryTo:              integer("salaryTo"),
   // No resumeUrl column — candidateResumes is the sole source of truth for a candidate's resume;
   // "current" is simply the newest row (see getResumeVersions()'s ORDER BY createdAt DESC).
 })
