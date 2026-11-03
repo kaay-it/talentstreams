@@ -494,7 +494,7 @@ function SelectionFormModal({
               <button
                 type="submit"
                 disabled={status === "submitting" || !canSubmit}
-                className="mt-5 w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="mx-auto mt-5 block w-full max-w-md rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {status === "submitting" ? "Сохраняем…" : "Сохранить"}
               </button>

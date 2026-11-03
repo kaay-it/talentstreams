@@ -13,10 +13,10 @@ export type EligibleCandidate = {
   activeSince: string
 }
 
-/** Three-line row — ФИО / уровень / роли (title split on " / ", same convention as
- * profile-view.tsx and candidate-entry-card.tsx) — plus a summary column, so a manager picking
- * candidates by what they remember about them (not by surname) has enough to go on without
- * leaving the picker. */
+/** Three columns — ФИО/уровень/роли (title split on " / ", same convention as profile-view.tsx
+ * and candidate-entry-card.tsx), a wide summary column (a manager picking candidates by what
+ * they remember about them, not by surname, needs this without leaving the picker), and
+ * activeSince on the far right (only meaningful in the "на паузе" list). */
 export function CandidateRow({
   candidate,
   checked,
@@ -38,13 +38,8 @@ export function CandidateRow({
         disabled={readOnly}
         className="mt-1 size-4 shrink-0 accent-primary"
       />
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate font-medium text-foreground">{candidate.name || candidate.id}</span>
-          {candidate.activeSince && (
-            <span className="shrink-0 text-[11px] text-muted-foreground">Активен с {candidate.activeSince}</span>
-          )}
-        </div>
+      <div className="w-56 shrink-0 space-y-1">
+        <span className="block truncate font-medium text-foreground">{candidate.name || candidate.id}</span>
         {candidate.level && (
           <div>
             <span className="inline-flex items-center rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:bg-teal-900/20 dark:text-teal-400">
@@ -62,8 +57,11 @@ export function CandidateRow({
           </div>
         )}
       </div>
-      <div className="w-72 shrink-0 border-l pl-3 text-xs leading-relaxed text-muted-foreground line-clamp-3">
+      <div className="min-w-0 flex-1 border-l pl-3 text-xs leading-relaxed text-muted-foreground line-clamp-4">
         {candidate.summary || "—"}
+      </div>
+      <div className="w-28 shrink-0 text-right text-[11px] leading-tight text-muted-foreground">
+        {candidate.activeSince && <>Активен с {candidate.activeSince}</>}
       </div>
     </label>
   )
