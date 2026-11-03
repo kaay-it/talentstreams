@@ -274,6 +274,10 @@ function SelectionFormModal({
   const filteredPaused = searchTerm ? paused.filter((c) => c.name.toLowerCase().includes(searchTerm)) : paused
   const pausedVisible = pausedOpen || (searchTerm !== "" && filteredPaused.length > 0)
 
+  // Свёрнутая секция работодателей освобождает заметно места — без этого список кандидатов
+  // оставался той же высоты, и под ним зиял пустой кусок модалки.
+  const candidateListMaxH = employersOpen ? "max-h-[32vh]" : "max-h-[50vh]"
+
   const employerGroups = useMemo(() => {
     const byCompany = new Map<string, EmployerPickOption[]>()
     for (const e of employersForStream) {
@@ -477,7 +481,7 @@ function SelectionFormModal({
                       ) : filteredEligible.length === 0 ? (
                         <p className="text-sm text-muted-foreground">Совпадений по «{candidateSearch.trim()}» не найдено.</p>
                       ) : (
-                        <div className="max-h-[32vh] overflow-y-auto rounded-lg border divide-y">
+                        <div className={`${candidateListMaxH} overflow-y-auto rounded-lg border divide-y`}>
                           {filteredEligible.map((c) => (
                             <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
                           ))}
@@ -495,7 +499,7 @@ function SelectionFormModal({
                           filteredPaused.length === 0 ? (
                             <p className="text-sm text-muted-foreground">Совпадений по «{candidateSearch.trim()}» не найдено.</p>
                           ) : (
-                            <div className="max-h-[32vh] overflow-y-auto rounded-lg border divide-y">
+                            <div className={`${candidateListMaxH} overflow-y-auto rounded-lg border divide-y`}>
                               {filteredPaused.map((c) => (
                                 <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
                               ))}
