@@ -57,7 +57,7 @@ export function CandidateRow({
           </div>
         )}
       </div>
-      <div className="min-w-0 flex-1 border-l pl-3 text-xs leading-relaxed text-muted-foreground line-clamp-4">
+      <div className="min-w-0 flex-1 whitespace-pre-line border-l pl-3 text-xs leading-relaxed text-muted-foreground">
         {candidate.summary || "—"}
       </div>
       <div className="w-28 shrink-0 text-right text-[11px] leading-tight text-muted-foreground">
