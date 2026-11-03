@@ -253,6 +253,7 @@ function SelectionFormModal({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(selection?.candidateIds ?? []))
   const [selectedEmployerTokens, setSelectedEmployerTokens] = useState<Set<string>>(new Set(selection?.employerTokens ?? []))
   const [pausedOpen, setPausedOpen] = useState(false)
+  const [candidateSearch, setCandidateSearch] = useState("")
 
   const eligible = eligibleByStream[stream] ?? []
   const paused = pausedByStream[stream] ?? []
@@ -261,6 +262,14 @@ function SelectionFormModal({
     const all = [...eligible, ...paused]
     return new Map(all.map((c) => [c.id, c]))
   }, [eligible, paused])
+
+  // Поиск по ФИО — применяется и к активному списку, и к списку «на паузе» (менеджер не всегда
+  // помнит, активен ли сейчас нужный кандидат). Если совпадение есть только в списке на паузе,
+  // он разворачивается автоматически — иначе результат поиска выглядел бы пустым.
+  const searchTerm = candidateSearch.trim().toLowerCase()
+  const filteredEligible = searchTerm ? eligible.filter((c) => c.name.toLowerCase().includes(searchTerm)) : eligible
+  const filteredPaused = searchTerm ? paused.filter((c) => c.name.toLowerCase().includes(searchTerm)) : paused
+  const pausedVisible = pausedOpen || (searchTerm !== "" && filteredPaused.length > 0)
 
   const employerGroups = useMemo(() => {
     const byCompany = new Map<string, EmployerPickOption[]>()
@@ -280,6 +289,7 @@ function SelectionFormModal({
     setStream(next)
     setSelectedIds(new Set())
     setSelectedEmployerTokens(new Set())
+    setCandidateSearch("")
   }
 
   function toggleCandidate(id: string) {
@@ -335,8 +345,13 @@ function SelectionFormModal({
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div className="flex min-h-full items-center justify-center p-4">
-        <div role="dialog" aria-modal="true" aria-labelledby="selection-form-title" className="relative w-full max-w-lg rounded-2xl border bg-card shadow-xl">
-          <div className="flex items-center justify-between border-b px-6 py-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="selection-form-title"
+          className={`relative flex w-full flex-col rounded-2xl border bg-card shadow-xl ${status === "success" ? "max-w-lg" : "h-[90vh] max-w-6xl"}`}
+        >
+          <div className="flex shrink-0 items-center justify-between border-b px-6 py-4">
             <h2 id="selection-form-title" className="text-base font-semibold text-card-foreground">
               {selection ? "Редактирование подборки" : "Новая подборка"}
             </h2>
@@ -356,7 +371,7 @@ function SelectionFormModal({
               </button>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5">
+            <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-5">
               <div className="space-y-5">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
@@ -419,11 +434,21 @@ function SelectionFormModal({
 
                     <div className="space-y-1.5">
                       <p className="text-xs font-medium text-muted-foreground">Кандидаты ({selectedIds.size})</p>
+                      <input
+                        type="text"
+                        value={candidateSearch}
+                        onChange={(e) => setCandidateSearch(e.target.value)}
+                        placeholder="Поиск по ФИО…"
+                        className="w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+
                       {eligible.length === 0 ? (
                         <p className="text-sm text-muted-foreground">Нет подходящих кандидатов — активных, с уже наступившей датой «Активен с», по стриму «{stream}».</p>
+                      ) : filteredEligible.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Совпадений по «{candidateSearch.trim()}» не найдено.</p>
                       ) : (
-                        <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                          {eligible.map((c) => (
+                        <div className="max-h-[32vh] overflow-y-auto rounded-lg border divide-y">
+                          {filteredEligible.map((c) => (
                             <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
                           ))}
                         </div>
@@ -433,15 +458,19 @@ function SelectionFormModal({
                     {paused.length > 0 && (
                       <div className="space-y-1.5">
                         <button type="button" onClick={() => setPausedOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
-                          {pausedOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                          {pausedOpen ? "Скрыть кандидатов на паузе" : `Кандидаты на паузе, дата не наступила (${paused.length})`}
+                          {pausedVisible ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                          {pausedVisible ? "Скрыть кандидатов на паузе" : `Кандидаты на паузе, дата не наступила (${paused.length})`}
                         </button>
-                        {pausedOpen && (
-                          <div className="max-h-64 overflow-y-auto rounded-lg border divide-y">
-                            {paused.map((c) => (
-                              <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
-                            ))}
-                          </div>
+                        {pausedVisible && (
+                          filteredPaused.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">Совпадений по «{candidateSearch.trim()}» не найдено.</p>
+                          ) : (
+                            <div className="max-h-[32vh] overflow-y-auto rounded-lg border divide-y">
+                              {filteredPaused.map((c) => (
+                                <CandidateRow key={c.id} candidate={c} checked={selectedIds.has(c.id)} onToggle={() => toggleCandidate(c.id)} />
+                              ))}
+                            </div>
+                          )
                         )}
                       </div>
                     )}
