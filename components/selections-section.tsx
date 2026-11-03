@@ -353,6 +353,9 @@ function SelectionFormModal({
   }
 
   const canSubmit = Boolean(stream.trim() && date.trim() && selectedIds.size > 0)
+  // Ничего выбирать, пока не выбран стрим, — незачем открывать модалку сразу во весь экран.
+  // Как только стрим выбран, появляется всё остальное (состав), и диалог расширяется под него.
+  const compact = status === "success" || !stream
 
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -362,7 +365,7 @@ function SelectionFormModal({
           role="dialog"
           aria-modal="true"
           aria-labelledby="selection-form-title"
-          className={`relative flex w-full flex-col rounded-2xl border bg-card shadow-xl ${status === "success" ? "max-w-lg" : "h-[90vh] max-w-[95vw]"}`}
+          className={`relative flex w-full flex-col overflow-hidden rounded-2xl border bg-card shadow-xl transition-[max-width,height] duration-300 ease-out ${compact ? "max-w-lg" : "h-[90vh] max-w-[95vw]"}`}
         >
           <div className="flex shrink-0 items-center justify-between border-b px-6 py-4">
             <h2 id="selection-form-title" className="text-base font-semibold text-card-foreground">
@@ -511,22 +514,24 @@ function SelectionFormModal({
                 )}
               </div>
 
-              <div className="shrink-0 border-t px-6 py-4">
-                {status === "error" && (
-                  <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
-                    <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
-                    <p className="text-sm font-medium text-destructive">{errorMsg}</p>
-                  </div>
-                )}
+              {stream && (
+                <div className="shrink-0 border-t px-6 py-4">
+                  {status === "error" && (
+                    <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
+                      <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+                      <p className="text-sm font-medium text-destructive">{errorMsg}</p>
+                    </div>
+                  )}
 
-                <button
-                  type="submit"
-                  disabled={status === "submitting" || !canSubmit}
-                  className="mx-auto block w-full max-w-md rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {status === "submitting" ? "Сохраняем…" : "Сохранить"}
-                </button>
-              </div>
+                  <button
+                    type="submit"
+                    disabled={status === "submitting" || !canSubmit}
+                    className="mx-auto block w-full max-w-md rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {status === "submitting" ? "Сохраняем…" : "Сохранить"}
+                  </button>
+                </div>
+              )}
             </form>
           )}
         </div>
