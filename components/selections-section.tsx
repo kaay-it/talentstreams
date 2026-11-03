@@ -371,8 +371,8 @@ function SelectionFormModal({
               </button>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-5">
-              <div className="space-y-5">
+            <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="block text-sm font-medium text-card-foreground">
@@ -484,20 +484,22 @@ function SelectionFormModal({
                 )}
               </div>
 
-              {status === "error" && (
-                <div className="mt-5 flex items-start gap-2.5 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
-                  <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
-                  <p className="text-sm font-medium text-destructive">{errorMsg}</p>
-                </div>
-              )}
+              <div className="shrink-0 border-t px-6 py-4">
+                {status === "error" && (
+                  <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
+                    <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+                    <p className="text-sm font-medium text-destructive">{errorMsg}</p>
+                  </div>
+                )}
 
-              <button
-                type="submit"
-                disabled={status === "submitting" || !canSubmit}
-                className="mx-auto mt-5 block w-full max-w-md rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {status === "submitting" ? "Сохраняем…" : "Сохранить"}
-              </button>
+                <button
+                  type="submit"
+                  disabled={status === "submitting" || !canSubmit}
+                  className="mx-auto block w-full max-w-md rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {status === "submitting" ? "Сохраняем…" : "Сохранить"}
+                </button>
+              </div>
             </form>
           )}
         </div>
