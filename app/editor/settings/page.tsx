@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation"
 import { isSheetsConfigured } from "@/lib/sheets"
 import { ImportCandidatesButton } from "@/components/import-candidates-button"
+import { CandidateDigestSection } from "@/components/candidate-digest-section"
+import { getCandidateDigestSettings, getCandidateDigestRuns } from "@/app/actions"
 
 export const dynamic = "force-dynamic"
 
@@ -15,6 +17,8 @@ export default async function SettingsPage({
   if (editorSecret && secret !== editorSecret) {
     notFound()
   }
+
+  const [digestSettings, digestRuns] = await Promise.all([getCandidateDigestSettings(), getCandidateDigestRuns()])
 
   return (
     <div className="px-6 py-8">
@@ -35,6 +39,16 @@ export default async function SettingsPage({
         ) : (
           <p className="text-sm text-muted-foreground">Google Sheets не настроен в этом окружении.</p>
         )}
+      </div>
+
+      <div className="mt-10 space-y-3">
+        <h2 className="text-sm font-semibold text-card-foreground">Ежемесячный дайджест кандидатам</h2>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          «Сколько работодателей увидели ваше резюме» — письмо всем подтверждённым кандидатам
+          с email. Плановая отправка — первый понедельник каждого месяца, если включена ниже;
+          «Отправить сейчас» запускает её вне расписания.
+        </p>
+        <CandidateDigestSection initialAutoSendEnabled={digestSettings.autoSendEnabled} initialRuns={digestRuns} />
       </div>
     </div>
   )

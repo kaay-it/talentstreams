@@ -10,7 +10,8 @@
 - **Google Sheets** — не часть боевого пути приложения (TASK-DB-4 ✅, кандидаты переехали в Neon); `lib/sheets.ts` — опциональный канал массового ввода: менеджер заполняет таблицу вручную, кнопка в `/editor/settings` импортирует новых кандидатов в Neon (TASK-39 ✅, Service Account API v4)
 - **Neon (PostgreSQL)** — `candidates`, `contactRequests`, `streams`, `employers`, `candidateResumes`, `companies` (Drizzle ORM + neon-http driver)
 - **Vercel Blob** — приватное хранилище файлов резюме
-- **SendPulse** — email-рассылки (адресные книги, кампании, merge-теги) и Telegram-бот работодателей
+- **SendPulse** — email-рассылки (адресные книги, кампании, merge-теги), транзакционные письма кандидатам (SMTP API) и Telegram-бот работодателей
+- **Vercel Analytics** (`@vercel/analytics`) — подключена в `app/layout.tsx`, работает автоматически после деплоя на Vercel, смотреть в дашборде Vercel (вкладка Analytics)
 - **Tailwind CSS + lucide-react**
 
 ## Переменные окружения
@@ -22,8 +23,11 @@ GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
 SENDPULSE_CLIENT_ID=
 SENDPULSE_CLIENT_SECRET=
 SENDPULSE_MASTER_BOOK_NAME=Default
-SENDPULSE_FROM_EMAIL=
-SENDPULSE_FROM_NAME=TalentStreams
+SENDPULSE_EMPLOYER_FROM_EMAIL=partner@talentlabstreams.com   # рассылки работодателям (подборки)
+SENDPULSE_EMPLOYER_FROM_NAME=Talent Streams Partner
+SENDPULSE_CANDIDATE_FROM_EMAIL=career@talentlabstreams.com   # письма кандидатам (триггерное + дайджест)
+SENDPULSE_CANDIDATE_FROM_NAME=Talent Streams Career
+SENDPULSE_CANDIDATE_BOOK_NAME=Candidates                     # одна книга под приветственный Automation 360-триггер и дайджест
 SENDPULSE_TG_BOT_ID=              # Telegram-бот в SendPulse (TASK-35)
 SENDPULSE_TG_BOT_NAME=talentstreams_bot
 SENDPULSE_TG_START_FLOW_ID=       # стартовая цепочка бота
@@ -40,6 +44,7 @@ CRON_SECRET=                      # защищает /api/cron/* (Vercel Cron ш
 
 ```
 app/
+  layout.tsx                        # Корневой layout — подключает <Analytics /> (@vercel/analytics)
   actions.ts                        # ВСЕ Server Actions
   page.tsx                          # Главная: лендинг + формы регистрации
   list/[listId]/page.tsx            # Рассылка — резолвит, какую подборку показать: ?e= всегда резолвится «как у работодателя» (личная без фильтра, если есть, иначе дефолтная с фильтром), независимо от secret; secret без e — дефолтная подборка без фильтра, либо «подборка не готова», если дефолтной нет вовсе; без обоих — 404
@@ -53,29 +58,33 @@ app/
     candidates/page.tsx
     requests/page.tsx
     streams/page.tsx                # CRUD стримов (Neon)
-    settings/page.tsx             # Импорт кандидатов из Google-таблицы в Neon (TASK-39), гейтится по isSheetsConfigured()
+    settings/page.tsx             # Импорт кандидатов из Google-таблицы в Neon (TASK-39), гейтится по isSheetsConfigured(); + секция «Ежемесячный дайджест кандидатам» (CandidateDigestSection)
   api/
     publish/[listId]/route.ts       # curl-запуск рассылки
     upload/route.ts                 # POST: загрузка резюме → Vercel Blob
     resume/route.ts                 # GET: прокси приватных blob-файлов
     cron/cleanup-adhoc-books/route.ts # Ежедневный Vercel Cron (vercel.json): удаляет одноразовые SendPulse-книги ограниченных рассылок — после реальной отправки, после удаления выпуска из редактора, либо после долгого простоя без отправки (TASK-43)
+    cron/candidate-monthly-digest/route.ts # Еженедельный Vercel Cron (каждый понедельник), сам себя гасит, если не первый понедельник месяца или если автодайджест выключен в /editor/settings; вызывает runCandidateDigest("cron") из app/actions.ts напрямую (server-to-server импорт экспорта из "use server"-файла — не RPC, ограничение не действует)
 
 lib/
   sheets.ts                         # Google Sheets: типы, чтение, запись — не часть боевого пути приложения; читается только lib/sheets-import.ts (TASK-39)
   sheets-import.ts                  # Импорт кандидатов из Google-таблицы в Neon (TASK-39): общая categorize() + превью/реальный импорт
-  sendpulse.ts                      # SendPulse: OAuth, книги, кампании
+  sendpulse.ts                      # SendPulse: OAuth, книги, кампании; sendTransactionalEmail() — одно письмо через SMTP API (POST /smtp/emails), best-effort, никогда не бросает — используется только для триггерного письма кандидату (submitContactRequest в app/actions.ts), не для дайджеста (см. mailing-lists.ts/candidate-digest.ts — политика SendPulse не допускает периодическую рассылку через транзакционный канал)
+  email-templates.ts                # Общая HTML-обёртка писем кандидату (тёмная шапка, текстовый wordmark «Talent/Streams», без CTA-кнопок) + buildConsentRequestEmailHtml(company) (триггерное письмо, только company, никогда employer.name/контакты) + buildDigestEmailHtml() (дайджест, литеральный мердж-тег {{digest_count}}, не JS-переменная)
   i18n/                             # Словари RU/EN для главной страницы (не для редактора)
     home.ts / candidate-form.ts / employer-form.ts
   db/
     index.ts                        # Drizzle клиент (neon-http)
-    schema.ts                       # Схемы: candidates, contactRequests, streams, employers, candidateResumes, companies
-    candidates.ts                   # CRUD кандидатов (TASK-DB-4); объединяет бывшие Profile+Candidate (lib/sheets.ts) в один тип
+    schema.ts                       # Схемы: candidates, contactRequests, streams, employers, candidateResumes, companies, settings, candidateDigestRuns
+    settings.ts                     # Генеричный key-value доступ к таблице settings (GENERATED BY DEFAULT AS IDENTITY PK) — getSetting/setSetting/getBooleanSetting, задел под любые будущие тумблеры/настройки, не точечная таблица на каждую
+    candidate-digest.ts             # Настройки автодайджеста (тумблер в settings) + история запусков (candidateDigestRuns) — только БД, SendPulse-оркестрация живёт в app/actions.ts (runCandidateDigest)
+    candidates.ts                   # CRUD кандидатов (TASK-DB-4); объединяет бывшие Profile+Candidate (lib/sheets.ts) в один тип; getConfirmedCandidates() — статус «Активный» ИЛИ «Не публиковать» (в отличие от getActiveCandidates(), строго «Активный»), нужен книге/дайджесту кандидатов — «Не публиковать» (TASK-05, авто-пауза после 3-й отправки) не отказ, кандидат остаётся в книге SendPulse и дайджесте
     contact-requests.ts             # CRUD запросов (FK на candidates/employers/streams)
     streams.ts                      # CRUD стримов
     employers.ts                    # CRUD работодателей (TASK-DB-3); employer.company — резолвленное имя через join на companies
     companies.ts                    # CRUD компаний, поиск для автодополнения, find-or-create (TASK-36)
     resumes.ts                      # История версий резюме кандидата (TASK-32), FK на candidates (ON DELETE CASCADE)
-    mailing-lists.ts                # CRUD выпусков (TASK-DB-5; заголовочная таблица mailingLists + sentCampaignId, TASK-40 ✅); campaignNameFor() — имя кампании SendPulse, живёт здесь (не app/actions.ts, "use server" требует async от каждого экспорта); replaceMailingListRecipients() — полная замена узкой аудитории существующего выпуска (TASK-41 ✅); getMailingListCleanupStatuses(listIds) — пакетный sentCampaignId/targetDate по id для крон-очистки одноразовых книг (TASK-43 ✅). «Подборка» (selections/selectionEntries/selectionEmployers, TASK-44 ✅) — пул, не дочерняя сущность выпуска, со своей датой (targetDate — «стрим, потом дата, потом состав», как раньше у выпуска, редактируется отдельно от даты выпуска, в который подборку в итоге заберут): getSelectionsForStream(streamId)/getAllSelections() отдают подборки стрима/всех стримов разом (пул + присоединённые к любому выпуску, по полю listId: null|string, с именем стрима у getAllSelections()); createSelection(streamId, date, ...)/updateSelection(selectionId, date, ...)/deleteSelection() — CRUD пула; attachSelectionsToMailingList(listId, ids)/detachSelection(id) — единственный способ подборке получить/потерять listId. getMailingList(listId) — дефолтная + ограниченные, но только ПРИСОЕДИНЁННЫЕ к этому listId; resolveMailingListForEmployer()/getAllSelectionCandidateIds()/getEmployersWithoutSelection() — резолюция «что увидит работодатель»/объединение по рассылке/проверка покрытия перед отправкой, все работают с присоединённым набором
+    mailing-lists.ts                # CRUD выпусков (TASK-DB-5; заголовочная таблица mailingLists + sentCampaignId, TASK-40 ✅); campaignNameFor() — имя кампании SendPulse, живёт здесь (не app/actions.ts, "use server" требует async от каждого экспорта); replaceMailingListRecipients() — полная замена узкой аудитории существующего выпуска (TASK-41 ✅); getMailingListCleanupStatuses(listIds) — пакетный sentCampaignId/targetDate по id для крон-очистки одноразовых книг (TASK-43 ✅). «Подборка» (selections/selectionEntries/selectionEmployers, TASK-44 ✅) — пул, не дочерняя сущность выпуска, со своей датой (targetDate — «стрим, потом дата, потом состав», как раньше у выпуска, редактируется отдельно от даты выпуска, в который подборку в итоге заберут): getSelectionsForStream(streamId)/getAllSelections() отдают подборки стрима/всех стримов разом (пул + присоединённые к любому выпуску, по полю listId: null|string, с именем стрима у getAllSelections()); createSelection(streamId, date, ...)/updateSelection(selectionId, date, ...)/deleteSelection() — CRUD пула; attachSelectionsToMailingList(listId, ids)/detachSelection(id) — единственный способ подборке получить/потерять listId. getMailingList(listId) — дефолтная + ограниченные, но только ПРИСОЕДИНЁННЫЕ к этому listId; resolveMailingListForEmployer()/getAllSelectionCandidateIds()/getEmployersWithoutSelection() — резолюция «что увидит работодатель»/объединение по рассылке/проверка покрытия перед отправкой, все работают с присоединённым набором. getCandidateExposureCounts() — для дайджеста кандидатам: по каждому кандидату считает множество токенов работодателей, реально его увидевших (та же резолюция, что /list/[listId], прогнанная по всем отправленным рассылкам и их аудиториям разом; попадание засчитывается один раз даже при нескольких рассылках)
     migrations/                     # SQL-миграции
 
 components/
@@ -103,6 +112,7 @@ components/
   profile-view.tsx                  # Карточка профиля кандидата, флаг `isEditor` переключает полный/анонимизированный рендер (имя/контакты/резюме — реальные значения в анонимном режиме не попадают в JSX вовсе, не просто CSS-блюр); `summary`, роли и уровень — исключение, видны в обоих режимах (не идентифицируют кандидата, та же логика, что уже на анонимной карточке подборки). `title` (роли через " / ") сплитуется на отдельные пилюли, не единой строкой — та же логика, что в `candidate-entry-card.tsx`; `level` рядом — тоже пилюля (раньше не отображался на этой странице вовсе)
   campaign-history.tsx              # История отправленных кампаний на странице выпусков
   import-candidates-button.tsx      # Кнопка на /editor/settings: проверить таблицу → превью → подтвердить импорт (TASK-39)
+  candidate-digest-section.tsx      # Секция на /editor/settings: тумблер автодайджеста + «Отправить сейчас» (confirm) + таблица истории запусков (runCandidateDigest)
   candidate-entry-card.tsx          # Карточка кандидата в подборке — общая для /list/[listId] («Хочу связаться» активна) и /selection/[selectionId] (showContactButton=false, просто осмотр содержимого). `title` (роли через " / ") сплитуется на отдельные пилюли — менеджер вводит несколько ролей одной строкой, раньше показывались единым текстом
   release-create-modal.tsx          # Модалка создания выпуска — чистый пикер (TASK-44 ✅): переключатель «Все подписчики стрима»/«Выбранные получатели» (кому физически уйдёт письмо, TASK-40) + чекбокс-список уже подготовленных подборок стрима (SelectionPickerRow — бейдж, число кандидатов, ссылка «Просмотреть →»), без создания/правки состава на месте. RosterTable (всегда видимая таблица «кому что попадёт», подсвечивает недостающих) и SelectionPickerRow экспортируются, переиспользуются release-detail-modal.tsx
   release-detail-modal.tsx          # Одна модалка на два режима через readOnly: редактирование неотправленного выпуска (дата/узкая аудитория письма/выбор подборок — состав подборок не редактируется, только в /editor/selections) или просмотр отправленного (TASK-41, переписан под TASK-44 ✅). Доступные+присоединённые подборки стрима грузятся через getSelectionsForStream(stream) в режиме редактирования, полная резолюция через getMailingListDetail(listId) в readOnly
@@ -112,6 +122,8 @@ docs/
   manager-playbook.adoc             # Инструкция для нетехнического менеджера: кандидаты/работодатели/подборки/рассылка
   workspace.dsl                     # C4-архитектура (Structurizr)
   editor-stream-flow.puml           # Sequence-диаграмма жизненного цикла
+  welcome-email-template.html       # Шаблон приветственного письма работодателю (TASK-10) — загружается вручную в SendPulse Automation 360
+  welcome-email-template-candidate.html # Шаблон приветственного письма кандидату — тот же стиль, загружается вручную в SendPulse Automation 360 по триггеру «контакт добавлен в книгу „Candidates“» (см. «Email-уведомления кандидату» ниже)
 
 public/
   telegram-notify-v8.png            # Картинка для Telegram-уведомления о выпуске (TASK-35 часть 2) — 640×180, сплошная заливка #007e80 + белая молния 150×150 (крупнее, чем в первой версии этой же пропорции, там была 100×100). Пользователь вернулся к этому соотношению сторон после экспериментов с каноническим Open Graph 1.91:1 (v5–v7) — на реальном устройстве 640×180 подтверждён чистым (без полос), несмотря на то что формально не совпадает с OG-стандартом. SendPulse шлёт это как is_external_attachment: true (Telegram рендерит как карточку превью ссылки) — имя версионировано намеренно: Telegram кэширует внешнее фото по точному URL (подтверждено тестом) — при следующей правке картинки увеличивать суффикс (-v9…), не перезаписывать файл на том же имени
@@ -153,6 +165,18 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 - **Токен бота — наш** (создан через @BotFather, вставлен в SendPulse, не наоборот) — при желании можно перейти на self-hosted бота без потери подписчиков (см. `docs/backlog.adoc`)
 - `employers.telegramId` (Neon) — Telegram user id, синхронизируется при каждой загрузке `/editor/employers` из ответа SendPulse (пишется при подключении, чистится, если SendPulse контакт больше не находит); задел на случай перехода на self-hosted бота — этот id адресуется напрямую через Telegram Bot API, независимо от SendPulse
 - Та же синхронизация поправляет и `employers.telegram` (@username) на реальный подключённый аккаунт — работодатель вписывает его вручную при регистрации, но может открыть ссылку-приглашение с другого Telegram-аккаунта; обновляется только при реальном совпадении (никогда не затирается в пустую строку)
+
+### Email-уведомления кандидату
+
+Три письма кандидату, два разных механизма — выбор механизма определяется политикой SendPulse (транзакционный SMTP-канал — только для писем по конкретному разовому событию, не для периодических bulk-рассылок всем разом):
+
+- **Триггерное письмо согласия** — уходит сразу, как только работодатель нажимает «Хочу связаться» (`submitContactRequest()` → `sendTransactionalEmail()`, `lib/sendpulse.ts`, SMTP API). Только кандидатам с email. Содержит **только** `employer.company` — никогда `employer.name`/email/телефон. Просит подтвердить согласие **ответом на письмо** (не кнопкой — у пользователя уже проверено, что так выше конверсия в согласие); дальше работодатель получает контакты и общается с кандидатом напрямую. Сбор и обработка ответов кандидатов — осознанно не реализованы в этой итерации.
+- **Приветственное письмо при подтверждении** (`approveCandidate()`) — как и у работодателя (TASK-10): код приложения не шлёт HTML, только добавляет кандидата в адресную книгу SendPulse «Candidates» (`SENDPULSE_CANDIDATE_BOOK_NAME`); сама отправка — Automation 360-флоу «контакт добавлен в книгу», настраивается вручную в интерфейсе SendPulse по шаблону `docs/welcome-email-template-candidate.html`.
+- **Ежемесячный дайджест** («сколько работодателей увидели ваше резюме») — **книга + кампания + мердж-тег**, не транзакционный цикл: периодическая рассылка всем подтверждённым кандидатам разом — по сути bulk-механика, даже при персональном содержимом (число работодателей у каждого своё). `runCandidateDigest()` (`app/actions.ts`) при каждом запуске реконсилирует книгу «Candidates» (убирает тех, кто больше не подходит, добавляет/обновляет остальных с переменной `digest_count`), затем создаёт одну кампанию с мердж-тегом `{{digest_count}}` в теме и теле (`buildDigestEmailHtml()`, `lib/email-templates.ts`). Число — реальный подсчёт через `getCandidateExposureCounts()` (`lib/db/mailing-lists.ts`), но если меньше 8 — случайное 8–16. «Показан работодателю» = кандидат попал в подборку, которую этот работодатель реально увидел (та же резолюция, что `/list/[listId]`), один раз на работодателя, даже при нескольких рассылках.
+- **Одна книга «Candidates» на оба механизма** (приветственный триггер + дайджест), не две раздельные. Риск ложного приветственного письма всем существующим кандидатам при первой же реконсиляции дайджеста снимается **порядком действий**, не архитектурой — книгу сначала наполняют первым прогоном дайджеста, потом включают Automation 360 в SendPulse (см. `docs/welcome-email-template-candidate.html` и шаги в PR/бэклоге).
+- **Отклонение/удаление кандидата** (`rejectCandidate()`/`deleteCandidate()`) убирает его из книги «Candidates» — симметрично `removeEmployerFromSendPulse()`. **Статус «Не публиковать»** (TASK-05, авто-пауза после 3-й отправки) — технический, не отказ: кандидат остаётся в книге и в дайджесте (`getConfirmedCandidates()`, `lib/db/candidates.ts`, статус «Активный» ИЛИ «Не публиковать»).
+- **Отправитель** — `career@talentlabstreams.com` (`SENDPULSE_CANDIDATE_FROM_EMAIL`/`_NAME`) для обоих писем кандидату; рассылки работодателям — `partner@talentlabstreams.com` (`SENDPULSE_EMPLOYER_FROM_EMAIL`/`_NAME`); `hello@` — только приветственное письмо работодателю (TASK-10, не трогается кодом). DKIM настроен на уровне домена, по ящикам — только регистрация имени отправителя в SendPulse (Settings → Senders).
+- `/editor/settings` — секция «Ежемесячный дайджест кандидатам» (`CandidateDigestSection`): тумблер автоматической плановой отправки (крон, первый понедельник месяца), кнопка «Отправить сейчас» вне расписания, история запусков (`candidateDigestRuns`).
 
 ### Server Actions
 Все мутации — в `app/actions.ts`. После мутации, меняющей UI редактора, вызывать `revalidatePath(...)`.
@@ -204,12 +228,14 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 | Редактирование неотправленного выпуска (дата/кандидаты/получатели) + просмотр отправленного в рид-онли режиме («кому мы это направляем») | ✅ TASK-41 |
 | Ретрай гонки индексации при отправке ограниченной рассылки (`error_code 798`) + ежедневный крон-очистка одноразовых SendPulse-книг после модерации | ✅ TASK-43 |
 | Подборки — отдельный раздел редактора (видны все сразу, фильтр по стриму опционален), готовятся заранее со своей датой (общая/ограниченная), выпуск только выбирает их (attach/detach, не создаёт/редактирует состав); резолв по ссылке (ограниченная → дефолтная → «не готова»), всегда видимый ростер «кому что попадёт», подтверждение перед отправкой при пробелах | ✅ TASK-44 |
+| Email-уведомления кандидату (триггерное письмо-согласие при «Хочу связаться», приветственное письмо при подтверждении через книгу SendPulse + Automation 360, ежемесячный дайджест «сколько работодателей увидели» через книгу+кампанию+мердж-тег с ручным/плановым управлением из `/editor/settings`) + Vercel Analytics | ✅ TASK-45 |
 
 ## Активные задачи (приоритет)
 
 1. **TASK-25** — гео-сегментация рассылки: ждёт решения о переходе на Unisender (исследование SendPulse завершено, все тарифы не подходят)
 2. **TASK-12** — summary кандидата в теле email-рассылки
 3. **TASK-05 (остаток)** — статус «Не публиковать» по прямой просьбе кандидата (сейчас только автоматически после 3-й отправки)
+4. **TASK-45 (ручные шаги)** — после деплоя: добавить env-переменные в Vercel, зарегистрировать `career@`/`partner@` как отправителей в SendPulse, затем **в этом порядке** — наполнить книгу «Candidates» первым запуском дайджеста, только потом включить Automation 360-флоу приветственного письма (см. `docs/backlog.adoc`, TASK-45)
 
 Полный список с деталями — `docs/backlog.adoc`.
 

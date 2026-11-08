@@ -183,6 +183,13 @@
       "when": 1793721745424,
       "tag": "0025_opposite_sugar_man",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794128235953,
+      "tag": "0026_giant_exodus",
+      "breakpoints": true
     }
   ]
 }

@@ -450,3 +450,59 @@ export async function sendTelegramToEmployer(
     return false
   }
 }
+
+// ── Transactional email ─────────────────────────────────────────────────────────
+
+/**
+ * Sends a single transactional email via SendPulse's SMTP API — for event-triggered,
+ * per-recipient email (the candidate consent-request letter in app/actions.ts
+ * submitContactRequest()), not for periodic/bulk sends. SendPulse's transactional channel is
+ * meant for mail tied to one specific user event, not recurring campaigns — the monthly
+ * candidate digest deliberately does NOT use this, it goes through an address book + campaign
+ * instead (see runCandidateDigest() in app/actions.ts).
+ *
+ * `from` is an explicit parameter, not read from env here — there are two distinct senders in
+ * this app (employer-facing, candidate-facing) and this function shouldn't decide which one a
+ * given call needs.
+ *
+ * POST /smtp/emails requires `html` Base64-encoded (confirmed against SendPulse's own OpenAPI
+ * spec, api.sendpulse.com/.well-known/openapi/smtp.yaml, operationId sendSmtpEmail) — `text`
+ * would not need this, but every candidate-facing email in this app is HTML (minimal, see
+ * lib/email-templates.ts). `auto_plain_text: true` has SendPulse generate the plain-text part
+ * itself, so a second copy of the content doesn't need to be written by hand.
+ *
+ * Best-effort: never throws, returns false and logs on any failure — a candidate not getting
+ * this email must never block or roll back the action that triggered it.
+ */
+export async function sendTransactionalEmail(
+  to: { email: string; name?: string },
+  subject: string,
+  html: string,
+  from: { email: string; name: string },
+): Promise<boolean> {
+  try {
+    const token = await getToken()
+    if (!token) return false
+    const payload = JSON.stringify({
+      email: {
+        subject,
+        from,
+        to: [to],
+        html: Buffer.from(html, "utf-8").toString("base64"),
+        auto_plain_text: true,
+      },
+    })
+    const res = await spPost(
+      `${API}/smtp/emails`,
+      { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      payload,
+    )
+    const ok = res.status >= 200 && res.status < 300
+    if (ok) console.log(`[SendPulse] smtp send status=${res.status}`)
+    else console.warn(`[SendPulse] smtp send status=${res.status}`, res.text)
+    return ok
+  } catch (err) {
+    console.error("[SendPulse] sendTransactionalEmail failed:", err)
+    return false
+  }
+}
