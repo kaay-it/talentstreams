@@ -6,12 +6,13 @@ function escapeHtml(s: string): string {
 
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif"
 
-/** Shared minimal wrapper for every candidate-facing email (consent-request, monthly digest) —
- * dark header with the "Talent/Streams" text wordmark (same treatment as
- * docs/welcome-email-template.html; no separate logo image file exists in this project), a white
- * card for the body, a bare footer. No CTA buttons, no colored badges — these letters are meant
- * to read like a short personal note, not a marketing email (decided with the user). */
-export function buildCandidateEmailHtml(bodyHtml: string): string {
+/** Shared minimal wrapper for every transactional email the app sends (candidate consent-request/
+ * digest, employer release follow-ups) — dark header with the "Talent/Streams" text wordmark
+ * (same treatment as docs/welcome-email-template.html; no separate logo image file exists in
+ * this project), a white card for the body, a bare footer. No CTA buttons, no colored badges —
+ * these letters are meant to read like a short personal note, not a marketing email (decided
+ * with the user). */
+export function buildEmailHtml(bodyHtml: string): string {
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -72,7 +73,7 @@ export function buildConsentRequestEmailHtml(company: string): string {
       С уважением,<br>команда TalentStreams
     </p>
   `
-  return buildCandidateEmailHtml(body)
+  return buildEmailHtml(body)
 }
 
 /** Monthly digest body — one static HTML sent as a single SendPulse campaign to every eligible
@@ -98,5 +99,57 @@ export function buildDigestEmailHtml(): string {
     </p>
     <p style="margin:0;font-size:14px;color:#374151;line-height:1.65">Желаем вам интересных предложений!</p>
   `
-  return buildCandidateEmailHtml(body)
+  return buildEmailHtml(body)
+}
+
+/** Follow-up to an employer who opened a release's email but never submitted a contact request
+ * for any candidate — sent by runReleaseFollowUps() (app/actions.ts). Static text, no merge
+ * tags/interpolation — exact copy given by the user, same for every recipient. */
+export function buildFollowUpFeedbackEmailHtml(): string {
+  const body = `
+    <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.65">Уважаемый коллега, добрый день!</p>
+    <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.65">Спасибо, что пользуетесь TalentStreams.</p>
+    <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.65">
+      Мы надеемся, что наши подборки кандидатов вам полезны. Но нам важно, чтобы они не просто приходили, а действительно работали на задачи вашего бизнеса.
+    </p>
+    <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.65">
+      Поэтому, если кандидаты в рассылке не совсем те, кого вы ищете, пожалуйста, расскажите нам об этом в ответном письме. Уточните ваш запрос: возможно, вам нужен другой опыт, знание определённых языков или иные специализации. Мы учтём это в следующих подборках.
+    </p>
+    <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.65">
+      Так же важно для нас и ваше мнение о самом сервисе. Если что-то в нём кажется неудобным или чего-то не хватает — напишите, и мы постараемся это улучшить.
+    </p>
+    <p style="margin:0;font-size:14px;color:#374151;line-height:1.65">
+      Будем рады вашей обратной связи!<br>С уважением,<br>команда TalentStreams
+    </p>
+  `
+  return buildEmailHtml(body)
+}
+
+/** Follow-up to an employer who never opened a release's email at all (per SendPulse's
+ * per-recipient campaign open status) — sent by runReleaseFollowUps() (app/actions.ts).
+ * Personalized per employer/release: name, stream name, and the same personal link
+ * (`/list/[listId]?e=token`) the original campaign already used for both "view it" and
+ * "leave a request" — the subscription page serves both purposes on one page, there's no
+ * second, different link to point to. */
+export function buildFollowUpReminderEmailHtml(params: { employerName: string; streamName: string; listUrl: string }): string {
+  const name = escapeHtml(params.employerName)
+  const stream = escapeHtml(params.streamName)
+  const url = escapeHtml(params.listUrl)
+  const body = `
+    <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.65">${name}, добрый день!</p>
+    <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.65">Спасибо, что пользуетесь TalentStreams!</p>
+    <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.65">
+      На этой неделе мы отправили вам новую подборку кандидатов по стриму <strong>${stream}</strong>. Возможно, письмо затерялось среди других, поэтому напоминаем о нём: <a href="${url}" style="color:#2563eb">${url}</a>.
+    </p>
+    <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.65">
+      В подборке — руководители и специалисты, с которыми мы уже пообщались и проверили их опыт. Если кто-то из кандидатов вас заинтересует, оставьте заявку на сайте: <a href="${url}" style="color:#2563eb">${url}</a>. Мы уточним у кандидата готовность к диалогу и передадим вам его резюме с контактами.
+    </p>
+    <p style="margin:0 0 16px;font-size:14px;color:#374151;line-height:1.65">
+      Если ваш запрос изменился или поиск по этому направлению сейчас неактуален, напишите нам — мы скорректируем подборки под задачи вашего бизнеса.
+    </p>
+    <p style="margin:0;font-size:14px;color:#374151;line-height:1.65">
+      С уважением,<br>команда TalentStreams
+    </p>
+  `
+  return buildEmailHtml(body)
 }

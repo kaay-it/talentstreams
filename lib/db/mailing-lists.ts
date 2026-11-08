@@ -699,3 +699,19 @@ export async function getCandidateExposureCounts(): Promise<Map<string, number>>
   }
   return new Map([...sets].map(([id, set]) => [id, set.size]))
 }
+
+/** Who actually received a release's campaign email — narrowed recipients (TASK-40) if any,
+ * otherwise every confirmed subscriber of its stream. Deliberately does NOT resolve what
+ * content they saw (resolveMailingListForEmployer()/filterCandidatesForEmployer() above) —
+ * used by runReleaseFollowUps() (app/actions.ts), which only cares who got the email, not what
+ * was in it. `allEmployers` lets a caller iterating many releases pass an already-fetched list
+ * instead of this re-querying it on every call. */
+export async function getReleaseAudience(listId: string, stream: string, allEmployers?: Employer[]): Promise<Employer[]> {
+  const employers = allEmployers ?? (await getEmployers())
+  const recipientTokens = await getMailingListRecipientTokens(listId)
+  if (recipientTokens.length) {
+    const tokenSet = new Set(recipientTokens)
+    return employers.filter((e) => tokenSet.has(e.token))
+  }
+  return confirmedEmployersForStream(employers, { name: stream })
+}

@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, bigint, text, timestamp, date } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, bigint, text, timestamp, date, unique } from "drizzle-orm/pg-core"
 
 export const streams = pgTable("streams", {
   id:          serial("id").primaryKey(),
@@ -183,4 +183,31 @@ export const candidateDigestRuns = pgTable("candidateDigestRuns", {
   candidatesPrepared: integer("candidatesPrepared").notNull(),
   candidatesFailed:   integer("candidatesFailed").notNull(),
   campaignId:         integer("campaignId"), // null = campaign was never created (0 prepared, or an error)
+})
+
+// One row per (release, employer) the follow-up job (runReleaseFollowUps(), app/actions.ts) has
+// ever evaluated — the de-dup record that stops a daily cron from re-messaging the same employer
+// about the same release on every subsequent run. outcome records what was decided, not just
+// whether something was sent: "skipped" (opened AND already submitted a request — no follow-up
+// needed) is recorded same as "feedback"/"reminder", so a positive outcome is also remembered
+// and never re-evaluated. unique(listId, employerToken): at most one verdict per pair, ever.
+export const releaseFollowUps = pgTable("releaseFollowUps", {
+  id:            bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  listId:        text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
+  employerToken: text("employerToken").notNull().references(() => employers.token, { onDelete: "cascade" }),
+  outcome:       text("outcome").notNull(), // "feedback" | "reminder" | "skipped"
+  sentAt:        timestamp("sentAt").defaultNow().notNull(),
+}, (t) => [unique().on(t.listId, t.employerToken)])
+
+// One row per release-follow-up job run (cron or manual, see app/actions.ts runReleaseFollowUps())
+// — history shown in /editor/settings, same pattern as candidateDigestRuns above.
+export const releaseFollowUpRuns = pgTable("releaseFollowUpRuns", {
+  id:               bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  startedAt:        timestamp("startedAt").defaultNow().notNull(),
+  triggeredBy:      text("triggeredBy").notNull(), // "cron" | "manual"
+  releasesChecked:  integer("releasesChecked").notNull(),
+  employersEvaluated: integer("employersEvaluated").notNull(),
+  feedbackSent:     integer("feedbackSent").notNull(),
+  reminderSent:     integer("reminderSent").notNull(),
+  failed:           integer("failed").notNull(),
 })

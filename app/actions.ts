@@ -14,9 +14,10 @@ import {
   updateSelection as updateSelectionRows,
   deleteSelection as deleteSelectionRows,
   detachSelection as detachSelectionRows,
+  getReleaseAudience,
   campaignNameFor, isoToRu,
 } from "@/lib/db/mailing-lists"
-import { appendContactRequest, updateContactRequestStatus, type ContactRequestStatus } from "@/lib/db/contact-requests"
+import { appendContactRequest, updateContactRequestStatus, getEmployerTokensWithRequestForList, type ContactRequestStatus } from "@/lib/db/contact-requests"
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
@@ -29,12 +30,22 @@ import {
   recordCandidateDigestRun,
   type DigestRun,
 } from "@/lib/db/candidate-digest"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, enableTelegramContact, disableTelegramContact, deleteTelegramContact, sendTransactionalEmail } from "@/lib/sendpulse"
-import { buildConsentRequestEmailHtml, buildDigestEmailHtml } from "@/lib/email-templates"
+import {
+  getReleaseFollowUpSettings as getReleaseFollowUpSettingsDb,
+  setReleaseFollowUpAutoSend as setReleaseFollowUpAutoSendDb,
+  getReleaseFollowUpRuns as getReleaseFollowUpRunsDb,
+  recordReleaseFollowUpRun,
+  getEvaluatedFollowUpKeys,
+  recordFollowUpOutcome,
+  type FollowUpRun,
+} from "@/lib/db/release-follow-ups"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, enableTelegramContact, disableTelegramContact, deleteTelegramContact, sendTransactionalEmail, getCampaignSendDate, getCampaignEmailStatus } from "@/lib/sendpulse"
+import { buildConsentRequestEmailHtml, buildDigestEmailHtml, buildFollowUpFeedbackEmailHtml, buildFollowUpReminderEmailHtml } from "@/lib/email-templates"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 import { previewCandidatesImport as previewImport, importCandidatesFromSheet, type ImportPreview, type ImportResult } from "@/lib/sheets-import"
 export type { ImportPreview, ImportResult, ImportRow, ImportSkipped } from "@/lib/sheets-import"
 export type { DigestRun } from "@/lib/db/candidate-digest"
+export type { FollowUpRun } from "@/lib/db/release-follow-ups"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
 
@@ -1537,4 +1548,138 @@ export async function getCandidateDigestRuns() {
 
 export async function sendCandidateDigestNow(): Promise<DigestRun> {
   return runCandidateDigest("manual")
+}
+
+// Protects a first/late run from retroactively messaging every employer across the entire
+// historical release backlog (23+ releases going back months) the moment this feature ships or
+// resumes after being off for a while — only releases sent in roughly the last couple weeks are
+// ever in-window, which happens to also be the realistic span for "did they open it yet".
+const FOLLOW_UP_MIN_DAYS_AFTER_SEND = 3
+const FOLLOW_UP_MAX_DAYS_AFTER_SEND = 21
+
+/**
+ * Employer follow-ups after a release send — two kinds, decided per (release, employer) from
+ * SendPulse's own per-recipient open status (getCampaignEmailStatus()) and whether that employer
+ * ever submitted a contact request tied to this exact release (getEmployerTokensWithRequestForList()):
+ *   - opened, no request   -> "feedback" (static "помогите нам сделать подборки точнее" letter)
+ *   - never opened         -> "reminder" (personalized nudge back to the same release link)
+ *   - opened AND requested -> "skipped" (already engaged, no follow-up needed)
+ * Every (listId, employerToken) pair is recorded at most once, ever (releaseFollowUps' unique
+ * constraint + getEvaluatedFollowUpKeys() pre-filter) — re-running this daily never re-messages
+ * an employer it already decided about for a given release, "skipped" included. Transactional
+ * SMTP, not a book+campaign like the candidate digest — unlike the digest (same letter to
+ * everyone on a fixed calendar day), each send here is genuinely conditional on that one
+ * employer's own behavior around their own release.
+ */
+export async function runReleaseFollowUps(triggeredBy: "cron" | "manual"): Promise<FollowUpRun> {
+  const token = await getToken()
+  const [lists, allEmployers] = await Promise.all([getMailingLists(), getEmployers()])
+
+  if (!token) {
+    console.warn("[SendPulse] runReleaseFollowUps: failed to get access token")
+    return recordReleaseFollowUpRun({ triggeredBy, releasesChecked: 0, employersEvaluated: 0, feedbackSent: 0, reminderSent: 0, failed: 0 })
+  }
+
+  const qualifying: Array<{ listId: string; stream: string; sentCampaignId: number }> = []
+  for (const summary of lists.filter((l) => l.sentCampaignId !== null)) {
+    const sendDate = await getCampaignSendDate(summary.sentCampaignId!, token)
+    if (!sendDate) continue
+    const daysSinceSend = (Date.now() - sendDate.getTime()) / 86_400_000
+    if (daysSinceSend < FOLLOW_UP_MIN_DAYS_AFTER_SEND || daysSinceSend > FOLLOW_UP_MAX_DAYS_AFTER_SEND) continue
+    qualifying.push({ listId: summary.listId, stream: summary.stream, sentCampaignId: summary.sentCampaignId! })
+  }
+
+  const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
+  const employerFromEmail = process.env.SENDPULSE_EMPLOYER_FROM_EMAIL
+  const employerFromName = process.env.SENDPULSE_EMPLOYER_FROM_NAME || "Talent Streams Partner"
+
+  let employersEvaluated = 0
+  let feedbackSent = 0
+  let reminderSent = 0
+  let failed = 0
+
+  if (qualifying.length && !employerFromEmail) {
+    console.warn("[SendPulse] runReleaseFollowUps: SENDPULSE_EMPLOYER_FROM_EMAIL not set, skipping")
+  } else {
+    const alreadyEvaluated = await getEvaluatedFollowUpKeys(qualifying.map((q) => q.listId))
+
+    for (const release of qualifying) {
+      const [audience, requestedTokens] = await Promise.all([
+        getReleaseAudience(release.listId, release.stream, allEmployers),
+        getEmployerTokensWithRequestForList(release.listId),
+      ])
+
+      for (const employer of audience) {
+        if (alreadyEvaluated.has(`${release.listId}|${employer.token}`)) continue
+        employersEvaluated++
+
+        try {
+          const emailStatus = await getCampaignEmailStatus(release.sentCampaignId, employer.email, token)
+          if (!emailStatus) { failed++; continue } // unknown — leave unrecorded, retried next run
+
+          const opened = emailStatus.detailStatus >= 3 // 3 = Opened, 4 = Link redirected (implies opened)
+          const requested = requestedTokens.has(employer.token)
+
+          if (requested) {
+            // A submitted request is a stronger engagement signal than the open-tracking pixel
+            // (which misses opens when images are blocked) — an employer who already requested
+            // a candidate never gets a follow-up, opened or not; caught live in a dry run where
+            // an employer with requested=true but opened=false would otherwise have been told
+            // "вы ещё не открывали это письмо".
+            await recordFollowUpOutcome(release.listId, employer.token, "skipped")
+          } else if (opened) {
+            await sendTransactionalEmail(
+              { email: employer.email, name: employer.name },
+              "Помогите нам сделать подборки точнее",
+              buildFollowUpFeedbackEmailHtml(),
+              { email: employerFromEmail!, name: employerFromName },
+            )
+            await recordFollowUpOutcome(release.listId, employer.token, "feedback")
+            feedbackSent++
+          } else {
+            const listUrl = `${appUrl}/list/${release.listId}?e=${employer.token}`
+            await sendTransactionalEmail(
+              { email: employer.email, name: employer.name },
+              `Напоминаем о новой подборке кандидатов — ${release.stream}`,
+              buildFollowUpReminderEmailHtml({ employerName: employer.name, streamName: release.stream, listUrl }),
+              { email: employerFromEmail!, name: employerFromName },
+            )
+            await recordFollowUpOutcome(release.listId, employer.token, "reminder")
+            reminderSent++
+          }
+        } catch (err) {
+          console.error("[SendPulse] runReleaseFollowUps: failed to process employer:", employer.token, release.listId, err)
+          failed++
+        }
+      }
+    }
+  }
+
+  const run = await recordReleaseFollowUpRun({
+    triggeredBy,
+    releasesChecked: qualifying.length,
+    employersEvaluated,
+    feedbackSent,
+    reminderSent,
+    failed,
+  })
+  revalidatePath("/editor/settings")
+  return run
+}
+
+export async function getReleaseFollowUpSettings() {
+  return getReleaseFollowUpSettingsDb()
+}
+
+export async function setReleaseFollowUpAutoSend(enabled: boolean): Promise<void> {
+  await setReleaseFollowUpAutoSendDb(enabled)
+  revalidatePath("/editor/settings")
+}
+
+export async function getReleaseFollowUpRuns() {
+  return getReleaseFollowUpRunsDb()
+}
+
+export async function sendReleaseFollowUpsNow(): Promise<FollowUpRun> {
+  return runReleaseFollowUps("manual")
 }

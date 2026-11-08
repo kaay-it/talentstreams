@@ -219,6 +219,49 @@ export async function getCampaignStatus(campaignId: number, token: string): Prom
   }
 }
 
+/** A campaign's send_date from SendPulse's campaign-info endpoint ("YYYY-MM-DD HH:mm:ss", treated
+ * as UTC — exact timezone doesn't matter for the day-granularity windowing runReleaseFollowUps()
+ * uses it for). null on any failure. */
+export async function getCampaignSendDate(campaignId: number, token: string): Promise<Date | null> {
+  try {
+    const { status, text } = await spGet(`${API}/campaigns/${campaignId}`, { Authorization: `Bearer ${token}` })
+    if (status < 200 || status >= 300) {
+      console.warn(`[SendPulse] GET /campaigns/${campaignId} status=${status}`, text)
+      return null
+    }
+    const data = JSON.parse(text) as { send_date?: string }
+    if (!data.send_date) return null
+    const parsed = new Date(data.send_date.replace(" ", "T") + "Z")
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  } catch (err) {
+    console.error("[SendPulse] getCampaignSendDate failed:", err)
+    return null
+  }
+}
+
+/** Per-recipient engagement for one email in one campaign (GET /campaigns/{id}/emails/{email}) —
+ * detailStatus 3+ means the recipient opened it (3 = Opened, 4 = Link redirected implies an open
+ * too), confirmed against SendPulse's own status table. Used by runReleaseFollowUps() to decide
+ * which of the two follow-up emails (if any) an employer should get. null on any failure —
+ * callers must treat that as "unknown, skip for now" rather than assuming not-opened. */
+export async function getCampaignEmailStatus(campaignId: number, email: string, token: string): Promise<{ detailStatus: number } | null> {
+  try {
+    const { status, text } = await spGet(
+      `${API}/campaigns/${campaignId}/email/${encodeURIComponent(email)}`,
+      { Authorization: `Bearer ${token}` },
+    )
+    if (status < 200 || status >= 300) {
+      console.warn(`[SendPulse] GET /campaigns/${campaignId}/email/${email} status=${status}`, text)
+      return null
+    }
+    const data = JSON.parse(text) as { detail_status?: number }
+    return typeof data.detail_status === "number" ? { detailStatus: data.detail_status } : null
+  } catch (err) {
+    console.error("[SendPulse] getCampaignEmailStatus failed:", err)
+    return null
+  }
+}
+
 export async function getCampaigns(): Promise<Campaign[]> {
   const token = await getToken()
   if (!token) return []

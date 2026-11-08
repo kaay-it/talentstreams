@@ -78,3 +78,13 @@ export async function getContactRequests(): Promise<ContactRequest[]> {
 export async function updateContactRequestStatus(id: string, status: ContactRequestStatus): Promise<void> {
   await db.update(contactRequests).set({ status }).where(eq(contactRequests.id, id))
 }
+
+/** Every employer who submitted at least one contact request tied to this exact release —
+ * used by runReleaseFollowUps() (app/actions.ts) to tell "opened but never requested" (gets the
+ * feedback follow-up) from "opened and already engaged" (gets neither). Scoped to `listId`, not
+ * the employer's requests in general — a request from a different, earlier release doesn't
+ * count as engagement with this one. */
+export async function getEmployerTokensWithRequestForList(listId: string): Promise<Set<string>> {
+  const rows = await db.select({ employerToken: contactRequests.employerToken }).from(contactRequests).where(eq(contactRequests.listId, listId))
+  return new Set(rows.map((r) => r.employerToken))
+}
