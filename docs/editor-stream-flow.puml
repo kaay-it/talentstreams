@@ -22,7 +22,7 @@ actor       "Кандидат"              as candidate
 participant "TalentStreams\nWeb App" as app
 participant "Neon · streams"        as neonStreams  #d4f0d4
 participant "Neon · candidates"     as sh_cands    #d4f0d4
-participant "Neon · mailingListEntries" as sh_mail  #d4f0d4
+participant "Neon · mailingLists /\nselections" as sh_mail  #d4f0d4
 participant "Neon · employers"      as sh_emp      #d4f0d4
 participant "Vercel Blob\n(private)" as blob       #fff3cd
 participant "Neon · contactRequests" as neonDb     #d4f0d4
@@ -30,13 +30,17 @@ participant "Neon · candidateResumes" as neonResumes #d4f0d4
 participant "SendPulse\n(мастер-книга)" as sp_master  #fce8cc
 participant "SendPulse\n(книга стрима)" as sp_stream  #fce8cc
 participant "SendPulse\nCampaigns"  as sp_camp     #fce8cc
+participant "SendPulse\n(книга «Candidates»)" as sp_cbook #fce8cc
+participant "SendPulse\n(транзакционный SMTP)" as sp_smtp #fce8cc
+participant "Neon · releaseFollowUps" as neonFollow #d4f0d4
+participant "Neon · settings / runs" as neonAuto   #d4f0d4
 
 == 1. Редактор управляет стримами ==
 
 editor -> app : GET /editor/streams?secret=…
 app -> neonStreams : getStreamsDetailed()
 neonStreams --> app : [{ id, name, type, description, status }, …]
-app -> sh_mail : getMailingLists() + getCampaigns()\n(история рассылок на стрим, sent-пометка)
+app -> sh_mail : getMailingLists()\n(история рассылок на стрим; sent — напрямую\nsentCampaignId !== null, БЕЗ getCampaigns())
 sh_mail --> app : выпуски, сгруппированные по streamId
 app --> editor : Активные стримы — таблица с inline-редактированием\n(StreamsTable) + раскрываемая история рассылок;\nархивные — схлопнутая секция ArchivedStreamsSection
 
@@ -49,10 +53,9 @@ else Изменить стрим (имя/тип/описание)
   editor -> app : updateStream(id, { name, type, description })
   app -> neonStreams : getStreamById(id) — текущее имя для сравнения
   neonStreams --> app : { id, name, … }
-  app -> sh_mail : getMailingLists() — выпуски этого стрима
-  sh_mail --> app : список выпусков (streamId, дата)
-  app -> sp_camp : getCampaigns() — какие реально отправлены
-  sp_camp --> app : список кампаний
+  app -> sh_mail : getMailingLists()\nвсе выпуски, с sentCampaignId на каждом (TASK-40)
+  sh_mail --> app : список выпусков
+  app -> app : streamHasSentReleases(id):\nlists.some(l => l.streamId === id && l.sentCampaignId !== null)\nБЕЗ обращения к SendPulse/getCampaigns() вовсе
   alt имя не меняется, или у стрима нет отправленных рассылок
     app -> neonStreams : UPDATE streams SET … WHERE id=…\n(type/description — всегда без ограничений)
     neonStreams --> app : OK
@@ -62,10 +65,9 @@ else Изменить стрим (имя/тип/описание)
   end
 else Удалить стрим
   editor -> app : deleteStream(id)
-  app -> sh_mail : getMailingLists() — выпуски этого стрима
+  app -> sh_mail : getMailingLists()\nвсе выпуски, с sentCampaignId на каждом (TASK-40)
   sh_mail --> app : список выпусков
-  app -> sp_camp : getCampaigns()
-  sp_camp --> app : список кампаний
+  app -> app : streamHasSentReleases(id) — тот же guard, что при переименовании
   alt нет отправленных рассылок
     app -> neonStreams : DELETE FROM streams WHERE id=…
     neonStreams --> app : OK
@@ -198,6 +200,12 @@ alt Редактор одобряет кандидата
   editor -> app : approveCandidate(id)
   app -> sh_cands : updateCandidateStatus(id, "Активный", today)
   sh_cands --> app : OK
+  app -> sh_cands : getCandidateById(id)
+  sh_cands --> app : candidate
+  alt у кандидата есть email
+    app -> sp_cbook : syncCandidateToSendPulse(candidate)\nPOST /addressbooks/{Candidates}/emails\n{ email, variables: { Имя, phone, candidate_id } }
+    sp_cbook --> app : { "result": true }
+  end
   app --> editor : Страница обновлена (revalidatePath)
 else Редактор отклоняет кандидата
   editor -> app : rejectCandidate(id)
@@ -211,20 +219,27 @@ note over app, sh_cands
   о новой анкете не реализовано — отложено
 end note
 
+note over app, sp_cbook
+  TASK-45: членство в книге «Candidates» триггерит
+  приветственное письмо кандидату — Automation 360-флоу
+  «контакт добавлен в книгу», настраивается целиком в
+  интерфейсе SendPulse (docs/welcome-email-template-candidate.html),
+  код приложения HTML не шлёт, тот же паттерн, что у
+  работодателя (§3а ниже).
+end note
+
 == 2б. Редактор редактирует данные кандидата ==
 
 editor -> app : Нажимает Pencil-кнопку в строке кандидата\n(доступна для всех статусов)
-app --> editor : CandidateEditModal — форма предзаполнена\n(имя, роль, email, телефон, резюме, сопроводительное письмо,\nsummary, уровень, стримы, страна текущая/желаемая, дата активности)
+app --> editor : CandidateFormModal (TASK-33 — одна модалка на\nдобавление/редактирование через опциональный проп candidate)\nпредзаполнена — имя, роль, email, телефон, резюме, сопроводительное\nписьмо, summary, уровень, стримы, страна текущая/желаемая, дата активности
 
 app -> neonResumes : getCandidateResumeHistory(candidate.id)\n(при открытии модалки, если id не пустой)
 neonResumes --> app : версии резюме, новые сверху
 app --> editor : Под полем «Резюме» — две подгруппы:\n«Файлы (N)» и «Ссылки (N)», по kind версии
 
 app -> sh_mail : getCandidateMailingHistory(candidate.id)\n(TASK-05, видимость — тот же useEffect-паттерн,\nчто у истории резюме, параллельно с ним)
-sh_mail -> sh_mail : getMailingListsForCandidate(candidate.id)\nWHERE candidateId = ..., новые сверху
-sh_mail -> sp_camp : getCampaigns()\n(проверка, какие из этих выпусков реально отправлены)
-sp_camp --> sh_mail : список кампаний
-sh_mail --> app : [{ listId, stream, date, sent }, …]
+sh_mail -> sh_mail : getMailingListsForCandidate(candidate.id) (TASK-44)\nSELECT selectionId FROM selectionEntries WHERE candidateId = ...,\nзатем SELECT listId FROM selections WHERE id IN (...),\nзатем заголовки mailingLists (streams.name, targetDate,\nsentCampaignId) — БЕЗ обращения к SendPulse/getCampaigns() вовсе
+sh_mail --> app : [{ listId, stream, date, sent: sentCampaignId !== null }, …]\nновые сверху
 app --> editor : Под полем «Стримы» — блок «История рассылок»:\nдата · стрим · «Отправлено»/«Не отправлено», read-only
 
 note right of sh_mail
@@ -275,7 +290,7 @@ app --> editor : Страница обновлена (revalidatePath)
 
 note over app, sh_cands
   activeSince хранится в Neon как настоящая date-колонка (ISO,
-  TASK-DB-4) — наружу (CandidateEditModal, approveCandidate(),
+  TASK-DB-4) — наружу (CandidateFormModal, approveCandidate(),
   фильтры-хелперы) всё ещё отдаётся как ru-RU строка
   ("21.07.2026"), конвертация изолирована в lib/db/candidates.ts.
   <input type="date"> требует ISO — вторая, отдельная конвертация
@@ -285,19 +300,31 @@ end note
 == 2г. Редактор отключает / удаляет / добавляет кандидата (TASK-33) ==
 
 note over editor, app
-  Кандидаты не участвуют в SendPulse — в отличие от работодателя (3б),
-  здесь нет отдельного шага отписки. rejectCandidate()/approveCandidate()
-  переиспользуются как есть — те же функции, что и для первой модерации.
+  TASK-45 донастроила это: кандидат ТЕПЕРЬ участвует в SendPulse
+  (книга «Candidates») — rejectCandidate()/deleteCandidate() убирают
+  его оттуда, симметрично removeEmployerFromSendPulse() у работодателя
+  (3б). approveCandidate()/rejectCandidate() переиспользуются как есть —
+  те же функции, что и для первой модерации (§2а), с тем же побочным
+  эффектом на SendPulse.
 end note
 
 editor -> app : «Отключить» (status == "Активный")\nили «Подтвердить» у отклонённого (status == "Отклонён")
 app -> app : rejectCandidate(id) / approveCandidate(id)
 app -> sh_cands : updateCandidateStatus(id, "Отклонён" | "Активный", [today])
 sh_cands --> app : OK
+alt rejectCandidate() и у кандидата есть email
+  app -> sp_cbook : removeCandidateFromSendPulse(email)\nDELETE /addressbooks/{Candidates}/emails
+  sp_cbook --> app : OK
+else approveCandidate()
+  app -> sp_cbook : syncCandidateToSendPulse(candidate) (как в §2а)
+  sp_cbook --> app : { "result": true }
+end
 app --> editor : Статус обновлён в строке
 
 editor -> app : Корзина в строке → отдельный шаг подтверждения\n(«Удалить кандидата?» + «Да, удалить»/«Отмена»)
 app -> app : deleteCandidate(id)
+app -> sh_cands : getCandidateById(id) — email для SendPulse, до удаления строки
+sh_cands --> app : candidate
 app -> neonResumes : getResumeVersions(id)
 neonResumes --> app : все версии резюме кандидата
 loop для каждой версии с kind == "file"
@@ -313,9 +340,13 @@ note right of sh_cands
   Явный deleteResumeVersions() больше не нужен (раньше
   вызывался здесь отдельным шагом перед удалением строки).
 end note
+alt у кандидата был email
+  app -> sp_cbook : removeCandidateFromSendPulse(candidate.email) (TASK-45)
+  sp_cbook --> app : OK
+end
 app --> editor : Строка удалена из таблицы
 
-editor -> app : «+ Добавить кандидата» в панели фильтров\nCandidateCreateModal — та же форма, что CandidateEditModal,\nно без истории резюме, «Активен с» = сегодня
+editor -> app : «+ Добавить кандидата» в панели фильтров\nCandidateFormModal без переданного candidate (TASK-33) —\nта же форма, что при редактировании, но без истории резюме/\nрассылок/«Исключённые компании»/«Исключённые стримы»\n(нечего показывать/исключать у ещё не существующего кандидата),\n«Активен с» = сегодня по умолчанию
 editor -> app : createCandidate({ name, title, email, phone, level,\n  activeSince, stream, countryPrimary, countryDesired,\n  summary, resumeUrl, resumeFilename?, coverLetter })
 app -> app : id = crypto.randomUUID()
 app -> sh_cands : createCandidateRecord({ id, name, email, phone,\n  coverLetter, status: "На проверке",\n  title, level, activeSince, stream, countryPrimary,\n  countryDesired, summary })\nINSERT INTO candidates — один шаг (TASK-DB-4,\nраньше append+update в два шага в Sheets; resumeUrl\nсюда не входит — пишется только через addResumeVersion ниже)
@@ -325,6 +356,48 @@ alt резюме передано
   neonResumes --> app : OK
 end
 app --> editor : Кандидат в статусе «На проверке» — как и при\nпубличной регистрации, требует подтверждения (заносить\nи проверять может быть разный человек: секретарь / рекрутёр)
+
+== 2д. Ежемесячный дайджест кандидатам (TASK-45) ==
+
+note over app, sp_cbook
+  Запуск: ежедневный крон (первый понедельник месяца — остальные
+  дни no-op) ИЛИ кнопка «Отправить сейчас» в CandidateDigestSection
+  (/editor/settings), независимо от тумблера автоотправки.
+end note
+
+app -> sh_cands : getConfirmedCandidates()\nstatus IN ('Активный', 'Не публиковать') — «Не публиковать» (TASK-05)\nне отказ, книги/дайджеста это не касается
+sh_cands --> app : eligible (только с email)
+app -> sh_mail : getCandidateExposureCounts()\nдля каждого кандидата — множество токенов работодателей,\nреально его увидевших по ВСЕМ отправленным рассылкам разом
+sh_mail --> app : Map<candidateId, Set<employerToken>>
+
+app -> sp_cbook : listAddressBookEmails(Candidates)\nтекущие члены книги
+sp_cbook --> app : [email, …]
+app -> sp_cbook : removeFromAddressBook() на каждого,\nкто больше не eligible (отклонён/удалён/лишился email)
+sp_cbook --> app : OK
+
+loop по каждому eligible кандидату
+  app -> app : real = exposureCounts.get(id) ?? 0\nshown = real >= 8 ? real : случайное 8–16
+  app -> sp_cbook : addToAddressBook(email, { Имя, phone })\n+ updateContactVariable(email, "digest_count", shown)
+  sp_cbook --> app : OK
+end
+
+alt хотя бы один подготовлен успешно
+  app -> sp_camp : createCampaign(Candidates, subject с {{digest_count}},\nbuildDigestEmailHtml(), career@)\n{{digest_count}} — литеральный мердж-тег, SendPulse подставляет\nиз переменной контакта при отправке, не JS-значение
+  sp_camp --> app : { id: campaignId }
+end
+
+app -> neonAuto : recordCandidateDigestRun({ triggeredBy, candidatesTotal,\ncandidatesPrepared, candidatesFailed, campaignId })\nINSERT INTO candidateDigestRuns
+neonAuto --> app : OK
+app --> editor : История запусков на /editor/settings обновлена
+
+note right of neonAuto
+  Книга «Candidates» общая для приветственного триггера (§2а)
+  и дайджеста — одна книга, не две раздельные (упрощено по ходу
+  планирования). Порядок развёртывания важен: книгу сначала
+  наполняют первым прогоном дайджеста, потом включают
+  Automation 360 — иначе реконсиляция ложно триггерит
+  приветственные письма всем уже существующим кандидатам.
+end note
 
 == 2в. Редактор редактирует данные работодателя ==
 
@@ -451,72 +524,101 @@ app -> sh_emp : updateEmployerFields(token, { status: "Подтверждён" }
 sh_emp --> app : OK
 app --> editor : Работодатель снова «Подтверждён», возвращён в рассылку
 
+== 3в. Редактор готовит подборки (TASK-44) ==
+
+note over editor, app
+  TASK-44 полностью перестроила этот этап. Раньше карточка выпуска
+  означала СРАЗУ и «кому физически уйдёт письмо», и «что увидит
+  получатель по ссылке» — один фиксированный список кандидатов на
+  весь стрим. Теперь это два независимых понятия: «подборка» (этот
+  раздел — независимый пул, готовится заранее, до и без привязки
+  к конкретному выпуску) и «выпуск» (§4 ниже — письмо, которое
+  реально уходит в SendPulse; только ВЫБИРАЕТ уже готовые подборки,
+  никогда не создаёт и не редактирует их состав на месте). Таблица
+  mailingListEntries (прежняя TASK-DB-5), где раньше жил состав
+  выпуска, физически удалена из БД после TASK-44 — её роль заняли
+  selections/selectionEntries/selectionEmployers ниже.
+end note
+
+editor -> app : GET /editor/selections?secret=…
+app -> sh_mail : getAllSelections()\n(подборки ВСЕХ стримов разом — фильтр по стриму опционален,\nне обязательная навигация; пул + уже присоединённые к любому\nвыпуску вперемешку, с именем стрима и статусом на каждой)
+sh_mail --> app : [{ selectionId, stream, date, label,\n  candidateCount, employerTokens, listId | null }, …]
+app --> editor : Раздел «Подборки» — таблица: бейдж стрима,\nбейдж Общая/Ограниченная, дата, число кандидатов,\nстатус (В пуле / Используется в неотправленном\nвыпуске от … / Отправлена в выпуске от …)
+
+editor -> app : Кнопка «Подборка» — выбирает стрим и дату\n(дата подборки независима от даты будущего выпуска)
+app -> sh_cands : getEligibleCandidatesForRelease(candidates, stream)\n/ getPausedCandidatesForRelease(candidates, stream) (TASK-05)
+sh_cands --> app : подходящие + на паузе (summary/уровень/роли/Active Since)
+app -> sh_emp : confirmedEmployersForStream(employers, stream)
+sh_emp --> app : подтверждённые подписчики стрима, сгруппированные по компании
+app --> editor : Candidate-пикер + employer-пикер (по компаниям —\nгалочка у компании отмечает разом всех её людей)
+
+editor -> app : Отмечает кандидатов; «Видна только этим работодателям» —\nпусто для общей подборки, иначе отмечает работодателей/компании\n(ограниченная); жмёт «Сохранить»
+app -> app : createSelection(stream, { date, candidateIds, employerTokens })
+app -> sh_mail : INSERT INTO selections (streamId, targetDate, listId = NULL)\n+ batch INSERT INTO selectionEntries (candidateId на каждого)\n+ (если ограниченная) batch INSERT INTO selectionEmployers
+sh_mail --> app : OK
+app --> editor : Подборка появляется в таблице со статусом «В пуле»
+
+note right of sh_mail
+  Таблицы selections/selectionEntries/selectionEmployers (TASK-44):
+  ───────────────────────────────────────────────────────────────
+  selections: id | streamId (FK, CASCADE) | targetDate | listId (nullable, SET NULL)
+  У одного ПРИСОЕДИНЁННОГО к выпуску набора — не более одной подборки
+  БЕЗ selectionEmployers (дефолтная, видна всем без своей ограниченной)
+  и любое число С ≥1 selectionEmployers (ограниченные, видны только
+  им — filterCandidatesForEmployer их вообще не касается, менеджер
+  уже решил вручную). listId = NULL — свободна в пуле. Состав
+  редактируется ТОЛЬКО здесь (карандаш у строки), независимо от
+  того, свободна подборка сейчас или уже присоединена к
+  неотправленному выпуску; удалить/открепить/отредактировать
+  подборку уже отправленного выпуска нельзя (assertSelectionEditable()).
+end note
+
 == 4. Редактор готовит выпуск ==
 
-editor -> sh_cands : Обогащает профили одобренных кандидатов\n(title, summary, stream, level, страны — через CandidateEditModal\nна сайте; все поля редактируются только там, Sheets больше\nне часть боевого пути, TASK-DB-4)
-note right of sh_cands
-  Таблица candidates (Neon) — единый источник правды.
-  Регистрационная форма и рассылки используют одну и ту же таблицу.
-  ─────────────────────────────────────────────────────────────────────────────
-  id (UUID)  | name     | title | stream  | level  | summary     | status    | …
-  a3f8e2c1-… | (личное) | PM    | Finance | Senior | Опытный PM… | Активный  |
-  7c1d4f82-… | (личное) | CTO   | Finance | Lead   | Руководил…  | Активный  |
-  b2e9a3f1-… | (личное) |       |         |        |             | На проверке |  ← ещё не одобрен, в рассылки не попадёт
-  getActiveCandidates() фильтрует: status = «Активный»
+note over editor, app
+  ReleaseCreateModal — чистый пикер (TASK-44): больше не выбирает
+  кандидатов напрямую, только уже подготовленные подборки стрима.
 end note
 
 editor -> app : Открывает ReleaseCreateModal, выбирает стрим и дату
-app -> sh_cands : getEligibleCandidatesForRelease(candidates, stream)\n(уже загружены постранично при рендере /editor —\nстатус «Активный» через getActiveCandidates(), плюс Active Since\nпустой или уже наступил)
-sh_cands --> app : подходящие кандидаты + число подтверждённых\nподписчиков (confirmedEmployersForStream)
-app -> sh_cands : getPausedCandidatesForRelease(candidates, stream)\n(TASK-05 — зеркало с обратным условием: Active Since ещё не наступил)
-sh_cands --> app : кандидаты на паузе
-app --> editor : Предзаполненный чекбокс-список\n(предупреждение, если < 6 / > 10 или 0 подписчиков),\nрядом — схлопнутый список «на паузе» с датой Active Since\nу каждого кандидата в обоих списках
-editor -> app : Снимает/оставляет кандидатов (при нехватке — разворачивает\nсписок «на паузе» и включает кого-то вручную), жмёт «Создать рассылку»
-app -> app : createMailingList({ stream, date, candidateIds })\n(date уже ISO — берётся прямо из <input type="date">)
-app -> sh_mail : createMailingListRows(...)\nlistId = crypto.randomUUID(), один batch INSERT —\nпо строке на кандидата, listId гарантированно одинаковый
+app -> sh_mail : getSelectionsForStream(stream)\nподборки стрима, свободные в пуле (listId = NULL)
+sh_mail --> app : [{ selectionId, label, candidateCount, … }, …]
+app --> editor : Переключатель «Все подписчики стрима» / «Выбранные\nполучатели» (TASK-40 — кому физически уйдёт письмо,\nось, отдельная от подборок) + чекбокс-список подборок\n(SelectionPickerRow: бейдж, число кандидатов, «Просмотреть →»)
+editor -> app : Отмечает подборки (хотя бы одну — обязательно),\nпри узкой рассылке отмечает получателей; RosterTable\nуже показывает «кому что попадёт», подсвечивая пробелы
+editor -> app : Жмёт «Создать рассылку»
+app -> app : createMailingList({ stream, date, employerTokens?, selectionIds })\n(date уже ISO — берётся прямо из <input type="date">)
+app -> sh_mail : validateSelectionChoice(streamId, selectionIds)\nкаждая id принадлежит стриму, свободна, не больше\nодной без работодателей в итоговом наборе
+sh_mail --> app : OK
+app -> sh_mail : createMailingListRows({ stream, date, recipientLabel })\nINSERT INTO mailingLists — только заголовок выпуска,\nlistId = crypto.randomUUID(); кандидатов не принимает вовсе
 sh_mail --> app : { listId }
-app --> editor : «Выпуск создан» + ссылка на подборку
-
-note right of sh_mail
-  Таблица mailingListEntries (Neon / PostgreSQL, TASK-DB-5):
-  ──────────────────────────────────────────────────────────────────────────
-  id (UUID)  | listId (UUID) | streamId | targetDate | candidateId (UUID)
-  9c1b2e3f-… | f04a9b3e-…    | 1        | 2026-07-21 | a3f8e2c1-…
-  4d5e6a7b-… | f04a9b3e-…    | 1        | 2026-07-21 | 7c1d4f82-…
-  targetDate — нативная Postgres date-колонка (не текст); наружу
-  (кампании SendPulse, письмо, UI) отдаётся как ru-RU текст через
-  isoToRu(). Одинаковый listId на всех строках выпуска гарантирован
-  одним batch INSERT — единственный способ создать выпуск теперь и
-  есть эта кнопка: лист «Mailing lists» в Sheets удалён полностью.
-  streamId — FK на streams.id (ON DELETE SET NULL), не текстовое
-  имя стрима — имя резолвится через JOIN на streams при чтении
-  (стримы: статус Активный/Архивный, см. раздел 1 выше). Раньше
-  здесь был денормализованный text-столбец stream — заменён на FK
-  вместе с правилом «нельзя переименовать/удалить стрим, у которого
-  уже есть отправленная рассылка», снявшим риск дрейфа имени.
-end note
+alt узкая аудитория письма (employerTokens непусто, TASK-40)
+  app -> sh_mail : createMailingListRecipientRows(listId, employerTokens)\nINSERT INTO mailingListRecipients — переопределение получателей\nПИСЬМА, независимая ось от состава подборок ниже
+  sh_mail --> app : OK
+end
+app -> sh_mail : attachSelectionsToMailingList(listId, selectionIds)\nUPDATE selections SET listId = ... WHERE id IN (...)\n(единственный способ подборке получить listId)
+sh_mail --> app : OK
+app --> editor : «Выпуск создан» — карточка в списке «Выпуски»
 
 == 4а. Редактор удаляет ещё не отправленный выпуск ==
 
 editor -> app : Нажимает корзину у карточки выпуска\n(видна только пока выпуск ни разу не отправлялся),\nподтверждает «Да, удалить»
 app -> app : deleteMailingList("f04a9b3e-…")
-app -> sh_mail : getMailingListMeta("f04a9b3e-…")\n(лёгкий запрос — только stream/targetDate, без джойна с кандидатами)
-sh_mail --> app : { stream: "Finance", date: "21.07.2026" }
-app -> sp_camp : getCampaigns()\n(проверка: нет ли уже кампании с именем "Finance — 21.07.2026")
-sp_camp --> app : список кампаний
+app -> sh_mail : getMailingListMeta("f04a9b3e-…")\n(лёгкий запрос — stream/targetDate/recipientLabel/sentCampaignId,\nбез джойна с подборками)
+sh_mail --> app : { stream: "Finance", date: "21.07.2026", sentCampaignId }
 
-alt кампания с таким именем уже есть
+alt sentCampaignId !== null (TASK-40 — единственный источник правды,\nбез обращения к SendPulse/getCampaigns() вообще)
   app --> editor : Ошибка «Эта рассылка уже отправлена — удалить её нельзя»
-else кампании ещё нет
-  app -> sh_mail : deleteMailingListRows("f04a9b3e-…")\nDELETE FROM mailingListEntries WHERE listId = ...
+else sentCampaignId === null
+  app -> sh_mail : deleteMailingListRows("f04a9b3e-…")\nDELETE FROM mailingLists WHERE id = ...\n(каскад сносит mailingListRecipients; selections.listId —\nON DELETE SET NULL, TASK-44 — присоединённые подборки\nоткрепляются обратно в пул, НЕ уничтожаются)
   sh_mail --> app : OK
   app --> editor : Карточка выпуска пропадает из списка
 end
 
 note right of sh_mail
   UI прячет корзину для уже отправленных выпусков (alreadySent),
-  но серверный deleteMailingList() перепроверяет это сам через
-  SendPulse — на случай прямого вызова action в обход интерфейса.
+  но серверный deleteMailingList() перепроверяет это сам по
+  mailingLists.sentCampaignId — на случай прямого вызова action
+  в обход интерфейса. Больше не ходит в SendPulse за этим вовсе.
 end note
 
 == 5. Редактор запускает рассылку ==
@@ -527,57 +629,88 @@ note over editor, app
   б) curl /api/publish/{listId}?token=…
 end note
 
-editor -> app : publishMailingList("f04a9b3e-…")\n(Server Action или API-роут)
+editor -> app : publishMailingList("f04a9b3e-…", confirmed = false)
 app -> sh_mail : getMailingListMeta("f04a9b3e-…")
-sh_mail --> app : { stream: "Finance", date: "21.07.2026" }
+sh_mail --> app : { stream, date, recipientLabel, sentCampaignId }
 
-app -> sp_camp : getCampaigns()\n(первая ли это отправка — та же проверка,\nчто у deleteMailingList()/streamHasSentReleases())
-sp_camp --> app : список кампаний
+alt !confirmed
+  app -> sh_mail : getEmployersWithoutSelection(listId) (TASK-44)\nаудитория письма (узкая TASK-40, иначе весь стрим) минус\nпокрытые дефолтной/ограниченными подборками
+  sh_mail --> app : missingEmployers
+  alt missingEmployers непусто
+    app --> editor : { requiresConfirmation: true, missingEmployers }\nPublishButton показывает «N без подборки» + «Отправить всё равно»
+    editor -> app : publishMailingList(listId, confirmed = true) — повтор
+  end
+end
 
-alt первая отправка, и сегодняшняя дата разошлась с плановой
-  app -> sh_mail : updateMailingListDate("f04a9b3e-…", today)\n(дата — план, не обязательство: менеджер мог\nотправить не в тот день, что планировал)
+alt sentCampaignId === null (первая отправка), и сегодняшняя дата разошлась с плановой
+  app -> sh_mail : updateMailingListTimestamp(listId, now)\n(полный timestamp, не только дата; дата — план, не обязательство)
   sh_mail --> app : OK
-  note right of sh_mail
-    Дата в выпуске фиксируется по факту первой реальной
-    отправки, а не остаётся плановой. Повторная отправка
-    того же выпуска дату уже не трогает — тема и имя
-    кампании должны совпадать с тем, что уже отправлено.
-  end note
 else повторная отправка, или дата и так совпадает
   note over app
-    Дата не меняется — используется как есть
+    Дата не меняется — тема/имя кампании должны
+    совпадать с уже отправленным
   end note
 end
 
-app -> sp_camp : POST /oauth/access_token
-sp_camp --> app : { access_token }
+app -> sh_mail : getMailingListRecipientTokens(listId)\n(TASK-40 — пусто = весь стрим, иначе узкая аудитория письма)
+sh_mail --> app : recipientTokens
 
-app -> sp_camp : POST /campaigns\n{ list_id: FINANCE_BOOK_ID,\n  subject: "Talent Stream: Finance — 21.07.2026",\n  body: html с {{Имя}},\n  sender_name, sender_email }
-sp_camp --> app : { id: 12345 }
+alt recipientTokens непусто — узкая рассылка
+  app -> sp_stream : getOrCreateBook(`${stream} — ${date} — ${listId}`)\nодноразовая книга, свежая на КАЖДЫЙ publish (первая отправка И ресенд)
+  sp_stream --> app : bookId
+  app -> sp_stream : addToAddressBook() на каждого выбранного получателя\n(Имя/phone/Streams/employer_token — те же переменные,\nчто у syncEmployerToSendPulse(), иначе персональная\nссылка в письме не резолвится)
+  sp_stream --> app : OK
+else весь стрим
+  app -> sp_stream : getOrCreateBook(stream)
+  sp_stream --> app : bookId
+end
 
-alt первая отправка (та же проверка, что определила дату выше)
-  app -> sh_mail : getMailingListCandidateIds("f04a9b3e-…")
-  sh_mail --> app : [a3f8e2c1-…, 7c1d4f82-…]
-  app -> sh_cands : getCandidates()\n(резолвит id по каждому кандидату выпуска —\nTASK-DB-4, раньше нужен был rowIndex, getProfiles()\nего не отдавал)
-  sh_cands --> app : все кандидаты (все статусы)
+app -> sp_camp : createCampaign(bookId, subject, html, campaignName, partner@)\nTASK-43 — ретрай на error_code 798 до 3 раз (пауза 0.5с/1с/1.5с):\nтолько что добавленный email не всегда сразу виден проверке\nSendPulse «книга не пуста»
+sp_camp --> app : { id: campaignId }
 
-  loop по каждому кандидату выпуска
-    app -> sh_mail : getMailingListsForCandidate(id)\n(вся история выпусков кандидата)
-    sh_mail --> app : выпуски кандидата
-    app -> app : sentBefore = сколько из них уже реально\nотправлялось (сверка с campaignNames,\nснимок getCampaigns() ДО этой отправки)
-    alt sentBefore + 1 == 1 (первая реальная отправка кандидата)
-      app -> sh_cands : updateCandidateStatus(id,\n"Активный", today + 2 недели)
+note right of sp_stream
+  Книга (одноразовая ИЛИ стрима) НЕ удаляется здесь вообще — ни на
+  успехе, ни на ошибке createCampaign() (решение после TASK-43):
+  на успехе SendPulse отказывает в удалении, пока книга привязана
+  к не прошедшей модерацию кампании; на ошибке удаление+пересоздание
+  на каждый ручной повтор сбрасывало прогресс индексации нового
+  контакта у SendPulse (реальный инцидент — контакт индексировался
+  ~20 минут вместо секунд). Удаление — отдельный ежедневный крон
+  cleanupCron (§1), не часть этого сценария.
+end note
+
+app -> sh_mail : getAllSelectionCandidateIds(listId) (TASK-44)\nобъединение по ВСЕМ подборкам, присоединённым к выпуску —\nпопадание в любую засчитывается один раз, не по разу за подборку
+sh_mail --> app : candidateIds
+
+app -> sh_mail : getMailingList(listId) — полная резолюция подборок\n(для персонального счётчика в Telegram-уведомлении ниже)
+sh_mail --> app : fullList
+
+loop по каждому получателю письма (TASK-35 часть 2 — ПЕРСОНАЛЬНО,\nне общее число по всей рассылке, донастроено отдельным коммитом)
+  app -> app : resolveMailingListForEmployer(fullList, employer.token)\n+ filterCandidatesForEmployer() для дефолтной — count = то,\nчто этот конкретный работодатель реально увидит по ссылке
+  app -> sp_master : sendTelegramToEmployer(token, text с count,\n{ button: персональная ссылка, photo }) — best-effort,\nбез резолва (подборка «не готова») пинг не уходит вовсе
+  sp_master --> app : OK
+end
+
+alt sentCampaignId === null (первая настоящая отправка)
+  app -> sh_mail : markMailingListSent(listId, campaignId)\nUPDATE mailingLists SET sentCampaignId = ...
+  sh_mail --> app : OK
+  app -> sh_cands : getCandidates() — резолвит id по каждому\nкандидату выпуска (все статусы)
+  sh_cands --> app : кандидаты
+
+  loop по каждому кандидату из candidateIds
+    app -> sh_mail : getMailingListsForCandidate(id)\nwhole история выпусков кандидата
+    sh_mail --> app : история, с sentCampaignId на каждой записи
+    app -> app : sentBefore = history.filter(sentCampaignId !== null).length\n(TASK-40 — больше НЕ сверка с именами кампаний/campaignNames)
+    alt sentBefore + 1 == 1
+      app -> sh_cands : updateCandidateStatus(id, "Активный", today + 2 недели)
     else sentBefore + 1 == 2
-      app -> sh_cands : updateCandidateStatus(id,\n"Активный", today + 3 месяца)
+      app -> sh_cands : updateCandidateStatus(id, "Активный", today + 3 месяца)
     else sentBefore + 1 >= 3
-      app -> sh_cands : updateCandidateStatus(id,\n"Не публиковать", today + 10 лет)
+      app -> sh_cands : updateCandidateStatus(id, "Не публиковать", today + 10 лет)
       note right of sh_cands
-        Терминальный статус — кандидат отправлен уже
-        3 раза, дальше getActiveCandidates() исключает его
-        из всех подборок насовсем. Сознательное отклонение
-        от буквального ТЗ (там пауза только после 2-й
-        отправки, про 3-ю не сказано) — согласовано с
-        пользователем. Редактор может вручную вернуть
+        Терминальный статус — кандидат отправлен уже 3 раза,
+        дальше getActiveCandidates() исключает его из всех
+        подборок насовсем. Редактор может вручную вернуть
         статус «Активный» кнопкой «Подтвердить» на
         странице «Кандидаты».
       end note
@@ -585,53 +718,137 @@ alt первая отправка (та же проверка, что опред
   end
 else повторная отправка
   note over app
-    Счётчик отправок кандидатов не трогаем — иначе
-    пауза сдвигалась бы заново при каждом ресенде
+    sentCampaignId уже не NULL — markMailingListSent() и счётчик
+    отправок кандидатов не трогаем, иначе пауза сдвигалась бы
+    заново при каждом ресенде
   end note
 end
 
-app --> editor : «Кампания #12345 запущена»\n(revalidatePath /editor — карточка выпуска\nпоказывает актуальную дату)
+app --> editor : «Кампания #{campaignId} запущена»\n(revalidatePath /editor)
 
 == 5а. SendPulse доставляет письма подписчикам ==
 
-sp_camp -> employer : Email «Talent Stream: Finance — 21.07.2026»\nСсылка: /list/f04a9b3e-…?e={{employer_token}}\n({{Имя}} и {{employer_token}} заменяются на значения получателя)
+sp_camp -> employer : Email «Talent Stream: Finance — выпуск 21.07.2026»\nСсылка: /list/f04a9b3e-…?e={{employer_token}}\n({{Имя}} и {{employer_token}} заменяются на значения получателя)
 
 note right of sp_camp
-  SendPulse рассылает письма
-  всем подтверждённым контактам в книге «Finance»
-  Каждый получатель видит ссылку со своим токеном —
-  подборка персонализирована и закрыта от посторонних
+  Книга получателей — одноразовая (§5, если выбраны «Выбранные
+  получатели», TASK-40) либо книга всего стрима. Каждый получатель
+  видит ссылку со своим токеном — подборка персонализирована и
+  закрыта от посторонних; что именно он увидит по ссылке, решает
+  resolveMailingListForEmployer() на /list/[listId] (§6 ниже), не
+  состав этой книги.
 end note
 
-== 6. Работодатель просматривает подборку ==
+== 5б. Фоллоу-ап работодателям после рассылки (TASK-46) ==
+
+note over app, neonFollow
+  Запуск: ЕЖЕДНЕВНЫЙ крон (в отличие от еженедельного §2д —
+  каждый выпуск сидит в своём окне [3, 21] дней после отправки
+  только один раз, ежедневная проверка ловит его близко к
+  границе) ИЛИ «Отправить сейчас» в ReleaseFollowUpSection.
+end note
+
+app -> sh_mail : getMailingLists()\nвсе отправленные выпуски (sentCampaignId != null)
+sh_mail --> app : [{ listId, stream, sentCampaignId }, …]
+
+loop по каждому отправленному выпуску
+  app -> sp_camp : getCampaignSendDate(sentCampaignId)\nGET /campaigns/{id} → send_date
+  sp_camp --> app : sendDate
+  alt daysSinceSend вне [3, 21] дней
+    app -> app : пропустить — либо рано, либо слишком поздно\n(защита от обработки всего исторического бэклога\nпри первом/запоздавшем запуске)
+  else в окне
+    app -> sh_mail : getReleaseAudience(listId, stream)\nузкая аудитория (TASK-40), если есть, иначе весь\nподтверждённый стрим — кто реально ПОЛУЧИЛ письмо
+    sh_mail --> app : [employer, …]
+    app -> neonDb : getEmployerTokensWithRequestForList(listId)\nкто уже отправил заявку ИМЕННО по этому выпуску
+    neonDb --> app : Set<employerToken>
+    app -> neonFollow : getEvaluatedFollowUpKeys([listId])\nпары (выпуск, работодатель), уже решённые когда-либо
+    neonFollow --> app : Set<"listId|employerToken">
+
+    loop по каждому ещё не решённому работодателю аудитории
+      app -> sp_camp : getCampaignEmailStatus(sentCampaignId, employer.email)\nGET /campaigns/{id}/email/{email} — ЕДИНСТВЕННОЕ число\n(похожий путь с emails во множественном числе существует\nи выглядит правдоподобно, но отдаёт 404 на каждый запрос —\nреальная ошибка, пойманная живым драй-раном до прод-отправки)
+      sp_camp --> app : { detailStatus }\nopened = detailStatus >= 3 (3 Opened, 4 Link redirected)
+
+      alt работодатель уже отправил заявку по этому выпуску
+        app -> neonFollow : recordFollowUpOutcome(listId, token, "skipped")\nНЕЗАВИСИМО от opened — заявка перевешивает open-tracking\nпиксель (ненадёжен: блокировка картинок даёт ложный\n«не открыл»; приоритет исправлен после реального бага,\nпойманного тем же драй-раном)
+        neonFollow --> app : OK
+      else opened == true
+        app -> sp_smtp : sendTransactionalEmail(employer, "Помогите нам\nсделать подборки точнее", buildFollowUpFeedbackEmailHtml(), partner@)
+        sp_smtp --> app : 200
+        app -> neonFollow : recordFollowUpOutcome(listId, token, "feedback")
+        neonFollow --> app : OK
+      else opened == false
+        app -> sp_smtp : sendTransactionalEmail(employer, "Напоминаем о\nновой подборке — {stream}", buildFollowUpReminderEmailHtml(\n{ employerName, streamName, listUrl: /list/listId?e=token }), partner@)\nТа же персональная ссылка, что была в исходном письме кампании
+        sp_smtp --> app : 200
+        app -> neonFollow : recordFollowUpOutcome(listId, token, "reminder")
+        neonFollow --> app : OK
+      end
+    end
+  end
+end
+
+app -> neonAuto : recordReleaseFollowUpRun({ triggeredBy, releasesChecked,\nemployersEvaluated, feedbackSent, reminderSent, failed })\nINSERT INTO releaseFollowUpRuns
+neonAuto --> app : OK
+app --> editor : История запусков на /editor/settings обновлена
+
+note right of neonFollow
+  releaseFollowUps — unique(listId, employerToken): каждая пара
+  решается один раз НАВСЕГДА, независимо от того, сколько раз
+  потом отработает ежедневный крон. Telegram-напоминание для
+  группы «не открыл» (из исходного запроса пользователя) НЕ
+  реализовано — текст помечен «на согласование», отложено.
+end note
+
+== 6. Работодатель просматривает подборку (TASK-44 — подборка отделена от выпуска) ==
+
+note over app, sh_mail
+  ?e= ВСЕГДА резолвится «как у этого работодателя» — личная
+  подборка без фильтра, если она на него заведена, иначе дефолтная
+  с фильтром — НЕЗАВИСИМО от того, передан ли одновременно ?secret=
+  (раньше secret при наличии e ошибочно отключал фильтр целиком).
+  ?secret= без e — отдельная, более узкая ветка: дефолтная подборка
+  без фильтра, либо «подборка не готова», если дефолтной нет вовсе.
+  Ни e, ни secret — 404 сразу, до единого запроса к БД.
+end note
 
 alt ?e=[token] — персонализированный доступ работодателя
 employer -> app : GET /list/f04a9b3e-…?e=8f3a1c…
+app -> sh_mail : getMailingList("f04a9b3e-…")\nзаголовок mailingLists + ПРИСОЕДИНЁННЫЕ к этому listId подборки\n(selections/selectionEntries/selectionEmployers) + джойн на\ngetCandidates() — ВСЕ статусы, не getActiveCandidates(): историческая\nпринадлежность к уже отправленному выпуску не зависит от статуса\nкандидата на момент просмотра
+sh_mail --> app : { stream, date,\n  default: ResolvedSelection | null,\n  personal: ResolvedSelection[] }
 app -> sh_emp : getEmployerByToken("8f3a1c…")
-sh_emp --> app : { name, company, country, … }
-app -> sh_mail : getMailingList("f04a9b3e-…")
-sh_mail -> sh_cands : getActiveCandidates() → джойн по candidateId\n(Neon, TASK-DB-4 — раньше getProfiles() из Sheets)
-sh_cands --> sh_mail : кандидаты
-sh_mail --> app : { stream, date, entries: [{ profile, mailingStream }, …] }
-app -> app : filterCandidatesForEmployer(candidates, employer)\n(in-memory: excludedCompanies, excludedStreams,\nгео: countryPrimary/countryDesired ∩ employer.country+additionalCountries;\n«Любая» → без гео-фильтра; нет данных о стране → скрыть)
+sh_emp --> app : employer | null (404, если не найден)
+app -> app : resolveMailingListForEmployer(mailingList, token)\nличная (если employerToken в её selectionEmployers) БЕЗ фильтра,\nиначе дефолтная
+alt резолвилась личная подборка
+  app -> app : entries = resolved.entries (без фильтра —\nменеджер уже решил вручную, filterCandidatesForEmployer\nсюда вообще не допускается)
+else резолвилась дефолтная
+  app -> app : filterCandidatesForEmployer(entries, employer)\n(excludedCompanies/excludedStreams, гео: countryPrimary/\ncountryDesired ∩ employer.country+additionalCountries;\n«Любая» → без гео-фильтра; нет данных о стране → скрыть)
+else резолв вернул null (ни личной, ни дефолтной)
+  app -> app : ready = false
+end
 app -> neonStreams : getStreamsDetailed() — типы стримов для тегов (TASK-27)
 neonStreams --> app : [{ name, type }, …]
-app --> employer : Страница выпуска: анонимные карточки\n(должность, уровень — teal-бейдж рядом с должностью, страна, summary,\nindustry-теги — синие, functional — фиолетовые: выводятся из\nProfile.stream кандидата по type стрима, а не из полей industry/func)\nБез имён и контактов. Кнопка «Хочу связаться».
-else ?secret=[EDITOR_SECRET] — доступ редактора (все кандидаты)
+app --> employer : ready → анонимные карточки (должность, уровень,\nстрана, summary, industry/functional-теги), кнопка «Хочу связаться»\n+ блок «Не нашли подходящих?» (GeneralInquiryButton) + ссылка\nTelegram-бота; !ready → «Подборка для вас пока не готова» (HTTP 200)
+else ?secret=[EDITOR_SECRET] без ?e= — доступ редактора
 editor -> app : GET /list/f04a9b3e-…?secret=…
-app -> sh_mail : getMailingList("f04a9b3e-…")
-sh_mail -> sh_cands : getActiveCandidates() → джойн по candidateId
-sh_cands --> sh_mail : все активные кандидаты (без фильтрации по работодателю)
-sh_mail --> app : { stream, date, entries: [{ profile, mailingStream }, …] }
-app --> editor : Страница выпуска: все кандидаты без исключений
-else без параметров — 404
-employer -> app : GET /list/f04a9b3e-… (без токена)
-app --> employer : 404 Not Found
+app -> sh_mail : getMailingList("f04a9b3e-…") (тот же запрос, что выше)
+sh_mail --> app : { stream, date, default, personal }
+alt mailingList.default существует
+  app -> app : entries = default.entries — БЕЗ фильтра,\nредактор видит дефолтную подборку как есть
+else дефолтной нет вовсе (есть только ограниченные)
+  app -> app : ready = false — «подборка не готова» и у редактора тоже,\nвалидный случай, если ограниченные покрывают весь стрим
+end
+app --> editor : Та же разметка, что у работодателя — просто без employerToken\n(блок «Не нашли подходящих?»/Telegram не показываются — нужен employerToken)
+else ни ?e=, ни ?secret= — 404 сразу
+employer -> app : GET /list/f04a9b3e-… (без параметров)
+app --> employer : 404 Not Found (до единого запроса к БД)
 end
 
 note over app, employer
-  Страница noindex — недоступна
-  поисковым роботам
+  Страница noindex — недоступна поисковым роботам.
+  Прямой просмотр ОДНОЙ подборки саму по себе, независимо от
+  привязки к выпуску (инструмент редактора «Подборка» →
+  «Просмотреть →», только ?secret=, без e= вовсе и без
+  гео-фильтра/исключений) — отдельная страница
+  /selection/[selectionId], не этот сценарий.
 end note
 
 == 7. Работодатель запрашивает контакт по кандидату ==
@@ -646,7 +863,21 @@ app -> neonStreams : getStreamIdByName("Finance")
 neonStreams --> app : streamId
 app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, streamId,\n  candidateId, employerToken, status: "Новый запрос" }
 neonDb --> app : OK
+alt у кандидата есть email (TASK-45)
+  app -> sh_cands : getCandidateById(candidateId)
+  sh_cands --> app : candidate
+  app -> sp_smtp : sendTransactionalEmail(candidate.email, subject,\nbuildConsentRequestEmailHtml(employer.company), career@)\nPOST /smtp/emails\nТолько название компании — НИКОГДА employer.name/email/телефон
+  sp_smtp --> app : 200
+end
 app --> employer : «Запрос отправлен — мы свяжемся с кандидатом»
+
+note right of sp_smtp
+  TASK-45: кандидата просят подтвердить согласие на передачу
+  резюме ОТВЕТОМ на письмо, не кнопкой — конверсия в согласие
+  через ответ выше (проверено пользователем). Сбор и обработка
+  ответов кандидатов — осознанно не автоматизированы в этой
+  итерации, обрабатываются менеджером вручную.
+end note
 
 note over neonDb
   Таблица contactRequests (Neon / PostgreSQL):
@@ -693,10 +924,10 @@ end note
 
 editor -> app : GET /editor/requests?secret=…
 app -> neonDb : SELECT * FROM contactRequests\nORDER BY timestamp DESC
-app -> sh_cands : getActiveCandidates()
+app -> sh_cands : getCandidates()\nВСЕ статусы, не getActiveCandidates() — имя в подписи\nне должно пропадать, если кандидат позже сменил статус (TASK-42)
 neonDb --> app : список запросов
-sh_cands --> app : кандидаты
-app --> editor : Раздел «Запросы»:\n«Общие запросы» (candidateId = "", 3 статуса:\nНовый запрос / Взяли в работу / Завершён)\nи «По кандидатам» (7 статусов:\nНовый запрос, Кандидату написали,\nКандидат не отвечает, Связаться с Аленой,\nКандидату интересно, Кандидату не интересно,\nКонтакты переданы)
+sh_cands --> app : кандидаты (все статусы)
+app --> editor : Раздел «Запросы»:\n«Общие запросы» (candidateId = "", 3 статуса:\nНовый запрос / Взяли в работу / Завершён)\nи «По кандидатам» (7 статусов:\nНовый запрос, Кандидату написали,\nКандидат не отвечает, Связаться с Аленой,\nКандидату интересно, Кандидату не интересно,\nКонтакты переданы). Имя кандидата (не просто роль) —\nссылка на ProfilePage, новая вкладка, с ?secret=
 
 editor -> app : Меняет статус через выпадающий список
 app -> app : setContactRequestStatus(id, status)
