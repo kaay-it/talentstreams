@@ -197,12 +197,12 @@ async function removeEmployerFromSendPulse(employer: { email: string; streams: s
  * email, same mechanism as the employer welcome email (TASK-10) — no HTML is built or sent by
  * this app's code. The same book is also reconciled by runCandidateDigest() (digest campaign
  * target) — one book for both, see docs/backlog.adoc for why. */
-async function syncCandidateToSendPulse(candidate: { id: string; name: string; email: string }): Promise<void> {
+async function syncCandidateToSendPulse(candidate: { id: string; name: string; email: string; phone: string }): Promise<void> {
   const token = await getToken()
   if (!token) { console.warn("[SendPulse] failed to get access token"); return }
   const bookName = process.env.SENDPULSE_CANDIDATE_BOOK_NAME || "Candidates"
   const bookId = await getOrCreateBook(bookName, token)
-  await addToAddressBook(candidate.email, bookId, { "Имя": candidate.name, candidate_id: candidate.id }, token)
+  await addToAddressBook(candidate.email, bookId, { "Имя": candidate.name, phone: candidate.phone, candidate_id: candidate.id }, token)
 }
 
 /** Removes a candidate from the "Candidates" book — mirrors removeEmployerFromSendPulse().
@@ -226,7 +226,7 @@ export async function approveCandidate(id: string, currentActiveSince?: string):
   await updateCandidateStatus(id, "Активный" as CandidateStatus, activeSince)
   const candidate = await getCandidateById(id)
   if (candidate?.email) {
-    await syncCandidateToSendPulse({ id: candidate.id, name: candidate.name, email: candidate.email })
+    await syncCandidateToSendPulse({ id: candidate.id, name: candidate.name, email: candidate.email, phone: candidate.phone })
   }
   revalidatePath("/editor/candidates")
 }
@@ -1478,7 +1478,7 @@ export async function runCandidateDigest(triggeredBy: "cron" | "manual"): Promis
     const real = exposureCounts.get(c.id) ?? 0
     const shown = real >= 8 ? real : 8 + Math.floor(Math.random() * 9) // 8..16
     try {
-      await addToAddressBook(c.email, bookId, { "Имя": c.name }, token)
+      await addToAddressBook(c.email, bookId, { "Имя": c.name, phone: c.phone }, token)
       await updateContactVariable(c.email, bookId, "digest_count", String(shown), token)
       prepared++
     } catch (err) {
