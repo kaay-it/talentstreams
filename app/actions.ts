@@ -91,32 +91,11 @@ async function removeFromAddressBook(
   console.log(`[SendPulse] remove bookId=${bookId} status=${status}`, text)
 }
 
-/** Sets/overwrites a single variable on an already-present address book contact — distinct from
- * addToAddressBook()'s variables (which only apply on insert/upsert of the whole contact), this
- * is the dedicated SendPulse endpoint for refreshing one variable on a contact that may already
- * exist (`POST /addressbooks/{id}/emails/variable`, confirmed against SendPulse's own OpenAPI
- * spec, api.sendpulse.com/.well-known/openapi/bulk-email.yaml, operationId updateContactVariables).
- * Used by runCandidateDigest() to refresh each candidate's digest_count every run. */
-async function updateContactVariable(
-  email: string,
-  bookId: number,
-  name: string,
-  value: string,
-  token: string,
-): Promise<void> {
-  const payload = JSON.stringify({ email, variables: [{ name, value }] })
-  const { status, text } = await spPost(
-    `${SENDPULSE_API}/addressbooks/${bookId}/emails/variable`,
-    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    payload,
-  )
-  console.log(`[SendPulse] updateContactVariable bookId=${bookId} status=${status}`, text)
-}
-
 /** Every contact email currently in an address book — paginated at the API's own 100-per-page
- * cap (`GET /addressbooks/{id}/emails`, confirmed against the same SendPulse OpenAPI spec as
- * updateContactVariable()). Used by runCandidateDigest() to reconcile the "Candidates" book:
- * anyone present who is no longer eligible gets removed before the campaign goes out. */
+ * cap (`GET /addressbooks/{id}/emails`, confirmed against SendPulse's own OpenAPI spec,
+ * api.sendpulse.com/.well-known/openapi/bulk-email.yaml). Used by runCandidateDigest() to
+ * reconcile the "Candidates" book: anyone present who is no longer eligible gets removed before
+ * the campaign goes out. */
 async function listAddressBookEmails(bookId: number, token: string): Promise<string[]> {
   const emails: string[] = []
   let offset = 0
@@ -1490,8 +1469,14 @@ export async function runCandidateDigest(triggeredBy: "cron" | "manual"): Promis
     const real = exposureCounts.get(c.id) ?? 0
     const shown = real >= 8 ? real : 8 + Math.floor(Math.random() * 9) // 8..16
     try {
-      await addToAddressBook(c.email, bookId, { "Имя": c.name, phone: c.phone }, token)
-      await updateContactVariable(c.email, bookId, "digest_count", String(shown), token)
+      // digest_count MUST be included in this one call, not set afterward via a separate
+      // "update variable" call — confirmed by live testing: SendPulse only auto-creates a new
+      // custom variable field in the book's schema from the bulk add-contacts endpoint; the
+      // single-variable endpoint silently no-ops when the field doesn't already exist in the
+      // book's schema (returns 200, but the value never shows up on the contact or in a merge
+      // tag). A prior version of this code called them as two separate steps and the digest_count
+      // merge tag never actually substituted in the sent email — caught live, not in review.
+      await addToAddressBook(c.email, bookId, { "Имя": c.name, phone: c.phone, digest_count: String(shown) }, token)
       prepared++
     } catch (err) {
       console.error("[SendPulse] runCandidateDigest: failed to prepare candidate:", c.id, err)
@@ -1609,8 +1594,9 @@ export async function sendCandidateDigestToApproved(approved: DigestPreviewCandi
   let failed = 0
   for (const c of finalList) {
     try {
-      await addToAddressBook(c.email, bookId, { "Имя": c.name, phone: c.phone }, token)
-      await updateContactVariable(c.email, bookId, "digest_count", String(c.shown), token)
+      // digest_count bundled into this one call, not a separate update — see the identical
+      // comment in runCandidateDigest() for why.
+      await addToAddressBook(c.email, bookId, { "Имя": c.name, phone: c.phone, digest_count: String(c.shown) }, token)
       prepared++
     } catch (err) {
       console.error("[SendPulse] sendCandidateDigestToApproved: failed to prepare candidate:", c.id, err)
