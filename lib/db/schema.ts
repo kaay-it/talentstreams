@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp, date } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, bigint, text, timestamp, date } from "drizzle-orm/pg-core"
 
 export const streams = pgTable("streams", {
   id:          serial("id").primaryKey(),
@@ -158,4 +158,29 @@ export const candidates = pgTable("candidates", {
   salaryTo:              integer("salaryTo"),
   // No resumeUrl column — candidateResumes is the sole source of truth for a candidate's resume;
   // "current" is simply the newest row (see getResumeVersions()'s ORDER BY createdAt DESC).
+})
+
+// Generic key-value settings store — any future on/off toggle or small config value goes here
+// instead of a dedicated table per setting. id is bigint identity, not serial/uuid: rows are
+// never referenced from a URL or another table, an auto-incrementing number is enough.
+export const settings = pgTable("settings", {
+  id:    bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  name:  text("name").notNull().unique(),
+  type:  text("type").notNull(), // "boolean" | "string" | "number" — informational, not enforced
+  value: text("value").notNull(),
+})
+
+// One row per candidate-digest send (cron or manual, see app/actions.ts runCandidateDigest()) —
+// history shown in /editor/settings. id is bigint identity, not uuid: never referenced from a URL.
+export const candidateDigestRuns = pgTable("candidateDigestRuns", {
+  id:                 bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  startedAt:          timestamp("startedAt").defaultNow().notNull(),
+  triggeredBy:        text("triggeredBy").notNull(), // "cron" | "manual"
+  candidatesTotal:    integer("candidatesTotal").notNull(),
+  // Not "candidatesSent" — a SendPulse campaign gives no synchronous per-recipient delivery
+  // confirmation, only that the contact was successfully added to the book and its digest_count
+  // variable was set before the campaign was created.
+  candidatesPrepared: integer("candidatesPrepared").notNull(),
+  candidatesFailed:   integer("candidatesFailed").notNull(),
+  campaignId:         integer("campaignId"), // null = campaign was never created (0 prepared, or an error)
 })

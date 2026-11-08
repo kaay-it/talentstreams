@@ -15,7 +15,8 @@
 * *Google Sheets* — профили кандидатов, подборки рассылок (Service Account API v4)
 * *Neon (PostgreSQL)* — работодатели, запросы на контакт, стримы, история версий резюме (Drizzle ORM + neon-http driver)
 * *Vercel Blob* — приватное хранилище файлов резюме
-* *SendPulse* — email-рассылки (адресные книги, кампании, merge-теги)
+* *SendPulse* — email-рассылки (адресные книги, кампании, merge-теги) и транзакционные письма кандидатам
+* *Vercel Analytics*
 * *Tailwind CSS + lucide-react*
 
 == Переменные окружения
@@ -38,8 +39,11 @@ BLOB_READ_WRITE_TOKEN=...
 SENDPULSE_CLIENT_ID=...
 SENDPULSE_CLIENT_SECRET=...
 SENDPULSE_MASTER_BOOK_NAME=Default
-SENDPULSE_FROM_EMAIL=hello@example.com
-SENDPULSE_FROM_NAME=TalentStreams
+SENDPULSE_EMPLOYER_FROM_EMAIL=partner@example.com
+SENDPULSE_EMPLOYER_FROM_NAME=TalentStreams Partner
+SENDPULSE_CANDIDATE_FROM_EMAIL=career@example.com
+SENDPULSE_CANDIDATE_FROM_NAME=TalentStreams Career
+SENDPULSE_CANDIDATE_BOOK_NAME=Candidates
 
 # Приложение
 APP_URL=https://your-domain.com

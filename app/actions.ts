@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache"
 import { del } from "@vercel/blob"
-import { getCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
+import { getCandidates, getCandidateById, getConfirmedCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
 import {
-  getMailingLists, getMailingListMeta, getMailingList, getAllSelectionCandidateIds, resolveMailingListForEmployer, createMailingListRows,
+  getMailingLists, getMailingListMeta, getMailingList, getAllSelectionCandidateIds, getCandidateExposureCounts, resolveMailingListForEmployer, createMailingListRows,
   deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent,
   createMailingListRecipientRows, getMailingListRecipientTokens,
   replaceMailingListRecipients, getEmployersWithoutSelection, attachSelectionsToMailingList, getSelectionById,
@@ -22,10 +22,19 @@ export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, confirmedEmployersForStream, filterCandidatesForEmployer, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
 import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, enableTelegramContact, disableTelegramContact, deleteTelegramContact } from "@/lib/sendpulse"
+import {
+  getCandidateDigestSettings as getCandidateDigestSettingsDb,
+  setCandidateDigestAutoSend as setCandidateDigestAutoSendDb,
+  getCandidateDigestRuns as getCandidateDigestRunsDb,
+  recordCandidateDigestRun,
+  type DigestRun,
+} from "@/lib/db/candidate-digest"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, enableTelegramContact, disableTelegramContact, deleteTelegramContact, sendTransactionalEmail } from "@/lib/sendpulse"
+import { buildConsentRequestEmailHtml, buildDigestEmailHtml } from "@/lib/email-templates"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 import { previewCandidatesImport as previewImport, importCandidatesFromSheet, type ImportPreview, type ImportResult } from "@/lib/sheets-import"
 export type { ImportPreview, ImportResult, ImportRow, ImportSkipped } from "@/lib/sheets-import"
+export type { DigestRun } from "@/lib/db/candidate-digest"
 
 const SENDPULSE_API = "https://api.sendpulse.com"
 
@@ -69,6 +78,52 @@ async function removeFromAddressBook(
     payload,
   )
   console.log(`[SendPulse] remove bookId=${bookId} status=${status}`, text)
+}
+
+/** Sets/overwrites a single variable on an already-present address book contact — distinct from
+ * addToAddressBook()'s variables (which only apply on insert/upsert of the whole contact), this
+ * is the dedicated SendPulse endpoint for refreshing one variable on a contact that may already
+ * exist (`POST /addressbooks/{id}/emails/variable`, confirmed against SendPulse's own OpenAPI
+ * spec, api.sendpulse.com/.well-known/openapi/bulk-email.yaml, operationId updateContactVariables).
+ * Used by runCandidateDigest() to refresh each candidate's digest_count every run. */
+async function updateContactVariable(
+  email: string,
+  bookId: number,
+  name: string,
+  value: string,
+  token: string,
+): Promise<void> {
+  const payload = JSON.stringify({ email, variables: [{ name, value }] })
+  const { status, text } = await spPost(
+    `${SENDPULSE_API}/addressbooks/${bookId}/emails/variable`,
+    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    payload,
+  )
+  console.log(`[SendPulse] updateContactVariable bookId=${bookId} status=${status}`, text)
+}
+
+/** Every contact email currently in an address book — paginated at the API's own 100-per-page
+ * cap (`GET /addressbooks/{id}/emails`, confirmed against the same SendPulse OpenAPI spec as
+ * updateContactVariable()). Used by runCandidateDigest() to reconcile the "Candidates" book:
+ * anyone present who is no longer eligible gets removed before the campaign goes out. */
+async function listAddressBookEmails(bookId: number, token: string): Promise<string[]> {
+  const emails: string[] = []
+  let offset = 0
+  while (true) {
+    const { status, text } = await spGet(
+      `${SENDPULSE_API}/addressbooks/${bookId}/emails?limit=100&offset=${offset}`,
+      { Authorization: `Bearer ${token}` },
+    )
+    if (status < 200 || status >= 300) {
+      console.warn(`[SendPulse] GET /addressbooks/${bookId}/emails status=${status}`, text)
+      break
+    }
+    const page = JSON.parse(text) as Array<{ email: string }>
+    if (!page.length) break
+    emails.push(...page.map((e) => e.email))
+    offset += page.length
+  }
+  return emails
 }
 
 /**
@@ -137,6 +192,30 @@ async function removeEmployerFromSendPulse(employer: { email: string; streams: s
   )
 }
 
+/** Adds a confirmed candidate to the single "Candidates" SendPulse book — the only purpose is
+ * to trigger a SendPulse Automation 360 flow ("contact added to book") that sends the welcome
+ * email, same mechanism as the employer welcome email (TASK-10) — no HTML is built or sent by
+ * this app's code. The same book is also reconciled by runCandidateDigest() (digest campaign
+ * target) — one book for both, see docs/backlog.adoc for why. */
+async function syncCandidateToSendPulse(candidate: { id: string; name: string; email: string }): Promise<void> {
+  const token = await getToken()
+  if (!token) { console.warn("[SendPulse] failed to get access token"); return }
+  const bookName = process.env.SENDPULSE_CANDIDATE_BOOK_NAME || "Candidates"
+  const bookId = await getOrCreateBook(bookName, token)
+  await addToAddressBook(candidate.email, bookId, { "Имя": candidate.name, candidate_id: candidate.id }, token)
+}
+
+/** Removes a candidate from the "Candidates" book — mirrors removeEmployerFromSendPulse().
+ * Called on explicit rejection/deletion only, never on the automatic "Не публиковать" pause
+ * (TASK-05) — that status doesn't mean the candidate was rejected, see getConfirmedCandidates(). */
+async function removeCandidateFromSendPulse(email: string): Promise<void> {
+  const token = await getToken()
+  if (!token) { console.warn("[SendPulse] failed to get access token"); return }
+  const bookName = process.env.SENDPULSE_CANDIDATE_BOOK_NAME || "Candidates"
+  const bookId = await getBookId(bookName, token)
+  if (bookId) await removeFromAddressBook(email, bookId, token)
+}
+
 /**
  * currentActiveSince is the value already shown in the editor for this candidate — if it's
  * already set (e.g. re-approving a previously disabled candidate), it's left untouched;
@@ -145,11 +224,19 @@ async function removeEmployerFromSendPulse(employer: { email: string; streams: s
 export async function approveCandidate(id: string, currentActiveSince?: string): Promise<void> {
   const activeSince = currentActiveSince?.trim() ? undefined : new Date().toLocaleDateString("ru-RU")
   await updateCandidateStatus(id, "Активный" as CandidateStatus, activeSince)
+  const candidate = await getCandidateById(id)
+  if (candidate?.email) {
+    await syncCandidateToSendPulse({ id: candidate.id, name: candidate.name, email: candidate.email })
+  }
   revalidatePath("/editor/candidates")
 }
 
 export async function rejectCandidate(id: string): Promise<void> {
+  const candidate = await getCandidateById(id)
   await updateCandidateStatus(id, "Отклонён" as CandidateStatus)
+  if (candidate?.email) {
+    await removeCandidateFromSendPulse(candidate.email)
+  }
   revalidatePath("/editor/candidates")
 }
 
@@ -527,11 +614,8 @@ async function createCampaign(
   subject: string,
   html: string,
   name: string,
+  from: { email: string; name: string },
 ): Promise<{ id: number }> {
-  const fromEmail = process.env.SENDPULSE_FROM_EMAIL
-  const fromName = process.env.SENDPULSE_FROM_NAME || "TalentStreams"
-  if (!fromEmail) throw new Error("SENDPULSE_FROM_EMAIL не задан в переменных окружения")
-
   const token = await getToken()
   if (!token) throw new Error("Не удалось получить токен SendPulse")
 
@@ -540,8 +624,8 @@ async function createCampaign(
     list_id: Number(bookId),
     subject,
     body: Buffer.from(html, "utf-8").toString("base64"),
-    sender_name: fromName,
-    sender_email: fromEmail,
+    sender_name: from.name,
+    sender_email: from.email,
   })
   console.log("[SendPulse] createCampaign:", payload)
 
@@ -716,9 +800,13 @@ export async function publishMailingList(listId: string, confirmed = false): Pro
   const campaignName = campaignNameFor(list.stream, date, list.recipientLabel)
   const html = buildEmailHtml(list.stream, date, listUrl, telegramConnectUrl("{{employer_token}}"))
 
+  const employerFromEmail = process.env.SENDPULSE_EMPLOYER_FROM_EMAIL
+  if (!employerFromEmail) throw new Error("SENDPULSE_EMPLOYER_FROM_EMAIL не задан в переменных окружения")
+  const employerFrom = { email: employerFromEmail, name: process.env.SENDPULSE_EMPLOYER_FROM_NAME || "Talent Streams Partner" }
+
   let campaign: { id: number }
   try {
-    campaign = await createCampaign(bookId, subject, html, campaignName)
+    campaign = await createCampaign(bookId, subject, html, campaignName, employerFrom)
   } catch (err) {
     // Deliberately NOT deleting the ad-hoc book here (unlike earlier versions of this code).
     // Real incident: a brand-new SendPulse contact (never added to any book before) kept
@@ -1019,6 +1107,7 @@ export async function deleteCandidateResumeVersion(candidateId: string, versionI
  * already gone, transient error) is logged, not fatal, so the row still gets removed.
  */
 export async function deleteCandidate(id: string): Promise<void> {
+  const candidate = await getCandidateById(id)
   const versions = await getResumeVersions(id)
   await Promise.all(
     versions
@@ -1031,6 +1120,9 @@ export async function deleteCandidate(id: string): Promise<void> {
       ),
   )
   await deleteCandidateRecord(id)
+  if (candidate?.email) {
+    await removeCandidateFromSendPulse(candidate.email)
+  }
   revalidatePath("/editor/candidates")
 }
 
@@ -1270,6 +1362,22 @@ export async function submitContactRequest(
     candidateId,
     employerToken,
   })
+
+  // Best-effort — a candidate not getting this email must never affect the contact request
+  // itself, which is already written above. Only the employer's company is named, never the
+  // employer (name/email/phone) — hard rule, decided with the user.
+  const candidate = await getCandidateById(candidateId)
+  if (candidate?.email) {
+    const candidateFromEmail = process.env.SENDPULSE_CANDIDATE_FROM_EMAIL
+    if (candidateFromEmail) {
+      await sendTransactionalEmail(
+        { email: candidate.email },
+        "Вашим резюме заинтересовался работодатель",
+        buildConsentRequestEmailHtml(employer.company),
+        { email: candidateFromEmail, name: process.env.SENDPULSE_CANDIDATE_FROM_NAME || "Talent Streams Career" },
+      )
+    }
+  }
 }
 
 /** True if a stream has at least one release that was actually sent as a SendPulse campaign —
@@ -1319,4 +1427,114 @@ export async function archiveStream(id: number): Promise<void> {
 export async function unarchiveStream(id: number): Promise<void> {
   await updateStreamRecord(id, { status: "Активный" })
   revalidatePath("/editor/streams")
+}
+
+/**
+ * Sends the monthly "N работодателей увидели ваше резюме" digest — one SendPulse campaign to
+ * the "Candidates" book, not a per-recipient loop (decided with the user after reconsidering:
+ * a transactional send would misuse SendPulse's SMTP channel, meant for one-off event-triggered
+ * mail, for what is actually a recurring bulk send — see docs/backlog.adoc). Called both from
+ * the cron route (app/api/cron/candidate-monthly-digest/route.ts) and from sendCandidateDigestNow()
+ * below (manual "Отправить сейчас" button) — a route handler importing an exported Server Action
+ * as a plain function is fine; the "use server" RPC restriction only applies to client-component
+ * calls, not server-to-server imports.
+ *
+ * The book is fully reconciled every run: anyone no longer "Активный"/"Не публиковать", or
+ * missing an email, is removed first; everyone currently eligible is (re-)added with a fresh
+ * digest_count variable. This is also how the book gets created and populated in the first
+ * place — there's no separate backfill step, see "Что нужно сделать руками" in the plan this
+ * feature shipped from: run this once manually before turning on the SendPulse Automation 360
+ * welcome flow on the same book, so the reconciliation's adds don't fire false "welcome" emails.
+ */
+export async function runCandidateDigest(triggeredBy: "cron" | "manual"): Promise<DigestRun> {
+  const [candidates, exposureCounts] = await Promise.all([getConfirmedCandidates(), getCandidateExposureCounts()])
+  const eligible = candidates.filter((c): c is typeof c & { email: string } => Boolean(c.email))
+  const eligibleEmails = new Set(eligible.map((c) => c.email.toLowerCase()))
+
+  const token = await getToken()
+  if (!token) {
+    console.warn("[SendPulse] runCandidateDigest: failed to get access token")
+    return recordCandidateDigestRun({
+      triggeredBy,
+      candidatesTotal: eligible.length,
+      candidatesPrepared: 0,
+      candidatesFailed: eligible.length,
+      campaignId: null,
+    })
+  }
+
+  const bookName = process.env.SENDPULSE_CANDIDATE_BOOK_NAME || "Candidates"
+  const bookId = await getOrCreateBook(bookName, token)
+
+  // 1. Remove anyone in the book who is no longer eligible (rejected/deleted/no email).
+  const currentMembers = await listAddressBookEmails(bookId, token)
+  const stale = currentMembers.filter((email) => !eligibleEmails.has(email.toLowerCase()))
+  await Promise.all(stale.map((email) => removeFromAddressBook(email, bookId, token)))
+
+  // 2. Add/refresh every eligible candidate — book membership and digest_count always current.
+  let prepared = 0
+  let failed = 0
+  for (const c of eligible) {
+    const real = exposureCounts.get(c.id) ?? 0
+    const shown = real >= 8 ? real : 8 + Math.floor(Math.random() * 9) // 8..16
+    try {
+      await addToAddressBook(c.email, bookId, { "Имя": c.name }, token)
+      await updateContactVariable(c.email, bookId, "digest_count", String(shown), token)
+      prepared++
+    } catch (err) {
+      console.error("[SendPulse] runCandidateDigest: failed to prepare candidate:", c.id, err)
+      failed++
+    }
+  }
+
+  // 3. One campaign for the whole book — {{digest_count}} is substituted per-recipient by
+  // SendPulse from the variable just set above, same mechanism as {{Имя}}/{{Streams}} already
+  // used for employer campaigns.
+  let campaignId: number | null = null
+  if (prepared > 0) {
+    const candidateFromEmail = process.env.SENDPULSE_CANDIDATE_FROM_EMAIL
+    if (!candidateFromEmail) {
+      console.warn("[SendPulse] runCandidateDigest: SENDPULSE_CANDIDATE_FROM_EMAIL not set, skipping campaign")
+    } else {
+      try {
+        const campaign = await createCampaign(
+          bookId,
+          "Итоги месяца: вас увидели {{digest_count}} работодателей",
+          buildDigestEmailHtml(),
+          `Дайджест кандидатам — ${new Date().toLocaleDateString("ru-RU")}`,
+          { email: candidateFromEmail, name: process.env.SENDPULSE_CANDIDATE_FROM_NAME || "Talent Streams Career" },
+        )
+        campaignId = campaign.id
+      } catch (err) {
+        console.error("[SendPulse] runCandidateDigest: failed to create campaign:", err)
+      }
+    }
+  }
+
+  const run = await recordCandidateDigestRun({
+    triggeredBy,
+    candidatesTotal: eligible.length,
+    candidatesPrepared: prepared,
+    candidatesFailed: failed,
+    campaignId,
+  })
+  revalidatePath("/editor/settings")
+  return run
+}
+
+export async function getCandidateDigestSettings() {
+  return getCandidateDigestSettingsDb()
+}
+
+export async function setCandidateDigestAutoSend(enabled: boolean): Promise<void> {
+  await setCandidateDigestAutoSendDb(enabled)
+  revalidatePath("/editor/settings")
+}
+
+export async function getCandidateDigestRuns() {
+  return getCandidateDigestRunsDb()
+}
+
+export async function sendCandidateDigestNow(): Promise<DigestRun> {
+  return runCandidateDigest("manual")
 }

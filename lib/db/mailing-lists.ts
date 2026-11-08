@@ -4,7 +4,7 @@ import { db } from "./index"
 import { mailingLists, mailingListRecipients, selections, selectionEntries, selectionEmployers, streams } from "./schema"
 import { getStreamIdByName } from "./streams"
 import { getCandidates, type Candidate } from "./candidates"
-import { getEmployers, getEmployerByToken, confirmedEmployersForStream, type Employer } from "./employers"
+import { getEmployers, getEmployerByToken, confirmedEmployersForStream, filterCandidatesForEmployer, type Employer } from "./employers"
 
 export type MailingListEntry = {
   profile: Candidate
@@ -659,4 +659,43 @@ export async function getEmployersWithoutSelection(listId: string): Promise<Empl
     : confirmedEmployersForStream(await getEmployers(), { name: meta.stream })
 
   return audience.filter((e) => !coveredTokens.has(e.token))
+}
+
+/** For every candidate, the set of distinct employer tokens who ever actually saw them through
+ * a sent release — the same resolution /list/[listId]/page.tsx uses for one employer at a time
+ * (resolveMailingListForEmployer() + filterCandidatesForEmployer() for the default selection,
+ * unfiltered for a personal one), run across every sent release and recipient at once. Used by
+ * runCandidateDigest() (app/actions.ts) for the "N работодателей увидели ваше резюме" count —
+ * a candidate counts once per employer even if multiple releases exposed them to the same one.
+ * Accepted inefficiency: getMailingList() re-fetches the full candidate table internally on
+ * every sent release (~23 today) — this only ever runs from a once-a-month cron/manual trigger,
+ * not a hot path, so it isn't worth threading a shared candidate list through to avoid that. */
+export async function getCandidateExposureCounts(): Promise<Map<string, number>> {
+  const [lists, allEmployers] = await Promise.all([getMailingLists(), getEmployers()])
+  const employerByToken = new Map(allEmployers.map((e) => [e.token, e]))
+  const sets = new Map<string, Set<string>>()
+
+  for (const summary of lists.filter((l) => l.sentCampaignId !== null)) {
+    const [full, recipientTokens] = await Promise.all([
+      getMailingList(summary.listId),
+      getMailingListRecipientTokens(summary.listId),
+    ])
+    if (!full) continue
+    const audience = recipientTokens.length
+      ? recipientTokens.map((t) => employerByToken.get(t)).filter((e): e is Employer => Boolean(e))
+      : confirmedEmployersForStream(allEmployers, { name: summary.stream })
+
+    for (const employer of audience) {
+      const resolved = resolveMailingListForEmployer(full, employer.token)
+      if (!resolved) continue
+      const visible = resolved.isPersonal
+        ? resolved.entries
+        : resolved.entries.filter((e) => filterCandidatesForEmployer([e.profile], employer).length > 0)
+      for (const entry of visible) {
+        if (!sets.has(entry.profile.id)) sets.set(entry.profile.id, new Set())
+        sets.get(entry.profile.id)!.add(employer.token)
+      }
+    }
+  }
+  return new Map([...sets].map(([id, set]) => [id, set.size]))
 }

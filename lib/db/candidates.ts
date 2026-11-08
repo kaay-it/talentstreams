@@ -1,5 +1,5 @@
 import "server-only"
-import { asc, eq } from "drizzle-orm"
+import { asc, eq, inArray } from "drizzle-orm"
 import { db } from "./index"
 import { candidates } from "./schema"
 
@@ -78,6 +78,19 @@ export async function getCandidates(): Promise<Candidate[]> {
 export async function getActiveCandidates(): Promise<Candidate[]> {
   try {
     const rows = await db.select().from(candidates).where(eq(candidates.status, "Активный"))
+    return rows.map(toCandidate)
+  } catch {
+    return []
+  }
+}
+
+/** "Активный" + "Не публиковать" — anyone who was confirmed and not explicitly rejected.
+ * "Не публиковать" only means excluded from new release selections (TASK-05 pause after the
+ * 3rd send), not that the candidate themselves was rejected — they still belong in SendPulse
+ * books / candidate-facing emails (the monthly digest, see app/actions.ts runCandidateDigest()). */
+export async function getConfirmedCandidates(): Promise<Candidate[]> {
+  try {
+    const rows = await db.select().from(candidates).where(inArray(candidates.status, ["Активный", "Не публиковать"]))
     return rows.map(toCandidate)
   } catch {
     return []
