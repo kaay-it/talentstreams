@@ -91,32 +91,11 @@ async function removeFromAddressBook(
   console.log(`[SendPulse] remove bookId=${bookId} status=${status}`, text)
 }
 
-/** Sets/overwrites a single variable on an already-present address book contact — distinct from
- * addToAddressBook()'s variables (which only apply on insert/upsert of the whole contact), this
- * is the dedicated SendPulse endpoint for refreshing one variable on a contact that may already
- * exist (`POST /addressbooks/{id}/emails/variable`, confirmed against SendPulse's own OpenAPI
- * spec, api.sendpulse.com/.well-known/openapi/bulk-email.yaml, operationId updateContactVariables).
- * Used by runCandidateDigest() to refresh each candidate's digest_count every run. */
-async function updateContactVariable(
-  email: string,
-  bookId: number,
-  name: string,
-  value: string,
-  token: string,
-): Promise<void> {
-  const payload = JSON.stringify({ email, variables: [{ name, value }] })
-  const { status, text } = await spPost(
-    `${SENDPULSE_API}/addressbooks/${bookId}/emails/variable`,
-    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    payload,
-  )
-  console.log(`[SendPulse] updateContactVariable bookId=${bookId} status=${status}`, text)
-}
-
 /** Every contact email currently in an address book — paginated at the API's own 100-per-page
- * cap (`GET /addressbooks/{id}/emails`, confirmed against the same SendPulse OpenAPI spec as
- * updateContactVariable()). Used by runCandidateDigest() to reconcile the "Candidates" book:
- * anyone present who is no longer eligible gets removed before the campaign goes out. */
+ * cap (`GET /addressbooks/{id}/emails`, confirmed against SendPulse's own OpenAPI spec,
+ * api.sendpulse.com/.well-known/openapi/bulk-email.yaml). Used by runCandidateDigest() to
+ * reconcile the "Candidates" book: anyone present who is no longer eligible gets removed before
+ * the campaign goes out. */
 async function listAddressBookEmails(bookId: number, token: string): Promise<string[]> {
   const emails: string[] = []
   let offset = 0
@@ -1444,11 +1423,12 @@ export async function unarchiveStream(id: number): Promise<void> {
  * Sends the monthly "N работодателей увидели ваше резюме" digest — one SendPulse campaign to
  * the "Candidates" book, not a per-recipient loop (decided with the user after reconsidering:
  * a transactional send would misuse SendPulse's SMTP channel, meant for one-off event-triggered
- * mail, for what is actually a recurring bulk send — see docs/backlog.adoc). Called both from
- * the cron route (app/api/cron/candidate-monthly-digest/route.ts) and from sendCandidateDigestNow()
- * below (manual "Отправить сейчас" button) — a route handler importing an exported Server Action
- * as a plain function is fine; the "use server" RPC restriction only applies to client-component
- * calls, not server-to-server imports.
+ * mail, for what is actually a recurring bulk send — see docs/backlog.adoc). Only called from the
+ * cron route (app/api/cron/candidate-monthly-digest/route.ts) now — the manual "Отправить сейчас"
+ * flow goes through previewCandidateDigest()/sendCandidateDigestToApproved() instead (a separate,
+ * manager-curated path, see those functions' doc comments below). A route handler importing an
+ * exported Server Action as a plain function is fine; the "use server" RPC restriction only
+ * applies to client-component calls, not server-to-server imports.
  *
  * The book is fully reconciled every run: anyone no longer "Активный"/"Не публиковать", or
  * missing an email, is removed first; everyone currently eligible is (re-)added with a fresh
@@ -1489,8 +1469,14 @@ export async function runCandidateDigest(triggeredBy: "cron" | "manual"): Promis
     const real = exposureCounts.get(c.id) ?? 0
     const shown = real >= 8 ? real : 8 + Math.floor(Math.random() * 9) // 8..16
     try {
-      await addToAddressBook(c.email, bookId, { "Имя": c.name, phone: c.phone }, token)
-      await updateContactVariable(c.email, bookId, "digest_count", String(shown), token)
+      // digest_count MUST be included in this one call, not set afterward via a separate
+      // "update variable" call — confirmed by live testing: SendPulse only auto-creates a new
+      // custom variable field in the book's schema from the bulk add-contacts endpoint; the
+      // single-variable endpoint silently no-ops when the field doesn't already exist in the
+      // book's schema (returns 200, but the value never shows up on the contact or in a merge
+      // tag). A prior version of this code called them as two separate steps and the digest_count
+      // merge tag never actually substituted in the sent email — caught live, not in review.
+      await addToAddressBook(c.email, bookId, { "Имя": c.name, phone: c.phone, digest_count: String(shown) }, token)
       prepared++
     } catch (err) {
       console.error("[SendPulse] runCandidateDigest: failed to prepare candidate:", c.id, err)
@@ -1546,8 +1532,102 @@ export async function getCandidateDigestRuns() {
   return getCandidateDigestRunsDb()
 }
 
-export async function sendCandidateDigestNow(): Promise<DigestRun> {
-  return runCandidateDigest("manual")
+export type DigestPreviewCandidate = { id: string; name: string; email: string; phone: string; shown: number }
+export type DigestPreview = { candidates: DigestPreviewCandidate[] }
+
+/** Read-only computation for the "Загрузить список" button on /editor/settings — same eligibility
+ * + exposure-count logic as runCandidateDigest(), but no SendPulse writes, no run recorded. The
+ * `shown` value here is frozen and must be reused as-is by sendCandidateDigestToApproved() below —
+ * recomputing it there would risk showing the manager one number and emailing a different one. */
+export async function previewCandidateDigest(): Promise<DigestPreview> {
+  const [candidates, exposureCounts] = await Promise.all([getConfirmedCandidates(), getCandidateExposureCounts()])
+  const eligible = candidates.filter((c): c is typeof c & { email: string } => Boolean(c.email))
+  return {
+    candidates: eligible.map((c) => {
+      const real = exposureCounts.get(c.id) ?? 0
+      const shown = real >= 8 ? real : 8 + Math.floor(Math.random() * 9) // 8..16
+      return { id: c.id, name: c.name, email: c.email, phone: c.phone, shown }
+    }),
+  }
+}
+
+/** Sends the digest to exactly the manager-approved subset from previewCandidateDigest() — the
+ * manual counterpart to runCandidateDigest("cron"), which is untouched and keeps targeting the
+ * "Candidates" book directly. This function deliberately never touches "Candidates" book
+ * membership: removing an unapproved candidate from it to exclude them from this one send would
+ * make their next re-add (e.g. next month, once approved) a genuine fresh "contact added to book"
+ * event, which is exactly what triggers the SendPulse Automation 360 welcome-email flow
+ * (syncCandidateToSendPulse(), approveCandidate()) — a false repeat "welcome" email. Instead this
+ * uses a separate, permanent, reused-every-time book that exists only to carry this campaign's
+ * audience; "Candidates" membership is never read or written here. */
+export async function sendCandidateDigestToApproved(approved: DigestPreviewCandidate[]): Promise<DigestRun> {
+  // Re-validate against current eligibility (not just trusting the client) — a candidate rejected/
+  // deleted between preview and this click must not receive the campaign. `shown` IS trusted
+  // verbatim from `approved` (see previewCandidateDigest()'s doc comment) — only membership is
+  // re-checked here, not the number.
+  const currentlyEligible = new Set(
+    (await getConfirmedCandidates()).filter((c) => c.email).map((c) => c.id),
+  )
+  const finalList = approved.filter((c) => currentlyEligible.has(c.id))
+
+  if (finalList.length === 0) {
+    const run = await recordCandidateDigestRun({ triggeredBy: "manual", candidatesTotal: 0, candidatesPrepared: 0, candidatesFailed: 0, campaignId: null })
+    revalidatePath("/editor/settings")
+    return run
+  }
+
+  const token = await getToken()
+  if (!token) {
+    console.warn("[SendPulse] sendCandidateDigestToApproved: failed to get access token")
+    return recordCandidateDigestRun({ triggeredBy: "manual", candidatesTotal: finalList.length, candidatesPrepared: 0, candidatesFailed: finalList.length, campaignId: null })
+  }
+
+  const bookName = process.env.SENDPULSE_CANDIDATE_DIGEST_SEND_BOOK_NAME || "Candidates Digest Manual"
+  const bookId = await getOrCreateBook(bookName, token)
+
+  // Fully clear and repopulate every manual send — this book only ever needs to carry exactly
+  // this run's approved audience, nothing held over from a previous manual send.
+  const currentMembers = await listAddressBookEmails(bookId, token)
+  await Promise.all(currentMembers.map((email) => removeFromAddressBook(email, bookId, token)))
+
+  let prepared = 0
+  let failed = 0
+  for (const c of finalList) {
+    try {
+      // digest_count bundled into this one call, not a separate update — see the identical
+      // comment in runCandidateDigest() for why.
+      await addToAddressBook(c.email, bookId, { "Имя": c.name, phone: c.phone, digest_count: String(c.shown) }, token)
+      prepared++
+    } catch (err) {
+      console.error("[SendPulse] sendCandidateDigestToApproved: failed to prepare candidate:", c.id, err)
+      failed++
+    }
+  }
+
+  let campaignId: number | null = null
+  if (prepared > 0) {
+    const candidateFromEmail = process.env.SENDPULSE_CANDIDATE_FROM_EMAIL
+    if (!candidateFromEmail) {
+      console.warn("[SendPulse] sendCandidateDigestToApproved: SENDPULSE_CANDIDATE_FROM_EMAIL not set, skipping campaign")
+    } else {
+      try {
+        const campaign = await createCampaign(
+          bookId,
+          "Итоги месяца: вас увидели {{digest_count}} работодателей",
+          buildDigestEmailHtml(),
+          `Дайджест кандидатам (вручную) — ${new Date().toLocaleDateString("ru-RU")}`,
+          { email: candidateFromEmail, name: process.env.SENDPULSE_CANDIDATE_FROM_NAME || "Talent Streams Career" },
+        )
+        campaignId = campaign.id
+      } catch (err) {
+        console.error("[SendPulse] sendCandidateDigestToApproved: failed to create campaign:", err)
+      }
+    }
+  }
+
+  const run = await recordCandidateDigestRun({ triggeredBy: "manual", candidatesTotal: finalList.length, candidatesPrepared: prepared, candidatesFailed: failed, campaignId })
+  revalidatePath("/editor/settings")
+  return run
 }
 
 // Protects a first/late run from retroactively messaging every employer across the entire
@@ -1680,6 +1760,163 @@ export async function getReleaseFollowUpRuns() {
   return getReleaseFollowUpRunsDb()
 }
 
-export async function sendReleaseFollowUpsNow(): Promise<FollowUpRun> {
-  return runReleaseFollowUps("manual")
+export type FollowUpPreviewRow = {
+  listId: string
+  employerToken: string
+  employerName: string
+  company: string
+  email: string
+  classification: "feedback" | "reminder"
+}
+export type FollowUpPreviewRelease = {
+  listId: string
+  stream: string
+  date: string
+  rows: FollowUpPreviewRow[]
+  /** Already requested for this release — no follow-up applies, not an actionable row. */
+  skippedCount: number
+}
+export type FollowUpPreview = { releases: FollowUpPreviewRelease[] }
+
+/** Read-only computation for the "Загрузить список" button — same classification logic as
+ * runReleaseFollowUps() (including the live, unavoidable getCampaignEmailStatus() calls per
+ * employer), but sends nothing and records nothing. Only feedback/reminder (actionable) rows are
+ * returned per-row; already-requested employers are counted in skippedCount, not listed — nothing
+ * for the manager to decide about them, they never get an email either way. */
+export async function previewReleaseFollowUps(): Promise<FollowUpPreview> {
+  const token = await getToken()
+  const [lists, allEmployers] = await Promise.all([getMailingLists(), getEmployers()])
+  if (!token) return { releases: [] }
+
+  const qualifying: Array<{ listId: string; stream: string; date: string; sentCampaignId: number }> = []
+  for (const summary of lists.filter((l) => l.sentCampaignId !== null)) {
+    const sendDate = await getCampaignSendDate(summary.sentCampaignId!, token)
+    if (!sendDate) continue
+    const daysSinceSend = (Date.now() - sendDate.getTime()) / 86_400_000
+    if (daysSinceSend < FOLLOW_UP_MIN_DAYS_AFTER_SEND || daysSinceSend > FOLLOW_UP_MAX_DAYS_AFTER_SEND) continue
+    qualifying.push({ listId: summary.listId, stream: summary.stream, date: summary.date, sentCampaignId: summary.sentCampaignId! })
+  }
+  if (!qualifying.length) return { releases: [] }
+
+  const alreadyEvaluated = await getEvaluatedFollowUpKeys(qualifying.map((q) => q.listId))
+  const releases: FollowUpPreviewRelease[] = []
+
+  for (const release of qualifying) {
+    const [audience, requestedTokens] = await Promise.all([
+      getReleaseAudience(release.listId, release.stream, allEmployers),
+      getEmployerTokensWithRequestForList(release.listId),
+    ])
+
+    const rows: FollowUpPreviewRow[] = []
+    let skippedCount = 0
+
+    for (const employer of audience) {
+      if (alreadyEvaluated.has(`${release.listId}|${employer.token}`)) continue
+
+      const emailStatus = await getCampaignEmailStatus(release.sentCampaignId, employer.email, token)
+      if (!emailStatus) continue // unknown — leave out of preview, same as runReleaseFollowUps() leaves it unrecorded
+
+      const opened = emailStatus.detailStatus >= 3
+      const requested = requestedTokens.has(employer.token)
+
+      if (requested) {
+        skippedCount++
+      } else {
+        rows.push({
+          listId: release.listId,
+          employerToken: employer.token,
+          employerName: employer.name,
+          company: employer.company,
+          email: employer.email,
+          classification: opened ? "feedback" : "reminder",
+        })
+      }
+    }
+
+    if (rows.length || skippedCount) {
+      releases.push({ listId: release.listId, stream: release.stream, date: release.date, rows, skippedCount })
+    }
+  }
+
+  return { releases }
+}
+
+/** Sends exactly the manager-approved rows from previewReleaseFollowUps() — the manual counterpart
+ * to runReleaseFollowUps("cron"), which is untouched. Re-checks each pair against
+ * getEvaluatedFollowUpKeys() immediately before sending (cheap, DB-only) to guard the race where
+ * the daily cron (or a concurrent manual send) already decided this exact pair between preview and
+ * this click — such a row is silently skipped, not re-sent and not errored. Does NOT re-fetch
+ * getCampaignEmailStatus()/re-check contact requests — open status only ever moves toward "opened"
+ * (a harmless staleness), and a request submitted in the last few minutes is a rare, low-stakes
+ * tone mismatch, not a duplicate or incorrect permanent record. */
+export async function sendReleaseFollowUpsToApproved(
+  approved: Array<{ listId: string; employerToken: string; classification: "feedback" | "reminder" }>,
+): Promise<FollowUpRun> {
+  const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
+  const employerFromEmail = process.env.SENDPULSE_EMPLOYER_FROM_EMAIL
+  const employerFromName = process.env.SENDPULSE_EMPLOYER_FROM_NAME || "Talent Streams Partner"
+
+  const releaseIds = [...new Set(approved.map((r) => r.listId))]
+  let feedbackSent = 0
+  let reminderSent = 0
+  let failed = 0
+
+  if (approved.length && !employerFromEmail) {
+    console.warn("[SendPulse] sendReleaseFollowUpsToApproved: SENDPULSE_EMPLOYER_FROM_EMAIL not set, skipping")
+    failed = approved.length
+  } else if (approved.length) {
+    const [alreadyEvaluated, allEmployers, allLists] = await Promise.all([
+      getEvaluatedFollowUpKeys(releaseIds),
+      getEmployers(),
+      getMailingLists(),
+    ])
+    const employerByToken = new Map(allEmployers.map((e) => [e.token, e]))
+    const streamByListId = new Map(allLists.map((l) => [l.listId, l.stream]))
+
+    for (const row of approved) {
+      const key = `${row.listId}|${row.employerToken}`
+      if (alreadyEvaluated.has(key)) continue // already decided by a concurrent cron/manual run — don't double-send
+
+      const employer = employerByToken.get(row.employerToken)
+      if (!employer) { failed++; continue }
+
+      try {
+        if (row.classification === "feedback") {
+          await sendTransactionalEmail(
+            { email: employer.email, name: employer.name },
+            "Помогите нам сделать подборки точнее",
+            buildFollowUpFeedbackEmailHtml(),
+            { email: employerFromEmail!, name: employerFromName },
+          )
+          await recordFollowUpOutcome(row.listId, row.employerToken, "feedback")
+          feedbackSent++
+        } else {
+          const stream = streamByListId.get(row.listId) ?? ""
+          const listUrl = `${appUrl}/list/${row.listId}?e=${row.employerToken}`
+          await sendTransactionalEmail(
+            { email: employer.email, name: employer.name },
+            `Напоминаем о новой подборке кандидатов — ${stream}`,
+            buildFollowUpReminderEmailHtml({ employerName: employer.name, streamName: stream, listUrl }),
+            { email: employerFromEmail!, name: employerFromName },
+          )
+          await recordFollowUpOutcome(row.listId, row.employerToken, "reminder")
+          reminderSent++
+        }
+      } catch (err) {
+        console.error("[SendPulse] sendReleaseFollowUpsToApproved: failed to process employer:", row.employerToken, row.listId, err)
+        failed++
+      }
+    }
+  }
+
+  const run = await recordReleaseFollowUpRun({
+    triggeredBy: "manual",
+    releasesChecked: releaseIds.length,
+    employersEvaluated: approved.length,
+    feedbackSent,
+    reminderSent,
+    failed,
+  })
+  revalidatePath("/editor/settings")
+  return run
 }

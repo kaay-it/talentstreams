@@ -44,6 +44,7 @@ SENDPULSE_EMPLOYER_FROM_NAME=TalentStreams Partner
 SENDPULSE_CANDIDATE_FROM_EMAIL=career@example.com
 SENDPULSE_CANDIDATE_FROM_NAME=TalentStreams Career
 SENDPULSE_CANDIDATE_BOOK_NAME=Candidates
+SENDPULSE_CANDIDATE_DIGEST_SEND_BOOK_NAME=Candidates Digest Manual
 
 # Приложение
 APP_URL=https://your-domain.com
