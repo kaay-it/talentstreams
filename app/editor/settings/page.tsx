@@ -2,7 +2,8 @@ import { notFound } from "next/navigation"
 import { isSheetsConfigured } from "@/lib/sheets"
 import { ImportCandidatesButton } from "@/components/import-candidates-button"
 import { CandidateDigestSection } from "@/components/candidate-digest-section"
-import { getCandidateDigestSettings, getCandidateDigestRuns } from "@/app/actions"
+import { ReleaseFollowUpSection } from "@/components/release-follow-up-section"
+import { getCandidateDigestSettings, getCandidateDigestRuns, getReleaseFollowUpSettings, getReleaseFollowUpRuns } from "@/app/actions"
 
 export const dynamic = "force-dynamic"
 
@@ -18,7 +19,12 @@ export default async function SettingsPage({
     notFound()
   }
 
-  const [digestSettings, digestRuns] = await Promise.all([getCandidateDigestSettings(), getCandidateDigestRuns()])
+  const [digestSettings, digestRuns, followUpSettings, followUpRuns] = await Promise.all([
+    getCandidateDigestSettings(),
+    getCandidateDigestRuns(),
+    getReleaseFollowUpSettings(),
+    getReleaseFollowUpRuns(),
+  ])
 
   return (
     <div className="px-6 py-8">
@@ -49,6 +55,17 @@ export default async function SettingsPage({
           «Отправить сейчас» запускает её вне расписания.
         </p>
         <CandidateDigestSection initialAutoSendEnabled={digestSettings.autoSendEnabled} initialRuns={digestRuns} />
+      </div>
+
+      <div className="mt-10 space-y-3">
+        <h2 className="text-sm font-semibold text-card-foreground">Фоллоу-ап после рассылки работодателям</h2>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Через 3–21 день после отправки каждого выпуска: тем, кто открыл письмо, но не оставил
+          заявку — просьба дать обратную связь по подборке; тем, кто письмо вообще не открыл —
+          персональное напоминание со ссылкой на тот же выпуск. Каждому работодателю по каждому
+          выпуску — не больше одного решения, повторно не напоминаем.
+        </p>
+        <ReleaseFollowUpSection initialAutoSendEnabled={followUpSettings.autoSendEnabled} initialRuns={followUpRuns} />
       </div>
     </div>
   )
