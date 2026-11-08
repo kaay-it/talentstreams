@@ -78,21 +78,35 @@ export async function getToken(): Promise<string | null> {
 type BookEntry = { id: number; emailCount: number }
 let _bookCache: Map<string, BookEntry> | null = null
 let _bookCacheExpiry = 0
+// Concurrent callers (e.g. Promise.all over every stream on /editor) would otherwise all race
+// past the cache check above before any of them finishes populating it, each firing its own
+// GET /addressbooks — this lets them share the one in-flight request instead.
+let _bookCacheInflight: Promise<void> | null = null
 
 async function loadBookCache(token: string): Promise<void> {
   if (_bookCache && Date.now() < _bookCacheExpiry) return
-  const { status, text } = await spGet(
-    `${API}/addressbooks?limit=500&offset=0`,
-    { Authorization: `Bearer ${token}` },
-  )
-  if (status >= 200 && status < 300) {
-    const books = JSON.parse(text) as Array<{ id: number; name: string; all_email_qty?: number }>
-    _bookCache = new Map(books.map((b) => [b.name, { id: b.id, emailCount: b.all_email_qty ?? 0 }]))
-    _bookCacheExpiry = Date.now() + 60_000
-    console.log(`[SendPulse] loaded ${_bookCache.size} address books`)
-  } else {
-    console.warn(`[SendPulse] GET /addressbooks status=${status}`, text)
-    _bookCache = new Map()
+  if (_bookCacheInflight) return _bookCacheInflight
+
+  _bookCacheInflight = (async () => {
+    const { status, text } = await spGet(
+      `${API}/addressbooks?limit=500&offset=0`,
+      { Authorization: `Bearer ${token}` },
+    )
+    if (status >= 200 && status < 300) {
+      const books = JSON.parse(text) as Array<{ id: number; name: string; all_email_qty?: number }>
+      _bookCache = new Map(books.map((b) => [b.name, { id: b.id, emailCount: b.all_email_qty ?? 0 }]))
+      _bookCacheExpiry = Date.now() + 60_000
+      console.log(`[SendPulse] loaded ${_bookCache.size} address books`)
+    } else {
+      console.warn(`[SendPulse] GET /addressbooks status=${status}`, text)
+      _bookCache = new Map()
+    }
+  })()
+
+  try {
+    await _bookCacheInflight
+  } finally {
+    _bookCacheInflight = null
   }
 }
 
