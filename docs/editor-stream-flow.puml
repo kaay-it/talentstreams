@@ -30,6 +30,10 @@ participant "Neon · candidateResumes" as neonResumes #d4f0d4
 participant "SendPulse\n(мастер-книга)" as sp_master  #fce8cc
 participant "SendPulse\n(книга стрима)" as sp_stream  #fce8cc
 participant "SendPulse\nCampaigns"  as sp_camp     #fce8cc
+participant "SendPulse\n(книга «Candidates»)" as sp_cbook #fce8cc
+participant "SendPulse\n(транзакционный SMTP)" as sp_smtp #fce8cc
+participant "Neon · releaseFollowUps" as neonFollow #d4f0d4
+participant "Neon · settings / runs" as neonAuto   #d4f0d4
 
 == 1. Редактор управляет стримами ==
 
@@ -198,6 +202,12 @@ alt Редактор одобряет кандидата
   editor -> app : approveCandidate(id)
   app -> sh_cands : updateCandidateStatus(id, "Активный", today)
   sh_cands --> app : OK
+  app -> sh_cands : getCandidateById(id)
+  sh_cands --> app : candidate
+  alt у кандидата есть email
+    app -> sp_cbook : syncCandidateToSendPulse(candidate)\nPOST /addressbooks/{Candidates}/emails\n{ email, variables: { Имя, phone, candidate_id } }
+    sp_cbook --> app : { "result": true }
+  end
   app --> editor : Страница обновлена (revalidatePath)
 else Редактор отклоняет кандидата
   editor -> app : rejectCandidate(id)
@@ -209,6 +219,15 @@ end
 note over app, sh_cands
   TASK-10 (кандидат): email-уведомление рекрутера
   о новой анкете не реализовано — отложено
+end note
+
+note over app, sp_cbook
+  TASK-45: членство в книге «Candidates» триггерит
+  приветственное письмо кандидату — Automation 360-флоу
+  «контакт добавлен в книгу», настраивается целиком в
+  интерфейсе SendPulse (docs/welcome-email-template-candidate.html),
+  код приложения HTML не шлёт, тот же паттерн, что у
+  работодателя (§3а ниже).
 end note
 
 == 2б. Редактор редактирует данные кандидата ==
@@ -285,19 +304,31 @@ end note
 == 2г. Редактор отключает / удаляет / добавляет кандидата (TASK-33) ==
 
 note over editor, app
-  Кандидаты не участвуют в SendPulse — в отличие от работодателя (3б),
-  здесь нет отдельного шага отписки. rejectCandidate()/approveCandidate()
-  переиспользуются как есть — те же функции, что и для первой модерации.
+  TASK-45 донастроила это: кандидат ТЕПЕРЬ участвует в SendPulse
+  (книга «Candidates») — rejectCandidate()/deleteCandidate() убирают
+  его оттуда, симметрично removeEmployerFromSendPulse() у работодателя
+  (3б). approveCandidate()/rejectCandidate() переиспользуются как есть —
+  те же функции, что и для первой модерации (§2а), с тем же побочным
+  эффектом на SendPulse.
 end note
 
 editor -> app : «Отключить» (status == "Активный")\nили «Подтвердить» у отклонённого (status == "Отклонён")
 app -> app : rejectCandidate(id) / approveCandidate(id)
 app -> sh_cands : updateCandidateStatus(id, "Отклонён" | "Активный", [today])
 sh_cands --> app : OK
+alt rejectCandidate() и у кандидата есть email
+  app -> sp_cbook : removeCandidateFromSendPulse(email)\nDELETE /addressbooks/{Candidates}/emails
+  sp_cbook --> app : OK
+else approveCandidate()
+  app -> sp_cbook : syncCandidateToSendPulse(candidate) (как в §2а)
+  sp_cbook --> app : { "result": true }
+end
 app --> editor : Статус обновлён в строке
 
 editor -> app : Корзина в строке → отдельный шаг подтверждения\n(«Удалить кандидата?» + «Да, удалить»/«Отмена»)
 app -> app : deleteCandidate(id)
+app -> sh_cands : getCandidateById(id) — email для SendPulse, до удаления строки
+sh_cands --> app : candidate
 app -> neonResumes : getResumeVersions(id)
 neonResumes --> app : все версии резюме кандидата
 loop для каждой версии с kind == "file"
@@ -313,6 +344,10 @@ note right of sh_cands
   Явный deleteResumeVersions() больше не нужен (раньше
   вызывался здесь отдельным шагом перед удалением строки).
 end note
+alt у кандидата был email
+  app -> sp_cbook : removeCandidateFromSendPulse(candidate.email) (TASK-45)
+  sp_cbook --> app : OK
+end
 app --> editor : Строка удалена из таблицы
 
 editor -> app : «+ Добавить кандидата» в панели фильтров\nCandidateCreateModal — та же форма, что CandidateEditModal,\nно без истории резюме, «Активен с» = сегодня
@@ -325,6 +360,48 @@ alt резюме передано
   neonResumes --> app : OK
 end
 app --> editor : Кандидат в статусе «На проверке» — как и при\nпубличной регистрации, требует подтверждения (заносить\nи проверять может быть разный человек: секретарь / рекрутёр)
+
+== 2д. Ежемесячный дайджест кандидатам (TASK-45) ==
+
+note over app, sp_cbook
+  Запуск: ежедневный крон (первый понедельник месяца — остальные
+  дни no-op) ИЛИ кнопка «Отправить сейчас» в CandidateDigestSection
+  (/editor/settings), независимо от тумблера автоотправки.
+end note
+
+app -> sh_cands : getConfirmedCandidates()\nstatus IN ('Активный', 'Не публиковать') — «Не публиковать» (TASK-05)\nне отказ, книги/дайджеста это не касается
+sh_cands --> app : eligible (только с email)
+app -> sh_mail : getCandidateExposureCounts()\nдля каждого кандидата — множество токенов работодателей,\nреально его увидевших по ВСЕМ отправленным рассылкам разом
+sh_mail --> app : Map<candidateId, Set<employerToken>>
+
+app -> sp_cbook : listAddressBookEmails(Candidates)\nтекущие члены книги
+sp_cbook --> app : [email, …]
+app -> sp_cbook : removeFromAddressBook() на каждого,\nкто больше не eligible (отклонён/удалён/лишился email)
+sp_cbook --> app : OK
+
+loop по каждому eligible кандидату
+  app -> app : real = exposureCounts.get(id) ?? 0\nshown = real >= 8 ? real : случайное 8–16
+  app -> sp_cbook : addToAddressBook(email, { Имя, phone })\n+ updateContactVariable(email, "digest_count", shown)
+  sp_cbook --> app : OK
+end
+
+alt хотя бы один подготовлен успешно
+  app -> sp_camp : createCampaign(Candidates, subject с {{digest_count}},\nbuildDigestEmailHtml(), career@)\n{{digest_count}} — литеральный мердж-тег, SendPulse подставляет\nиз переменной контакта при отправке, не JS-значение
+  sp_camp --> app : { id: campaignId }
+end
+
+app -> neonAuto : recordCandidateDigestRun({ triggeredBy, candidatesTotal,\ncandidatesPrepared, candidatesFailed, campaignId })\nINSERT INTO candidateDigestRuns
+neonAuto --> app : OK
+app --> editor : История запусков на /editor/settings обновлена
+
+note right of neonAuto
+  Книга «Candidates» общая для приветственного триггера (§2а)
+  и дайджеста — одна книга, не две раздельные (упрощено по ходу
+  планирования). Порядок развёртывания важен: книгу сначала
+  наполняют первым прогоном дайджеста, потом включают
+  Automation 360 — иначе реконсиляция ложно триггерит
+  приветственные письма всем уже существующим кандидатам.
+end note
 
 == 2в. Редактор редактирует данные работодателя ==
 
@@ -603,6 +680,65 @@ note right of sp_camp
   подборка персонализирована и закрыта от посторонних
 end note
 
+== 5б. Фоллоу-ап работодателям после рассылки (TASK-46) ==
+
+note over app, neonFollow
+  Запуск: ЕЖЕДНЕВНЫЙ крон (в отличие от еженедельного §2д —
+  каждый выпуск сидит в своём окне [3, 21] дней после отправки
+  только один раз, ежедневная проверка ловит его близко к
+  границе) ИЛИ «Отправить сейчас» в ReleaseFollowUpSection.
+end note
+
+app -> sh_mail : getMailingLists()\nвсе отправленные выпуски (sentCampaignId != null)
+sh_mail --> app : [{ listId, stream, sentCampaignId }, …]
+
+loop по каждому отправленному выпуску
+  app -> sp_camp : getCampaignSendDate(sentCampaignId)\nGET /campaigns/{id} → send_date
+  sp_camp --> app : sendDate
+  alt daysSinceSend вне [3, 21] дней
+    app -> app : пропустить — либо рано, либо слишком поздно\n(защита от обработки всего исторического бэклога\nпри первом/запоздавшем запуске)
+  else в окне
+    app -> sh_mail : getReleaseAudience(listId, stream)\nузкая аудитория (TASK-40), если есть, иначе весь\nподтверждённый стрим — кто реально ПОЛУЧИЛ письмо
+    sh_mail --> app : [employer, …]
+    app -> neonDb : getEmployerTokensWithRequestForList(listId)\nкто уже отправил заявку ИМЕННО по этому выпуску
+    neonDb --> app : Set<employerToken>
+    app -> neonFollow : getEvaluatedFollowUpKeys([listId])\nпары (выпуск, работодатель), уже решённые когда-либо
+    neonFollow --> app : Set<"listId|employerToken">
+
+    loop по каждому ещё не решённому работодателю аудитории
+      app -> sp_camp : getCampaignEmailStatus(sentCampaignId, employer.email)\nGET /campaigns/{id}/email/{email} — ЕДИНСТВЕННОЕ число\n(похожий путь с emails во множественном числе существует\nи выглядит правдоподобно, но отдаёт 404 на каждый запрос —\nреальная ошибка, пойманная живым драй-раном до прод-отправки)
+      sp_camp --> app : { detailStatus }\nopened = detailStatus >= 3 (3 Opened, 4 Link redirected)
+
+      alt работодатель уже отправил заявку по этому выпуску
+        app -> neonFollow : recordFollowUpOutcome(listId, token, "skipped")\nНЕЗАВИСИМО от opened — заявка перевешивает open-tracking\nпиксель (ненадёжен: блокировка картинок даёт ложный\n«не открыл»; приоритет исправлен после реального бага,\nпойманного тем же драй-раном)
+        neonFollow --> app : OK
+      else opened == true
+        app -> sp_smtp : sendTransactionalEmail(employer, "Помогите нам\nсделать подборки точнее", buildFollowUpFeedbackEmailHtml(), partner@)
+        sp_smtp --> app : 200
+        app -> neonFollow : recordFollowUpOutcome(listId, token, "feedback")
+        neonFollow --> app : OK
+      else opened == false
+        app -> sp_smtp : sendTransactionalEmail(employer, "Напоминаем о\nновой подборке — {stream}", buildFollowUpReminderEmailHtml(\n{ employerName, streamName, listUrl: /list/listId?e=token }), partner@)\nТа же персональная ссылка, что была в исходном письме кампании
+        sp_smtp --> app : 200
+        app -> neonFollow : recordFollowUpOutcome(listId, token, "reminder")
+        neonFollow --> app : OK
+      end
+    end
+  end
+end
+
+app -> neonAuto : recordReleaseFollowUpRun({ triggeredBy, releasesChecked,\nemployersEvaluated, feedbackSent, reminderSent, failed })\nINSERT INTO releaseFollowUpRuns
+neonAuto --> app : OK
+app --> editor : История запусков на /editor/settings обновлена
+
+note right of neonFollow
+  releaseFollowUps — unique(listId, employerToken): каждая пара
+  решается один раз НАВСЕГДА, независимо от того, сколько раз
+  потом отработает ежедневный крон. Telegram-напоминание для
+  группы «не открыл» (из исходного запроса пользователя) НЕ
+  реализовано — текст помечен «на согласование», отложено.
+end note
+
 == 6. Работодатель просматривает подборку ==
 
 alt ?e=[token] — персонализированный доступ работодателя
@@ -646,7 +782,21 @@ app -> neonStreams : getStreamIdByName("Finance")
 neonStreams --> app : streamId
 app -> neonDb : INSERT INTO contactRequests\n{ id: uuid, timestamp, listId, streamId,\n  candidateId, employerToken, status: "Новый запрос" }
 neonDb --> app : OK
+alt у кандидата есть email (TASK-45)
+  app -> sh_cands : getCandidateById(candidateId)
+  sh_cands --> app : candidate
+  app -> sp_smtp : sendTransactionalEmail(candidate.email, subject,\nbuildConsentRequestEmailHtml(employer.company), career@)\nPOST /smtp/emails\nТолько название компании — НИКОГДА employer.name/email/телефон
+  sp_smtp --> app : 200
+end
 app --> employer : «Запрос отправлен — мы свяжемся с кандидатом»
+
+note right of sp_smtp
+  TASK-45: кандидата просят подтвердить согласие на передачу
+  резюме ОТВЕТОМ на письмо, не кнопкой — конверсия в согласие
+  через ответ выше (проверено пользователем). Сбор и обработка
+  ответов кандидатов — осознанно не автоматизированы в этой
+  итерации, обрабатываются менеджером вручную.
+end note
 
 note over neonDb
   Таблица contactRequests (Neon / PostgreSQL):
