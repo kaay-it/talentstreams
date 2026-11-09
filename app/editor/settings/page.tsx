@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation"
 import { isSheetsConfigured } from "@/lib/sheets"
 import { ImportCandidatesButton } from "@/components/import-candidates-button"
-import { CandidateDigestSection } from "@/components/candidate-digest-section"
-import { ReleaseFollowUpSection } from "@/components/release-follow-up-section"
-import { getCandidateDigestSettings, getCandidateDigestRuns, getReleaseFollowUpSettings, getReleaseFollowUpRuns } from "@/app/actions"
+import { CandidateDigestToggle } from "@/components/candidate-digest-toggle"
+import { ReleaseFollowUpToggle } from "@/components/release-follow-up-toggle"
+import { getCandidateDigestSettings, getReleaseFollowUpSettings } from "@/app/actions"
 
 export const dynamic = "force-dynamic"
 
@@ -19,11 +19,9 @@ export default async function SettingsPage({
     notFound()
   }
 
-  const [digestSettings, digestRuns, followUpSettings, followUpRuns] = await Promise.all([
+  const [digestSettings, followUpSettings] = await Promise.all([
     getCandidateDigestSettings(),
-    getCandidateDigestRuns(),
     getReleaseFollowUpSettings(),
-    getReleaseFollowUpRuns(),
   ])
 
   return (
@@ -52,9 +50,9 @@ export default async function SettingsPage({
         <p className="max-w-2xl text-sm text-muted-foreground">
           «Сколько работодателей увидели ваше резюме» — письмо всем подтверждённым кандидатам
           с email. Плановая отправка — первый понедельник каждого месяца, если включена ниже;
-          «Отправить сейчас» запускает её вне расписания.
+          ручная отправка с предпросмотром — в разделе «Коммуникации».
         </p>
-        <CandidateDigestSection initialAutoSendEnabled={digestSettings.autoSendEnabled} initialRuns={digestRuns} />
+        <CandidateDigestToggle initialAutoSendEnabled={digestSettings.autoSendEnabled} />
       </div>
 
       <div className="mt-10 space-y-3">
@@ -63,9 +61,10 @@ export default async function SettingsPage({
           Через 3–21 день после отправки каждого выпуска: тем, кто открыл письмо, но не оставил
           заявку — просьба дать обратную связь по подборке; тем, кто письмо вообще не открыл —
           персональное напоминание со ссылкой на тот же выпуск. Каждому работодателю по каждому
-          выпуску — не больше одного решения, повторно не напоминаем.
+          выпуску — не больше одного решения, повторно не напоминаем. Ручная отправка с
+          предпросмотром — в разделе «Коммуникации».
         </p>
-        <ReleaseFollowUpSection initialAutoSendEnabled={followUpSettings.autoSendEnabled} initialRuns={followUpRuns} />
+        <ReleaseFollowUpToggle initialAutoSendEnabled={followUpSettings.autoSendEnabled} />
       </div>
     </div>
   )
