@@ -18,9 +18,7 @@ export async function GET(
 async function handle(req: NextRequest, { listId }: { listId: string }) {
   const editorSecret = process.env.EDITOR_SECRET
   if (editorSecret) {
-    const token =
-      req.nextUrl.searchParams.get("token") ??
-      req.headers.get("x-editor-token")
+    const token = req.headers.get("x-editor-token")
     if (token !== editorSecret) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
