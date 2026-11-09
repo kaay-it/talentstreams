@@ -221,5 +221,5 @@ docs/
 
 [source,bash]
 ----
-curl "https://your-domain.com/api/publish/{listId}?token={EDITOR_SECRET}"
+curl -X POST -H "x-editor-token: {EDITOR_SECRET}" "https://your-domain.com/api/publish/{listId}"
 ----
