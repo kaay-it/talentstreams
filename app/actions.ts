@@ -1,6 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+import { requireEditorAuth } from "@/lib/auth"
 import { del } from "@vercel/blob"
 import { getCandidates, getCandidateById, getConfirmedCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
 import {
@@ -212,6 +213,7 @@ async function removeCandidateFromSendPulse(email: string): Promise<void> {
  * "Активен с" only gets today's date when the field was empty.
  */
 export async function approveCandidate(id: string, currentActiveSince?: string): Promise<void> {
+  await requireEditorAuth()
   const activeSince = currentActiveSince?.trim() ? undefined : new Date().toLocaleDateString("ru-RU")
   await updateCandidateStatus(id, "Активный" as CandidateStatus, activeSince)
   const candidate = await getCandidateById(id)
@@ -222,6 +224,7 @@ export async function approveCandidate(id: string, currentActiveSince?: string):
 }
 
 export async function rejectCandidate(id: string): Promise<void> {
+  await requireEditorAuth()
   const candidate = await getCandidateById(id)
   await updateCandidateStatus(id, "Отклонён" as CandidateStatus)
   if (candidate?.email) {
@@ -275,6 +278,7 @@ export async function createMailingList(data: {
   /** Existing подборки (from /editor/selections) to attach — picked, never authored here. */
   selectionIds: string[]
 }): Promise<{ listId: string }> {
+  await requireEditorAuth()
   if (!data.stream.trim()) throw new Error("Выберите стрим")
   if (!data.date.trim()) throw new Error("Укажите дату рассылки")
 
@@ -320,6 +324,7 @@ export async function updateMailingList(
   listId: string,
   data: { date: string; employerTokens?: string[]; selectionIds: string[] },
 ): Promise<void> {
+  await requireEditorAuth()
   const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
   if (list.sentCampaignId !== null) throw new Error("Эта рассылка уже отправлена — редактирование недоступно")
@@ -345,6 +350,7 @@ export async function updateMailingList(
  * resolved to real Candidate profiles — used by ReleaseCreateModal/ReleaseDetailModal to render
  * the roster table and the (read-only) list of attached подборки. */
 export async function getMailingListDetail(listId: string) {
+  await requireEditorAuth()
   return getMailingList(listId)
 }
 
@@ -352,6 +358,7 @@ export async function getMailingListDetail(listId: string) {
  * /editor/selections and by the release create/edit pickers (which show, per подборка, whether
  * it's free to attach, already attached to this release, or taken by another one). */
 export async function getSelectionsForStream(stream: string) {
+  await requireEditorAuth()
   const streamId = await getStreamIdByName(stream)
   if (streamId === null) return []
   return getSelectionsForStreamRows(streamId)
@@ -359,6 +366,7 @@ export async function getSelectionsForStream(stream: string) {
 
 /** Every подборка across every stream — the default view of /editor/selections. */
 export async function getAllSelections() {
+  await requireEditorAuth()
   return getAllSelectionsRows()
 }
 
@@ -368,6 +376,7 @@ export async function createSelection(
   stream: string,
   data: { date: string; candidateIds: string[]; employerTokens: string[] },
 ): Promise<void> {
+  await requireEditorAuth()
   const streamId = await getStreamIdByName(stream)
   if (streamId === null) throw new Error(`Стрим не найден: ${stream}`)
   if (!data.date.trim()) throw new Error("Укажите дату подборки")
@@ -397,6 +406,7 @@ export async function updateSelection(
   selectionId: string,
   data: { date: string; candidateIds: string[]; employerTokens: string[] },
 ): Promise<void> {
+  await requireEditorAuth()
   await assertSelectionEditable(selectionId)
   if (!data.date.trim()) throw new Error("Укажите дату подборки")
 
@@ -410,6 +420,7 @@ export async function updateSelection(
 /** Deletes a подборка outright — same guard as updateSelection(); one attached to an unsent
  * release can still be deleted directly (equivalent to detaching it first). */
 export async function deleteSelection(selectionId: string): Promise<void> {
+  await requireEditorAuth()
   await assertSelectionEditable(selectionId)
 
   await deleteSelectionRows(selectionId)
@@ -420,6 +431,7 @@ export async function deleteSelection(selectionId: string): Promise<void> {
 /** Detaches a подборка from its release directly (from /editor/selections) — returns it to the
  * pool, reusable in a future release. Same guard as updateSelection(). */
 export async function detachSelection(selectionId: string): Promise<void> {
+  await requireEditorAuth()
   const { listId } = await assertSelectionEditable(selectionId)
   if (!listId) return
   await detachSelectionRows(selectionId)
@@ -434,6 +446,7 @@ export type EmployerWithoutSelection = { token: string; name: string; company: s
  * from in-progress form state, this action just mirrors it for an already-saved release) and as
  * the list shown in PublishButton's confirmation dialog before a release with gaps is sent. */
 export async function getMissingSelectionEmployers(listId: string): Promise<EmployerWithoutSelection[]> {
+  await requireEditorAuth()
   const missing = await getEmployersWithoutSelection(listId)
   return missing.map((e) => ({ token: e.token, name: e.name, company: e.company }))
 }
@@ -443,6 +456,7 @@ export async function getMissingSelectionEmployers(listId: string): Promise<Empl
  * edit modal (to seed the current selection) and the view modal (to show who it actually went
  * to). [] means the release targets the whole stream (no override rows). */
 export async function getMailingListRecipients(listId: string): Promise<EmployerPickOption[]> {
+  await requireEditorAuth()
   const tokens = await getMailingListRecipientTokens(listId)
   if (!tokens.length) return []
   const employers = (await Promise.all(tokens.map((t) => getEmployerByToken(t))))
@@ -456,6 +470,7 @@ export async function getMailingListRecipients(listId: string): Promise<Employer
  * SendPulse campaign id (set once on first send, see publishMailingList()) — the only source of
  * truth for "was this release sent", not a name comparison against SendPulse's campaign list. */
 export async function deleteMailingList(listId: string): Promise<void> {
+  await requireEditorAuth()
   const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
 
@@ -713,6 +728,7 @@ async function applyPublicationPauseRules(candidateIds: string[]): Promise<void>
 }
 
 export async function publishMailingList(listId: string, confirmed = false): Promise<PublishResult> {
+  await requireEditorAuth()
   const list = await getMailingListMeta(listId)
   if (!list) throw new Error(`Подборка не найдена: ${listId}`)
 
@@ -952,6 +968,7 @@ export type NewCandidateData = {
 }
 
 export async function createCandidate(data: NewCandidateData): Promise<RegisterCandidateResult> {
+  await requireEditorAuth()
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
 
   const id = crypto.randomUUID()
@@ -1013,6 +1030,7 @@ export async function updateCandidate(
     excludedStreams: string[]
   },
 ): Promise<RegisterCandidateResult> {
+  await requireEditorAuth()
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
   try {
     await updateCandidateFields(id, {
@@ -1052,6 +1070,7 @@ export async function updateCandidate(
 
 /** Resume version history for a candidate (editor only — keyed by candidates.id). */
 export async function getCandidateResumeHistory(candidateId: string): Promise<ResumeVersion[]> {
+  await requireEditorAuth()
   return getResumeVersions(candidateId)
 }
 
@@ -1064,6 +1083,7 @@ export type CandidateMailingHistoryEntry = { listId: string; stream: string; dat
  * actually sent, or deleted before sending) — not a name comparison against SendPulse campaigns.
  */
 export async function getCandidateMailingHistory(candidateId: string): Promise<CandidateMailingHistoryEntry[]> {
+  await requireEditorAuth()
   if (!candidateId) return []
   const entries = await getMailingListsForCandidate(candidateId)
   return entries.map((e) => ({ listId: e.listId, stream: e.stream, date: e.date, sent: e.sentCampaignId !== null }))
@@ -1076,6 +1096,7 @@ export async function getCandidateMailingHistory(candidateId: string): Promise<C
  * as deleteCandidate() — a failed delete is logged, not fatal, so the row still gets removed.
  */
 export async function deleteCandidateResumeVersion(candidateId: string, versionId: string): Promise<void> {
+  await requireEditorAuth()
   const versions = await getResumeVersions(candidateId)
   const version = versions.find((v) => v.id === versionId)
   if (version?.kind === "file") {
@@ -1097,6 +1118,7 @@ export async function deleteCandidateResumeVersion(candidateId: string, versionI
  * already gone, transient error) is logged, not fatal, so the row still gets removed.
  */
 export async function deleteCandidate(id: string): Promise<void> {
+  await requireEditorAuth()
   const candidate = await getCandidateById(id)
   const versions = await getResumeVersions(id)
   await Promise.all(
@@ -1118,11 +1140,13 @@ export async function deleteCandidate(id: string): Promise<void> {
 
 /** Read-only dry run of importCandidatesFromSheets() — reports what would happen, writes nothing. */
 export async function previewCandidatesImport(): Promise<ImportPreview> {
+  await requireEditorAuth()
   return previewImport()
 }
 
 /** Actually imports new candidates from the Google Sheet (lib/sheets-import.ts). */
 export async function importCandidatesFromSheets(): Promise<ImportResult> {
+  await requireEditorAuth()
   const result = await importCandidatesFromSheet()
   if (result.ok && result.imported.length > 0) {
     revalidatePath("/editor/candidates")
@@ -1213,6 +1237,7 @@ export async function updateEmployer(
     additionalCountries: string[]
   },
 ): Promise<RegisterEmployerResult> {
+  await requireEditorAuth()
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
   if (!data.company.trim()) return { ok: false, error: "Укажите компанию" }
   if (!data.country.trim()) return { ok: false, error: "Укажите страну" }
@@ -1267,6 +1292,7 @@ export async function updateEmployer(
 }
 
 export async function confirmEmployer(token: string, employer: Pick<Employer, "token" | "name" | "email" | "phone" | "streams">): Promise<void> {
+  await requireEditorAuth()
   await syncEmployerToSendPulse(employer)
   await updateEmployerFields(token, { status: "Подтверждён" })
   // Re-enable first — a "На проверке"/"Отклонён" employer re-confirmed here may have been
@@ -1288,6 +1314,7 @@ export async function confirmEmployer(token: string, employer: Pick<Employer, "t
 }
 
 export async function rejectEmployer(token: string): Promise<void> {
+  await requireEditorAuth()
   const existing = await getEmployerByToken(token)
   if (existing?.status === "Подтверждён") {
     await removeEmployerFromSendPulse(existing)
@@ -1301,6 +1328,7 @@ export async function rejectEmployer(token: string): Promise<void> {
 }
 
 export async function deleteEmployer(token: string): Promise<void> {
+  await requireEditorAuth()
   const existing = await getEmployerByToken(token)
   if (existing?.status === "Подтверждён") {
     await removeEmployerFromSendPulse(existing)
@@ -1312,6 +1340,7 @@ export async function deleteEmployer(token: string): Promise<void> {
 }
 
 export async function setContactRequestStatus(id: string, status: ContactRequestStatus): Promise<void> {
+  await requireEditorAuth()
   await updateContactRequestStatus(id, status)
   revalidatePath("/editor")
 }
@@ -1383,6 +1412,7 @@ export async function updateStream(
   id: number,
   data: { name: string; type: string; description: string },
 ): Promise<void> {
+  await requireEditorAuth()
   const existing = await getStreamById(id)
   if (!existing) throw new Error("Стрим не найден")
   if (data.name !== existing.name && (await streamHasSentReleases(id))) {
@@ -1397,11 +1427,13 @@ export async function createStream(data: {
   type: string
   description: string
 }): Promise<void> {
+  await requireEditorAuth()
   await createStreamRecord(data)
   revalidatePath("/editor/streams")
 }
 
 export async function deleteStream(id: number): Promise<void> {
+  await requireEditorAuth()
   if (await streamHasSentReleases(id)) {
     throw new Error("У стрима уже есть отправленные рассылки — удаление недоступно, можно только архивировать")
   }
@@ -1410,11 +1442,13 @@ export async function deleteStream(id: number): Promise<void> {
 }
 
 export async function archiveStream(id: number): Promise<void> {
+  await requireEditorAuth()
   await updateStreamRecord(id, { status: "Архивный" })
   revalidatePath("/editor/streams")
 }
 
 export async function unarchiveStream(id: number): Promise<void> {
+  await requireEditorAuth()
   await updateStreamRecord(id, { status: "Активный" })
   revalidatePath("/editor/streams")
 }
@@ -1520,15 +1554,18 @@ export async function runCandidateDigest(triggeredBy: "cron" | "manual"): Promis
 }
 
 export async function getCandidateDigestSettings() {
+  await requireEditorAuth()
   return getCandidateDigestSettingsDb()
 }
 
 export async function setCandidateDigestAutoSend(enabled: boolean): Promise<void> {
+  await requireEditorAuth()
   await setCandidateDigestAutoSendDb(enabled)
   revalidatePath("/editor/settings")
 }
 
 export async function getCandidateDigestRuns() {
+  await requireEditorAuth()
   return getCandidateDigestRunsDb()
 }
 
@@ -1540,6 +1577,7 @@ export type DigestPreview = { candidates: DigestPreviewCandidate[] }
  * `shown` value here is frozen and must be reused as-is by sendCandidateDigestToApproved() below —
  * recomputing it there would risk showing the manager one number and emailing a different one. */
 export async function previewCandidateDigest(): Promise<DigestPreview> {
+  await requireEditorAuth()
   const [candidates, exposureCounts] = await Promise.all([getConfirmedCandidates(), getCandidateExposureCounts()])
   const eligible = candidates.filter((c): c is typeof c & { email: string } => Boolean(c.email))
   return {
@@ -1561,6 +1599,7 @@ export async function previewCandidateDigest(): Promise<DigestPreview> {
  * uses a separate, permanent, reused-every-time book that exists only to carry this campaign's
  * audience; "Candidates" membership is never read or written here. */
 export async function sendCandidateDigestToApproved(approved: DigestPreviewCandidate[]): Promise<DigestRun> {
+  await requireEditorAuth()
   // Re-validate against current eligibility (not just trusting the client) — a candidate rejected/
   // deleted between preview and this click must not receive the campaign. `shown` IS trusted
   // verbatim from `approved` (see previewCandidateDigest()'s doc comment) — only membership is
@@ -1748,15 +1787,18 @@ export async function runReleaseFollowUps(triggeredBy: "cron" | "manual"): Promi
 }
 
 export async function getReleaseFollowUpSettings() {
+  await requireEditorAuth()
   return getReleaseFollowUpSettingsDb()
 }
 
 export async function setReleaseFollowUpAutoSend(enabled: boolean): Promise<void> {
+  await requireEditorAuth()
   await setReleaseFollowUpAutoSendDb(enabled)
   revalidatePath("/editor/settings")
 }
 
 export async function getReleaseFollowUpRuns() {
+  await requireEditorAuth()
   return getReleaseFollowUpRunsDb()
 }
 
@@ -1784,6 +1826,7 @@ export type FollowUpPreview = { releases: FollowUpPreviewRelease[] }
  * returned per-row; already-requested employers are counted in skippedCount, not listed — nothing
  * for the manager to decide about them, they never get an email either way. */
 export async function previewReleaseFollowUps(): Promise<FollowUpPreview> {
+  await requireEditorAuth()
   const token = await getToken()
   const [lists, allEmployers] = await Promise.all([getMailingLists(), getEmployers()])
   if (!token) return { releases: [] }
@@ -1852,6 +1895,7 @@ export async function previewReleaseFollowUps(): Promise<FollowUpPreview> {
 export async function sendReleaseFollowUpsToApproved(
   approved: Array<{ listId: string; employerToken: string; classification: "feedback" | "reminder" }>,
 ): Promise<FollowUpRun> {
+  await requireEditorAuth()
   const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
   const employerFromEmail = process.env.SENDPULSE_EMPLOYER_FROM_EMAIL
   const employerFromName = process.env.SENDPULSE_EMPLOYER_FROM_NAME || "Talent Streams Partner"

@@ -10,7 +10,7 @@
 
 == Технический стек
 
-* *Next.js 14* (App Router, Server Components, Server Actions)
+* *Next.js 16* (App Router, Server Components, Server Actions, `proxy.ts`)
 * *TypeScript*
 * *Google Sheets* — профили кандидатов, подборки рассылок (Service Account API v4)
 * *Neon (PostgreSQL)* — работодатели, запросы на контакт, стримы, история версий резюме (Drizzle ORM + neon-http driver)
@@ -49,9 +49,12 @@ SENDPULSE_CANDIDATE_DIGEST_SEND_BOOK_NAME=Candidates Digest Manual
 # Приложение
 APP_URL=https://your-domain.com
 EDITOR_SECRET=your-secret-string
+SESSION_SECRET=your-session-signing-secret
 ----
 
-`EDITOR_SECRET` защищает `/editor` и `/api/publish` — без него страница возвращает 404, а API-роут отвечает 401.
+`EDITOR_SECRET` защищает `/editor` (страницы, по `?secret=`) и `/api/publish` (заголовок `x-editor-token`) — без него страница возвращает 404, а API-роут отвечает 401.
+
+Мутации (Server Actions в `app/actions.ts`) проверяются отдельно от страниц — `requireEditorAuth()` (`lib/auth.ts`) первой строкой в каждом editor-only экшене, раньше они были не защищены вовсе. Пропускает при валидной сессионной куке (её ставит `proxy.ts` по тому же `?secret=`) либо при заголовке `x-editor-token`, совпадающем с `EDITOR_SECRET` (curl/сервер-к-серверу). `SESSION_SECRET` подписывает эту куку (JWT, `jose`) — отдельный секрет, не светится в URL; сгенерировать `openssl rand -base64 32` или аналог, разный для dev и для Vercel Production/Preview.
 
 `APP_URL` используется для формирования proxy-ссылок на резюме (`APP_URL/api/resume?url=...`) — эти ссылки сохраняются в базе, поэтому значение должно совпадать для всех, кто их открывает (даже при локальной разработке против общей базы, см. ниже).
 

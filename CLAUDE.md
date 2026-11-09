@@ -5,7 +5,7 @@
 
 ## Стек
 
-- **Next.js 14** — App Router, Server Components, Server Actions (`"use server"` в `app/actions.ts`)
+- **Next.js 16** — App Router, Server Components, Server Actions (`"use server"` в `app/actions.ts`), `proxy.ts` (переименованный в 16.x `middleware.ts`)
 - **TypeScript**
 - **Google Sheets** — не часть боевого пути приложения (TASK-DB-4 ✅, кандидаты переехали в Neon); `lib/sheets.ts` — опциональный канал массового ввода: менеджер заполняет таблицу вручную, кнопка в `/editor/settings` импортирует новых кандидатов в Neon (TASK-39 ✅, Service Account API v4)
 - **Neon (PostgreSQL)** — `candidates`, `contactRequests`, `streams`, `employers`, `candidateResumes`, `companies` (Drizzle ORM + neon-http driver)
@@ -37,7 +37,8 @@ DATABASE_URL=                     # Neon connection string
 BLOB_READ_WRITE_TOKEN=            # Vercel Blob
 
 APP_URL=https://your-domain.com   # нужен для формирования proxy-URL резюме
-EDITOR_SECRET=                    # защищает /editor и /api/publish
+EDITOR_SECRET=                    # защищает /editor (постранично) и мутирующие Server Actions (requireEditorAuth(), см. «Авторизация» ниже)
+SESSION_SECRET=                   # подписывает куку сессии редактора (proxy.ts/lib/auth.ts) — отдельный секрет, не светится в URL; сгенерировать `openssl rand -base64 32` или аналог, разный для dev и Vercel Production/Preview
 CRON_SECRET=                      # защищает /api/cron/* (Vercel Cron шлёт Authorization: Bearer <значение>); без неё роут открыт
 ```
 
@@ -207,7 +208,17 @@ TASK-DB-4 ✅ перенесла кандидатов в Neon полностью
 
 ### Доступ к редактору
 `/editor/*` защищён: `if (editorSecret && secret !== editorSecret) notFound()`.
-Параметр `?secret=` передаётся через `EditorNav` во все ссылки.
+Параметр `?secret=` передаётся через `EditorNav` во все ссылки. Этот постраничный чек не трогает мутации — см. «Авторизация Server Actions» ниже.
+
+### Авторизация Server Actions (TASK-50)
+
+До этой задачи `?secret=`-проверка существовала только на уровне страниц — ни один экспорт `app/actions.ts` её не повторял, а «use server» делает каждый экспорт отдельным сетевым POST-эндпоинтом независимо от того, вызывает ли его реально какой-то клиентский компонент: раздобыв action-id (devtools, логи), можно было дёрнуть `approveCandidate`/`deleteCandidate`/`publishMailingList` и любой другой мутирующий экшен напрямую, мимо страницы.
+
+Два независимых слоя, не один — постраничные `?secret=`-проверки не изменились, они и дальше решают, что показывать при рендере. Новый слой — `requireEditorAuth()` (`lib/auth.ts`), первой строкой в каждом editor-only экшене `app/actions.ts` (~43 из 50 экспортов): пропускает при валидной куке ИЛИ заголовке `x-editor-token === EDITOR_SECRET`, иначе бросает `Unauthorized`. Если `EDITOR_SECRET` не задан вовсе — не гейтит, как и постраничные проверки.
+
+- **`proxy.ts`** (переименованный в Next.js 16 `middleware.ts`, matcher `/editor/:path*`) — единственная роль: по валидному `?secret=` (а) ставит подписанную (`jose`, `SESSION_SECRET`) HttpOnly-куку `ts_editor_session` на будущие запросы и (б) пробрасывает заголовок `x-editor-token` на ТЕКУЩИЙ запрос (`NextResponse.next({ request: { headers } })`) — иначе первый визит по `?secret=`-ссылке сломался бы: кука долетит до браузера только со следующего запроса, а SSR-чтения на этой же странице (`getCandidateDigestRuns()` и т.п.) случаются раньше. Домен куки не указывается явно — по умолчанию она скопирована на хост текущего запроса, поэтому продакшен и любой preview-домен Vercel (`*.vercel.app`) получают каждый свою рабочую куку без дополнительной настройки.
+- **Исключения, без `requireEditorAuth()`**: публичные экшены (`registerCandidate`, `registerEmployer`, `searchCompanies` — нужен и публичной форме, и редактору, `submitContactRequest`, `submitGeneralInquiry`) и `runCandidateDigest`/`runReleaseFollowUps` (вызываются только крон-роутами через `CRON_SECRET`, другой секрет и другой заголовок — ни один клиентский бандл их не импортирует, action-id никогда не попадает в браузер).
+- **`publishMailingList` не требует спецкейса** — вызывается И кнопкой в редакторе (браузер, кука), И `/api/publish/[listId]/route.ts` (curl, свой же `EDITOR_SECRET`-чек через заголовок `x-editor-token`, `?token=` убран как неиспользуемый — см. ниже). Рассмотренная и отклонённая альтернатива: передавать флаг типа `{ preAuthorized: true }` третьим аргументом — отклонено как дырявое решение: Server Action — сетевой endpoint, и такой флаг может прислать любой вызывающий в raw POST, минуя проверку (аргумент функции — не граница доверия, в отличие от куки/заголовка из реального запроса). Вместо этого маршрут вызывает `publishMailingList()` как обычный функциональный вызов в том же контексте запроса — `headers()` внутри `requireEditorAuth()` видит тот же `x-editor-token`, что был в исходном curl-запросе, и пропускает без всяких исключений.
 
 ### Доступ к подборке `/list/[listId]`
 - `?e=[employer_token]` → персонализированная подборка (фильтр по предпочтениям)
