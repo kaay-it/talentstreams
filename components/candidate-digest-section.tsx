@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react"
 import {
-  setCandidateDigestAutoSend,
   previewCandidateDigest,
   sendCandidateDigestToApproved,
   type DigestRun,
@@ -24,32 +23,11 @@ type PreviewState =
   | { status: "error"; message: string }
   | { status: "loaded"; candidates: (DigestPreviewCandidate & { checked: boolean })[] }
 
-export function CandidateDigestSection({
-  initialAutoSendEnabled,
-  initialRuns,
-}: {
-  initialAutoSendEnabled: boolean
-  initialRuns: DigestRun[]
-}) {
-  const [autoSendEnabled, setAutoSendEnabled] = useState(initialAutoSendEnabled)
+export function CandidateDigestSection({ initialRuns }: { initialRuns: DigestRun[] }) {
   const [runs, setRuns] = useState(initialRuns)
-  const [isTogglePending, startToggleTransition] = useTransition()
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" })
   const [isSendPending, startSendTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-
-  function handleToggle() {
-    const next = !autoSendEnabled
-    setAutoSendEnabled(next)
-    startToggleTransition(async () => {
-      try {
-        await setCandidateDigestAutoSend(next)
-      } catch (err) {
-        setAutoSendEnabled(!next)
-        setError(err instanceof Error ? err.message : "Не удалось изменить настройку")
-      }
-    })
-  }
 
   async function handleLoad() {
     setError(null)
@@ -98,16 +76,9 @@ export function CandidateDigestSection({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex items-center gap-2.5 text-sm text-card-foreground">
-          <input
-            type="checkbox"
-            checked={autoSendEnabled}
-            onChange={handleToggle}
-            disabled={isTogglePending}
-            className="size-4 shrink-0 accent-primary"
-          />
-          Автоматическая ежемесячная рассылка (первый понедельник месяца)
-        </label>
+        <p className="text-sm text-muted-foreground">
+          Получите актуальный список подходящих кандидатов с предпросмотром перед отправкой.
+        </p>
 
         {preview.status === "idle" || preview.status === "error" ? (
           <button
@@ -200,36 +171,41 @@ export function CandidateDigestSection({
         </div>
       )}
 
-      {runs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Рассылок пока не было.</p>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border bg-card">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Когда</th>
-                <th className="px-4 py-2 font-medium">Как запущено</th>
-                <th className="px-4 py-2 font-medium">Кандидатов</th>
-                <th className="px-4 py-2 font-medium">Подготовлено</th>
-                <th className="px-4 py-2 font-medium">Ошибок</th>
-                <th className="px-4 py-2 font-medium">Кампания SendPulse</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {runs.map((run) => (
-                <tr key={run.id}>
-                  <td className="px-4 py-2 text-card-foreground">{formatRunDate(run.startedAt)}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{triggerLabel(run.triggeredBy)}</td>
-                  <td className="px-4 py-2 text-card-foreground">{run.candidatesTotal}</td>
-                  <td className="px-4 py-2 text-card-foreground">{run.candidatesPrepared}</td>
-                  <td className={`px-4 py-2 ${run.candidatesFailed > 0 ? "text-destructive" : "text-muted-foreground"}`}>{run.candidatesFailed}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{run.campaignId ?? "— не создана"}</td>
+      <details className="rounded-xl border bg-card">
+        <summary className="cursor-pointer select-none px-4 py-2.5 text-sm font-medium text-card-foreground">
+          История запусков ({runs.length})
+        </summary>
+        {runs.length === 0 ? (
+          <p className="px-4 pb-4 text-sm text-muted-foreground">Рассылок пока не было.</p>
+        ) : (
+          <div className="overflow-x-auto border-t">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="px-4 py-2 font-medium">Когда</th>
+                  <th className="px-4 py-2 font-medium">Как запущено</th>
+                  <th className="px-4 py-2 font-medium">Кандидатов</th>
+                  <th className="px-4 py-2 font-medium">Подготовлено</th>
+                  <th className="px-4 py-2 font-medium">Ошибок</th>
+                  <th className="px-4 py-2 font-medium">Кампания SendPulse</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody className="divide-y">
+                {runs.map((run) => (
+                  <tr key={run.id}>
+                    <td className="px-4 py-2 text-card-foreground">{formatRunDate(run.startedAt)}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{triggerLabel(run.triggeredBy)}</td>
+                    <td className="px-4 py-2 text-card-foreground">{run.candidatesTotal}</td>
+                    <td className="px-4 py-2 text-card-foreground">{run.candidatesPrepared}</td>
+                    <td className={`px-4 py-2 ${run.candidatesFailed > 0 ? "text-destructive" : "text-muted-foreground"}`}>{run.candidatesFailed}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{run.campaignId ?? "— не создана"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </details>
     </div>
   )
 }

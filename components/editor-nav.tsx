@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
-import { MailOpen, Building2, Briefcase, Handshake, Settings, Users, Layers, ListChecks } from "lucide-react"
+import { MailOpen, Building2, Briefcase, Handshake, Settings, Users, Layers, ListChecks, Send } from "lucide-react"
 
 const NAV_ITEMS = [
   { label: "Выпуски", href: "/editor", icon: MailOpen },
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { label: "Компании", href: "/editor/companies", icon: Briefcase },
   { label: "Кандидаты", href: "/editor/candidates", icon: Users },
   { label: "Запросы", href: "/editor/requests", icon: Handshake },
+  { label: "Коммуникации", href: "/editor/communications", icon: Send },
   { label: "Стримы", href: "/editor/streams", icon: Layers },
   { label: "Настройки", href: "/editor/settings", icon: Settings },
 ]

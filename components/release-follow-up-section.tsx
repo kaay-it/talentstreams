@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react"
 import {
-  setReleaseFollowUpAutoSend,
   previewReleaseFollowUps,
   sendReleaseFollowUpsToApproved,
   type FollowUpRun,
@@ -31,32 +30,11 @@ type PreviewState =
   | { status: "error"; message: string }
   | { status: "loaded"; releases: PreviewRelease[] }
 
-export function ReleaseFollowUpSection({
-  initialAutoSendEnabled,
-  initialRuns,
-}: {
-  initialAutoSendEnabled: boolean
-  initialRuns: FollowUpRun[]
-}) {
-  const [autoSendEnabled, setAutoSendEnabled] = useState(initialAutoSendEnabled)
+export function ReleaseFollowUpSection({ initialRuns }: { initialRuns: FollowUpRun[] }) {
   const [runs, setRuns] = useState(initialRuns)
-  const [isTogglePending, startToggleTransition] = useTransition()
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" })
   const [isSendPending, startSendTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-
-  function handleToggle() {
-    const next = !autoSendEnabled
-    setAutoSendEnabled(next)
-    startToggleTransition(async () => {
-      try {
-        await setReleaseFollowUpAutoSend(next)
-      } catch (err) {
-        setAutoSendEnabled(!next)
-        setError(err instanceof Error ? err.message : "Не удалось изменить настройку")
-      }
-    })
-  }
 
   async function handleLoad() {
     setError(null)
@@ -118,16 +96,9 @@ export function ReleaseFollowUpSection({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex items-center gap-2.5 text-sm text-card-foreground">
-          <input
-            type="checkbox"
-            checked={autoSendEnabled}
-            onChange={handleToggle}
-            disabled={isTogglePending}
-            className="size-4 shrink-0 accent-primary"
-          />
-          Автоматическая отправка (ежедневная проверка, через 3–21 день после выпуска)
-        </label>
+        <p className="text-sm text-muted-foreground">
+          Получите список работодателей, подходящих по срокам, с предпросмотром перед отправкой.
+        </p>
 
         {preview.status === "idle" || preview.status === "error" ? (
           <button
@@ -237,38 +208,43 @@ export function ReleaseFollowUpSection({
         </div>
       )}
 
-      {runs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Запусков пока не было.</p>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border bg-card">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Когда</th>
-                <th className="px-4 py-2 font-medium">Как запущено</th>
-                <th className="px-4 py-2 font-medium">Выпусков проверено</th>
-                <th className="px-4 py-2 font-medium">Работодателей</th>
-                <th className="px-4 py-2 font-medium">«Отзыв»</th>
-                <th className="px-4 py-2 font-medium">«Напоминание»</th>
-                <th className="px-4 py-2 font-medium">Ошибок</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {runs.map((run) => (
-                <tr key={run.id}>
-                  <td className="px-4 py-2 text-card-foreground">{formatRunDate(run.startedAt)}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{triggerLabel(run.triggeredBy)}</td>
-                  <td className="px-4 py-2 text-card-foreground">{run.releasesChecked}</td>
-                  <td className="px-4 py-2 text-card-foreground">{run.employersEvaluated}</td>
-                  <td className="px-4 py-2 text-card-foreground">{run.feedbackSent}</td>
-                  <td className="px-4 py-2 text-card-foreground">{run.reminderSent}</td>
-                  <td className={`px-4 py-2 ${run.failed > 0 ? "text-destructive" : "text-muted-foreground"}`}>{run.failed}</td>
+      <details className="rounded-xl border bg-card">
+        <summary className="cursor-pointer select-none px-4 py-2.5 text-sm font-medium text-card-foreground">
+          История запусков ({runs.length})
+        </summary>
+        {runs.length === 0 ? (
+          <p className="px-4 pb-4 text-sm text-muted-foreground">Запусков пока не было.</p>
+        ) : (
+          <div className="overflow-x-auto border-t">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="px-4 py-2 font-medium">Когда</th>
+                  <th className="px-4 py-2 font-medium">Как запущено</th>
+                  <th className="px-4 py-2 font-medium">Выпусков проверено</th>
+                  <th className="px-4 py-2 font-medium">Работодателей</th>
+                  <th className="px-4 py-2 font-medium">«Отзыв»</th>
+                  <th className="px-4 py-2 font-medium">«Напоминание»</th>
+                  <th className="px-4 py-2 font-medium">Ошибок</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody className="divide-y">
+                {runs.map((run) => (
+                  <tr key={run.id}>
+                    <td className="px-4 py-2 text-card-foreground">{formatRunDate(run.startedAt)}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{triggerLabel(run.triggeredBy)}</td>
+                    <td className="px-4 py-2 text-card-foreground">{run.releasesChecked}</td>
+                    <td className="px-4 py-2 text-card-foreground">{run.employersEvaluated}</td>
+                    <td className="px-4 py-2 text-card-foreground">{run.feedbackSent}</td>
+                    <td className="px-4 py-2 text-card-foreground">{run.reminderSent}</td>
+                    <td className={`px-4 py-2 ${run.failed > 0 ? "text-destructive" : "text-muted-foreground"}`}>{run.failed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </details>
     </div>
   )
 }
