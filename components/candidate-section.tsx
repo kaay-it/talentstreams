@@ -122,7 +122,6 @@ function CandidateRow({
 }) {
   const [isPending, startTransition] = useTransition()
   const [localStatus, setLocalStatus] = useState<"approved" | "rejected" | "disabled" | "paused" | "deleted" | null>(null)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [editing, setEditing] = useState(false)
 
   function handleApprove() {
@@ -147,13 +146,13 @@ function CandidateRow({
   }
 
   function handleDelete() {
+    if (!confirm("Удалить кандидата? Это действие нельзя отменить.")) return
     startTransition(async () => {
       try {
         await deleteCandidate(candidate.id)
         setLocalStatus("deleted")
-        setConfirmingDelete(false)
       } catch {
-        setConfirmingDelete(false)
+        // no-op — row stays as-is, manager can retry
       }
     })
   }
@@ -232,27 +231,7 @@ function CandidateRow({
         </td>
 
         <td className="px-4 py-3">
-          {confirmingDelete ? (
-            <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-              <span className="text-xs font-medium text-destructive">Удалить кандидата?</span>
-              <button
-                onClick={handleDelete}
-                disabled={isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-              >
-                <Trash2 className="size-3.5" />
-                Да, удалить
-              </button>
-              <button
-                onClick={() => setConfirmingDelete(false)}
-                disabled={isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
-              >
-                Отмена
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+          <div className="flex items-center justify-end gap-2 whitespace-nowrap">
               {!done && (
                 <button
                   onClick={() => setEditing(true)}
@@ -326,7 +305,7 @@ function CandidateRow({
 
               {!done && (
                 <button
-                  onClick={() => setConfirmingDelete(true)}
+                  onClick={handleDelete}
                   disabled={isPending}
                   className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
                   aria-label="Удалить"
@@ -335,7 +314,6 @@ function CandidateRow({
                 </button>
               )}
             </div>
-          )}
         </td>
       </tr>
     </>
