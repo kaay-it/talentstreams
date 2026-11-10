@@ -24,6 +24,7 @@ function toIsoDate(ruDate: string): string {
 export function SelectionsSection({
   streams,
   allSelections,
+  candidateNameById,
   eligibleByStream,
   pausedByStream,
   employersByStream,
@@ -32,6 +33,7 @@ export function SelectionsSection({
 }: {
   streams: string[]
   allSelections: SelectionRow[]
+  candidateNameById: Record<string, string>
   eligibleByStream: Record<string, EligibleCandidate[]>
   pausedByStream: Record<string, EligibleCandidate[]>
   employersByStream: Record<string, EmployerPickOption[]>
@@ -50,6 +52,18 @@ export function SelectionsSection({
         .slice()
         .sort((a, b) => toIsoDate(b.date).localeCompare(toIsoDate(a.date))),
     [allSelections, streamFilter],
+  )
+
+  // Отправленные — чисто историческая запись (ни редактировать, ни открепить, ни удалить уже
+  // нельзя, см. условия кнопок ниже), убраны в отдельную схлопнутую секцию, чтобы не мешать
+  // работе с актуальными (в пуле или прикреплёнными к ещё не отправленному выпуску).
+  const activeSelections = useMemo(
+    () => visibleSelections.filter((s) => !(s.listId && releaseInfoByListId[s.listId]?.sent)),
+    [visibleSelections, releaseInfoByListId],
+  )
+  const sentSelections = useMemo(
+    () => visibleSelections.filter((s) => s.listId && releaseInfoByListId[s.listId]?.sent),
+    [visibleSelections, releaseInfoByListId],
   )
 
   async function handleDetach(selectionId: string) {
@@ -75,6 +89,99 @@ export function SelectionsSection({
     } finally {
       setPendingAction(null)
     }
+  }
+
+  function renderRow(s: SelectionRow) {
+    const isDefault = s.employerTokens.length === 0
+    const release = s.listId ? releaseInfoByListId[s.listId] : undefined
+    const employerByToken = new Map((employersByStream[s.stream] ?? []).map((e) => [e.token, e]))
+    const employerLabels = s.employerTokens.map((t) => {
+      const e = employerByToken.get(t)
+      return e ? `${e.name} (${e.company})` : t
+    })
+    const candidateNames = s.candidateIds.map((id) => candidateNameById[id] ?? id)
+    return (
+      <div key={s.selectionId} className="flex items-center gap-4 px-5 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-medium text-primary">
+              {s.stream || "—"}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${isDefault ? "bg-muted text-muted-foreground" : "bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400"}`}
+            >
+              {isDefault ? "Общая" : "Ограниченная"}
+            </span>
+            <span className="text-xs text-muted-foreground">{s.date}</span>
+            <span className="text-sm font-medium text-foreground">
+              {s.candidateIds.length} {candidatePlural(s.candidateIds.length)}
+            </span>
+            {!isDefault && (
+              <span className="truncate text-xs text-muted-foreground">
+                {employerLabels.slice(0, 3).join(", ")}{employerLabels.length > 3 ? ` и ещё ${employerLabels.length - 3}` : ""}
+              </span>
+            )}
+            <a
+              href={`/selection/${s.selectionId}${editorSecret ? `?secret=${editorSecret}` : ""}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-medium text-primary hover:underline"
+            >
+              Просмотреть →
+            </a>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {!release ? (
+              "В пуле — свободна для любого выпуска"
+            ) : release.sent ? (
+              `Отправлена в выпуске от ${release.date}`
+            ) : (
+              `Используется в неотправленном выпуске от ${release.date}`
+            )}
+          </p>
+          {candidateNames.length > 0 && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              <span className="font-medium">Кандидаты:</span> {candidateNames.join(", ")}
+            </p>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {!release?.sent && (
+            <button
+              onClick={() => setEditing(s)}
+              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Редактировать подборку"
+              title="Редактировать подборку"
+            >
+              <Pencil className="size-4" />
+            </button>
+          )}
+          {release && !release.sent && (
+            <button
+              onClick={() => handleDetach(s.selectionId)}
+              disabled={pendingAction === s.selectionId}
+              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+              aria-label="Открепить от выпуска"
+              title="Открепить от выпуска — вернуть в пул"
+            >
+              <Unlink className="size-4" />
+            </button>
+          )}
+          {!release?.sent && (
+            <button
+              onClick={() => handleDelete(s.selectionId)}
+              disabled={pendingAction === s.selectionId}
+              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+              aria-label="Удалить подборку"
+              title="Удалить подборку"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -117,99 +224,27 @@ export function SelectionsSection({
         </div>
       )}
 
-      {visibleSelections.length === 0 ? (
+      {activeSelections.length === 0 ? (
         <div className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">
-          {streamFilter ? `Для стрима «${streamFilter}» пока нет подборок.` : "Подборок пока нет."} Нажмите «Подборка», чтобы подготовить первую.
+          {sentSelections.length > 0
+            ? "Все подготовленные подборки уже отправлены — см. раздел ниже."
+            : <>{streamFilter ? `Для стрима «${streamFilter}» пока нет подборок.` : "Подборок пока нет."} Нажмите «Подборка», чтобы подготовить первую.</>}
         </div>
       ) : (
         <div className="rounded-xl border bg-card overflow-hidden divide-y">
-          {visibleSelections.map((s) => {
-            const isDefault = s.employerTokens.length === 0
-            const release = s.listId ? releaseInfoByListId[s.listId] : undefined
-            const employerByToken = new Map((employersByStream[s.stream] ?? []).map((e) => [e.token, e]))
-            const employerLabels = s.employerTokens.map((t) => {
-              const e = employerByToken.get(t)
-              return e ? `${e.name} (${e.company})` : t
-            })
-            return (
-              <div key={s.selectionId} className="flex items-center gap-4 px-5 py-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-medium text-primary">
-                      {s.stream || "—"}
-                    </span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${isDefault ? "bg-muted text-muted-foreground" : "bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400"}`}
-                    >
-                      {isDefault ? "Общая" : "Ограниченная"}
-                    </span>
-                    <span className="text-xs text-muted-foreground">{s.date}</span>
-                    <span className="text-sm font-medium text-foreground">
-                      {s.candidateIds.length} {candidatePlural(s.candidateIds.length)}
-                    </span>
-                    {!isDefault && (
-                      <span className="truncate text-xs text-muted-foreground">
-                        {employerLabels.slice(0, 3).join(", ")}{employerLabels.length > 3 ? ` и ещё ${employerLabels.length - 3}` : ""}
-                      </span>
-                    )}
-                    <a
-                      href={`/selection/${s.selectionId}${editorSecret ? `?secret=${editorSecret}` : ""}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-medium text-primary hover:underline"
-                    >
-                      Просмотреть →
-                    </a>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {!release ? (
-                      "В пуле — свободна для любого выпуска"
-                    ) : release.sent ? (
-                      `Отправлена в выпуске от ${release.date}`
-                    ) : (
-                      `Используется в неотправленном выпуске от ${release.date}`
-                    )}
-                  </p>
-                </div>
-
-                <div className="flex shrink-0 items-center gap-1">
-                  {!release?.sent && (
-                    <button
-                      onClick={() => setEditing(s)}
-                      className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                      aria-label="Редактировать подборку"
-                      title="Редактировать подборку"
-                    >
-                      <Pencil className="size-4" />
-                    </button>
-                  )}
-                  {release && !release.sent && (
-                    <button
-                      onClick={() => handleDetach(s.selectionId)}
-                      disabled={pendingAction === s.selectionId}
-                      className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-                      aria-label="Открепить от выпуска"
-                      title="Открепить от выпуска — вернуть в пул"
-                    >
-                      <Unlink className="size-4" />
-                    </button>
-                  )}
-                  {!release?.sent && (
-                    <button
-                      onClick={() => handleDelete(s.selectionId)}
-                      disabled={pendingAction === s.selectionId}
-                      className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                      aria-label="Удалить подборку"
-                      title="Удалить подборку"
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            )
-          })}
+          {activeSelections.map((s) => renderRow(s))}
         </div>
+      )}
+
+      {sentSelections.length > 0 && (
+        <details className="rounded-xl border bg-card">
+          <summary className="cursor-pointer select-none px-5 py-3 text-sm font-medium text-card-foreground">
+            Отправленные подборки ({sentSelections.length})
+          </summary>
+          <div className="divide-y border-t">
+            {sentSelections.map((s) => renderRow(s))}
+          </div>
+        </details>
       )}
 
       {editing && (
