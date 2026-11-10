@@ -1,8 +1,8 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, Ban, Trash2, FileText, Link as LinkIcon, Loader2, Pencil, Plus, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
-import { approveCandidate, rejectCandidate, deleteCandidate, type ResumeVersion } from "@/app/actions"
+import { CheckCircle2, XCircle, Ban, PauseCircle, Trash2, FileText, Link as LinkIcon, Loader2, Pencil, Plus, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { approveCandidate, rejectCandidate, pauseCandidate, deleteCandidate, type ResumeVersion } from "@/app/actions"
 import { CandidateFormModal } from "@/components/candidate-form-modal"
 import { PaginationControls, type PageSize } from "@/components/pagination-controls"
 import { withDownloadFilename } from "@/lib/blob"
@@ -121,7 +121,7 @@ function CandidateRow({
   editorSecret?: string
 }) {
   const [isPending, startTransition] = useTransition()
-  const [localStatus, setLocalStatus] = useState<"approved" | "rejected" | "disabled" | "deleted" | null>(null)
+  const [localStatus, setLocalStatus] = useState<"approved" | "rejected" | "disabled" | "paused" | "deleted" | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [editing, setEditing] = useState(false)
 
@@ -136,6 +136,13 @@ function CandidateRow({
     startTransition(async () => {
       setLocalStatus(result)
       await rejectCandidate(candidate.id)
+    })
+  }
+
+  function handlePause() {
+    startTransition(async () => {
+      setLocalStatus("paused")
+      await pauseCandidate(candidate.id)
     })
   }
 
@@ -279,25 +286,31 @@ function CandidateRow({
               )}
 
               {candidate.status === "Активный" && !done && (
-                <button
-                  onClick={() => handleReject("disabled")}
-                  disabled={isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/10 disabled:opacity-50"
-                >
-                  {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Ban className="size-3.5" />}
-                  Отключить
-                </button>
+                <>
+                  <button
+                    onClick={() => handleReject("disabled")}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/10 disabled:opacity-50"
+                  >
+                    {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Ban className="size-3.5" />}
+                    Отключить
+                  </button>
+                  <button
+                    onClick={handlePause}
+                    disabled={isPending}
+                    title="Временно скрыть кандидата из новых подборок, не отклоняя — вернуть в «Активный» можно той же кнопкой «Подтвердить», что и у «Отклонён»"
+                    className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-rose-600 transition-colors hover:bg-rose-500/10 disabled:opacity-50"
+                  >
+                    {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <PauseCircle className="size-3.5" />}
+                    Не публиковать
+                  </button>
+                </>
               )}
 
               {(candidate.status === "Отклонён" || candidate.status === "Не публиковать") && !done && (
                 <button
                   onClick={handleApprove}
                   disabled={isPending}
-                  title={
-                    candidate.status === "Не публиковать"
-                      ? "Кандидат отправлен в 3 выпусках подряд и автоматически исключён из рассылок — эта кнопка вернёт его в «Активный», дату «Активен с» затем поправьте в редактировании"
-                      : undefined
-                  }
                   className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
                 >
                   {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
@@ -308,6 +321,7 @@ function CandidateRow({
               {localStatus === "approved" && <span className="text-xs font-medium text-emerald-600">Добавлен</span>}
               {localStatus === "rejected" && <span className="text-xs font-medium text-destructive">Отклонён</span>}
               {localStatus === "disabled" && <span className="text-xs font-medium text-muted-foreground">Отключён</span>}
+              {localStatus === "paused" && <span className="text-xs font-medium text-rose-600">Не публиковать</span>}
               {localStatus === "deleted" && <span className="text-xs font-medium text-muted-foreground">Удалён</span>}
 
               {!done && (

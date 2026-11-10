@@ -65,7 +65,7 @@ export default async function ReleasesPage({
 
   // All statuses, not just getActiveCandidates() — a release's historical membership (candidate
   // names in CampaignHistory) must survive a candidate's status changing after the fact (e.g.
-  // TASK-05's pause/retirement to "Не публиковать" right after this exact send).
+  // the manager pausing them to "Не публиковать" later).
   const candidateById = new Map(allCandidates.map((c) => [c.id, c]))
 
   const token = await getToken()

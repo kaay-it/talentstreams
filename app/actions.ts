@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache"
 import { requireEditorAuth } from "@/lib/auth"
 import { del } from "@vercel/blob"
-import { getCandidates, getCandidateById, getConfirmedCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
+import { getCandidateById, getConfirmedCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
 import {
-  getMailingLists, getMailingListMeta, getMailingList, getAllSelectionCandidateIds, getCandidateExposureCounts, resolveMailingListForEmployer, createMailingListRows,
+  getMailingLists, getMailingListMeta, getMailingList, getCandidateExposureCounts, resolveMailingListForEmployer, createMailingListRows,
   deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent,
   createMailingListRecipientRows, getMailingListRecipientTokens,
   replaceMailingListRecipients, getEmployersWithoutSelection, attachSelectionsToMailingList, getSelectionById,
@@ -197,8 +197,8 @@ async function syncCandidateToSendPulse(candidate: { id: string; name: string; e
 }
 
 /** Removes a candidate from the "Candidates" book — mirrors removeEmployerFromSendPulse().
- * Called on explicit rejection/deletion only, never on the automatic "Не публиковать" pause
- * (TASK-05) — that status doesn't mean the candidate was rejected, see getConfirmedCandidates(). */
+ * Called on explicit rejection/deletion only, never on a manual "Не публиковать" pause
+ * (pauseCandidate()) — that status doesn't mean the candidate was rejected, see getConfirmedCandidates(). */
 async function removeCandidateFromSendPulse(email: string): Promise<void> {
   const token = await getToken()
   if (!token) { console.warn("[SendPulse] failed to get access token"); return }
@@ -230,6 +230,17 @@ export async function rejectCandidate(id: string): Promise<void> {
   if (candidate?.email) {
     await removeCandidateFromSendPulse(candidate.email)
   }
+  revalidatePath("/editor/candidates")
+}
+
+/** Manual pause — the manager decides a candidate shouldn't appear in new releases for now,
+ * without rejecting them outright. Unlike rejectCandidate(), doesn't touch SendPulse: a
+ * "Не публиковать" candidate stays in the "Candidates" book and in the monthly digest
+ * (getConfirmedCandidates() treats "Активный" and "Не публиковать" the same). Lifted the same
+ * way any other pause is — the existing "Подтвердить" button (approveCandidate()). */
+export async function pauseCandidate(id: string): Promise<void> {
+  await requireEditorAuth()
+  await updateCandidateStatus(id, "Не публиковать" as CandidateStatus)
   revalidatePath("/editor/candidates")
 }
 
@@ -675,58 +686,6 @@ async function createCampaign(
   }
 }
 
-function todayIso(): string {
-  return offsetIso({})
-}
-
-/** Today's date, ISO "YYYY-MM-DD", shifted by a calendar amount — used to compute the next
- * allowed publication date for the TASK-05 pause rule (setMonth/setFullYear so "3 months"/"10
- * years" land on the right calendar date, not a fixed day count). */
-function offsetIso(delta: { days?: number; months?: number; years?: number }): string {
-  const d = new Date()
-  if (delta.days) d.setDate(d.getDate() + delta.days)
-  if (delta.months) d.setMonth(d.getMonth() + delta.months)
-  if (delta.years) d.setFullYear(d.getFullYear() + delta.years)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-}
-
-/**
- * TASK-05 publication-pause rule, applied to exactly the candidates of a release right after its
- * first real send (never on a resend — see the `!alreadySent` guard at the call site). `sentBefore`
- * for each candidate is counted from their real mailing history via `sentCampaignId` — only
- * releases actually sent at least once count, see getMailingListsForCandidate():
- * 1st real send → 2-week pause, 2nd → 3-month pause, 3rd → retired for good ("Не публиковать").
- * The 3rd-send cutoff is a deliberate simplification beyond §13 of the spec (which only defines
- * the pause after the 2nd send) — decided with the user rather than left open. Pushing `activeSince`
- * 10 years out on retirement is belt-and-suspenders: getProfiles() already excludes "Не публиковать"
- * candidates from every release, this just keeps the date field consistent if that ever changes.
- */
-async function applyPublicationPauseRules(candidateIds: string[]): Promise<void> {
-  if (!candidateIds.length) return
-
-  const allCandidates = await getCandidates()
-  const candidateById = new Map(allCandidates.map((c) => [c.id, c]))
-
-  await Promise.all(
-    candidateIds.map(async (id) => {
-      const candidate = candidateById.get(id)
-      if (!candidate) return // candidate row deleted since the release was created
-
-      const history = await getMailingListsForCandidate(id)
-      const sentBefore = history.filter((e) => e.sentCampaignId !== null).length
-      const sendNumber = sentBefore + 1
-
-      if (sendNumber === 1) {
-        await updateCandidateStatus(candidate.id, "Активный", isoToRu(offsetIso({ days: 14 })))
-      } else if (sendNumber === 2) {
-        await updateCandidateStatus(candidate.id, "Активный", isoToRu(offsetIso({ months: 3 })))
-      } else {
-        await updateCandidateStatus(candidate.id, "Не публиковать", isoToRu(offsetIso({ years: 10 })))
-      }
-    }),
-  )
-}
-
 export async function publishMailingList(listId: string, confirmed = false): Promise<PublishResult> {
   await requireEditorAuth()
   const list = await getMailingListMeta(listId)
@@ -837,20 +796,16 @@ export async function publishMailingList(listId: string, confirmed = false): Pro
   // cleanup-adhoc-books cron (vercel.json) deletes it once SendPulse reports the campaign fully
   // processed.
 
-  const candidateIds = await getAllSelectionCandidateIds(listId)
-
   // TASK-35, часть 2 — same recipients the email just went to, also pinged on Telegram (whoever
   // connected the bot; sendTelegramToEmployer() never throws, just no-ops for anyone who hasn't —
   // best-effort, Telegram is a supplementary channel on top of email, not load-bearing). Fires on
   // every real send including a resend, mirroring createCampaign() above (also unconditional).
   // Candidate count shown here on purpose — unlike the email body (TASK-26's neutral phrasing,
   // no exact count), this was an explicit request for the Telegram channel specifically. Resolved
-  // PER EMPLOYER (TASK-44 made this necessary, not just the release-wide union in candidateIds
-  // above — that stays union-based for the pause counter, a different, deliberately coarser rule):
-  // a personal selection, or the default filtered the same way filterCandidatesForEmployer does on
-  // their own /list/[listId] page, so the number in the push always matches what they'll actually
-  // see when they tap the button. An employer resolving to nothing ("подборка не готова") gets no
-  // ping at all — nothing to point them at yet.
+  // PER EMPLOYER (TASK-44 made this necessary): a personal selection, or the default filtered the
+  // same way filterCandidatesForEmployer does on their own /list/[listId] page, so the number in
+  // the push always matches what they'll actually see when they tap the button. An employer
+  // resolving to nothing ("подборка не готова") gets no ping at all — nothing to point them at yet.
   const fullList = await getMailingList(listId)
   if (fullList) {
     await Promise.all(
@@ -880,10 +835,10 @@ export async function publishMailingList(listId: string, confirmed = false): Pro
     )
   }
 
-  // Only on a genuine first send — a resend must not advance any candidate's pause window again.
+  // sentCampaignId is written once, on the genuine first send — a resend must not overwrite it
+  // with the resend's own campaign id (it's the single source of truth for "was this ever sent").
   if (!alreadySent) {
     await markMailingListSent(listId, campaign.id)
-    await applyPublicationPauseRules(candidateIds)
   }
 
   revalidatePath("/editor")
@@ -1077,8 +1032,9 @@ export async function getCandidateResumeHistory(candidateId: string): Promise<Re
 export type CandidateMailingHistoryEntry = { listId: string; stream: string; date: string; sent: boolean }
 
 /**
- * Every release a candidate has ever been included in, newest first — visibility groundwork for
- * TASK-05 (publication pause rules, §13 ТЗ), before any automatic pause enforcement exists.
+ * Every release a candidate has ever been included in, newest first — lets the manager see how
+ * often a candidate has already been sent before deciding by hand whether to pause them
+ * (pauseCandidate()) — no automatic enforcement based on this count (removed, TASK-51).
  * `sent` is read straight from mailingLists.sentCampaignId (a release can be created and never
  * actually sent, or deleted before sending) — not a name comparison against SendPulse campaigns.
  */

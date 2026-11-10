@@ -139,8 +139,8 @@ export async function getMailingList(listId: string): Promise<MailingList | null
   }
 
   // All statuses, not just getActiveCandidates() — a candidate's historical membership in an
-  // already-sent release's selection must survive their status changing afterward (same
-  // reasoning as the old getMailingList(), see TASK-05).
+  // already-sent release's selection must survive their status changing afterward (e.g. paused
+  // or rejected later, same reasoning as getMailingList()).
   const allProfiles = await getCandidates()
   const profileById = new Map(allProfiles.map((p) => [p.id, p]))
 
@@ -205,22 +205,6 @@ export async function getMailingListMeta(
         sentCampaignId: row.sentCampaignId,
       }
     : null
-}
-
-/** Union of candidate IDs across EVERY selection (default + all personal) ATTACHED to a release —
- * used by publishMailingList() to apply the publication-pause rule (TASK-05) to exactly the
- * candidates touched by this send, and for the "N кандидатов" count shown in the Telegram
- * notification. Deliberately a union, not a sum: a candidate counts once per release even if they
- * appear in more than one selection (decided with the user — one send event, one pause-counter
- * tick). */
-export async function getAllSelectionCandidateIds(listId: string): Promise<string[]> {
-  const selectionRows = await db.select({ id: selections.id }).from(selections).where(eq(selections.listId, listId))
-  if (!selectionRows.length) return []
-  const rows = await db
-    .select({ candidateId: selectionEntries.candidateId })
-    .from(selectionEntries)
-    .where(inArray(selectionEntries.selectionId, selectionRows.map((r) => r.id)))
-  return [...new Set(rows.map((r) => r.candidateId))]
 }
 
 /** Fetch all mailing lists grouped by List ID (no profile data, fast), newest date first. */
@@ -360,9 +344,10 @@ export async function deleteMailingListRows(listId: string): Promise<void> {
 export type CandidateMailingHistoryEntry = { listId: string; stream: string; date: string; sentCampaignId: number | null }
 
 /** Every release a candidate has ever been included in (via any selection ATTACHED to it, default
- * or personal), newest first (TASK-05 groundwork — visibility into publication history before any
- * pause-rule enforcement is built on top of it). Selections currently sitting unattached in the
- * pool don't count — they're not part of any release yet. */
+ * or personal), newest first — the manager's visibility into publication history (candidate edit
+ * modal, app/actions.ts getCandidateMailingHistory()) before deciding by hand whether to pause a
+ * candidate (pauseCandidate()); no automatic rule is built on top of this. Selections currently
+ * sitting unattached in the pool don't count — they're not part of any release yet. */
 export async function getMailingListsForCandidate(candidateId: string): Promise<CandidateMailingHistoryEntry[]> {
   if (!candidateId) return []
 
