@@ -250,7 +250,6 @@ function EmployerRow({
 }) {
   const [isPending, startTransition] = useTransition()
   const [localStatus, setLocalStatus] = useState<"confirmed" | "rejected" | "disabled" | "deleted" | null>(null)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
 
@@ -279,15 +278,14 @@ function EmployerRow({
   }
 
   const handleDelete = () => {
+    if (!confirm("Удалить работодателя? Это действие нельзя отменить.")) return
     setError(null)
     startTransition(async () => {
       try {
         await deleteEmployer(employer.token)
         setLocalStatus("deleted")
-        setConfirmingDelete(false)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Неизвестная ошибка")
-        setConfirmingDelete(false)
       }
     })
   }
@@ -352,26 +350,6 @@ function EmployerRow({
         </td>
 
         <td className="px-4 py-3">
-          {confirmingDelete ? (
-            <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-              <span className="text-xs font-medium text-destructive">Удалить работодателя?</span>
-              <button
-                onClick={handleDelete}
-                disabled={isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-              >
-                <Trash2 className="size-3.5" />
-                Да, удалить
-              </button>
-              <button
-                onClick={() => setConfirmingDelete(false)}
-                disabled={isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
-              >
-                Отмена
-              </button>
-            </div>
-          ) : (
             <div className="flex flex-col items-end gap-1">
               <div className="flex items-center justify-end gap-2 whitespace-nowrap">
                 {!done && (
@@ -443,7 +421,7 @@ function EmployerRow({
 
                 {!done && (
                   <button
-                    onClick={() => setConfirmingDelete(true)}
+                    onClick={handleDelete}
                     disabled={isPending}
                     className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
                     aria-label="Удалить"
@@ -454,7 +432,6 @@ function EmployerRow({
               </div>
               {error && <p className="text-xs text-destructive">{error}</p>}
             </div>
-          )}
         </td>
       </tr>
     </>
