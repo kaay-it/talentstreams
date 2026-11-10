@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation"
-import { getActiveCandidates, getEligibleCandidatesForRelease, getPausedCandidatesForRelease } from "@/lib/db/candidates"
+import { getCandidates, getActiveCandidates, getEligibleCandidatesForRelease, getPausedCandidatesForRelease } from "@/lib/db/candidates"
 import { getStreams } from "@/lib/db/streams"
 import { getEmployers, confirmedEmployersForStream, type EmployerPickOption } from "@/lib/db/employers"
 import { getAllSelections, getMailingLists } from "@/lib/db/mailing-lists"
@@ -20,13 +20,18 @@ export default async function SelectionsPage({
     notFound()
   }
 
-  const [streams, candidates, allEmployers, mailingLists, allSelections] = await Promise.all([
+  const [streams, candidates, allCandidates, allEmployers, mailingLists, allSelections] = await Promise.all([
     getStreams(),
     getActiveCandidates(),
+    getCandidates(),
     getEmployers(),
     getMailingLists(),
     getAllSelections(),
   ])
+
+  // Any status, not just active/eligible — a selection can hold a candidate who was later
+  // rejected/paused/deleted, and the row's "Кандидаты: ..." summary must still show their name.
+  const candidateNameById: Record<string, string> = Object.fromEntries(allCandidates.map((c) => [c.id, c.name]))
 
   const releaseInfoByListId: Record<string, { date: string; sent: boolean }> = Object.fromEntries(
     mailingLists.map((l) => [l.listId, { date: l.date, sent: l.sentCampaignId !== null }]),
@@ -78,6 +83,7 @@ export default async function SelectionsPage({
       <SelectionsSection
         streams={streams}
         allSelections={allSelections}
+        candidateNameById={candidateNameById}
         eligibleByStream={eligibleByStream}
         pausedByStream={pausedByStream}
         employersByStream={employersByStream}
