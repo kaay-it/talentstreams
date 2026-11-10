@@ -7,8 +7,8 @@ import { createSign } from "crypto"
 // (writeCandidateId) exists only to make that import idempotent, see below.
 
 /** Moderation status of a candidate. Empty string = legacy row without this column (treated as "Активный").
- * "Не публиковать" is set automatically once a candidate has been sent in 3 real releases
- * (TASK-05 publication-pause rule) — a terminal state, not manually chosen at registration. */
+ * "Не публиковать" is a manual pause set by the manager (app/actions.ts pauseCandidate()) — not
+ * terminal, not chosen at registration; lifted the same way as "Отклонён" (approveCandidate()). */
 export type CandidateStatus = "На проверке" | "Активный" | "Отклонён" | "Не публиковать"
 
 /**
@@ -817,8 +817,8 @@ export function parseRuDate(s: string): number | null {
  * Candidates eligible for a new release of the given stream: tagged into the stream
  * (candidateMatchesStream) and already active — activeSince is empty (never set, treated
  * as always-eligible) or on/before today. Does not exclude candidates already published
- * recently (TASK-05, publication pause rules, not implemented) or already in another
- * pending release — the editor reviews the list before creating it.
+ * recently or already in another pending release — the editor reviews the list before
+ * creating it, pausing anyone by hand (pauseCandidate()) if needed.
  */
 export function getEligibleCandidatesForRelease(candidates: Profile[], stream: { name: string }): Profile[] {
   const todayEnd = new Date()

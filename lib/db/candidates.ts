@@ -85,9 +85,10 @@ export async function getActiveCandidates(): Promise<Candidate[]> {
 }
 
 /** "Активный" + "Не публиковать" — anyone who was confirmed and not explicitly rejected.
- * "Не публиковать" only means excluded from new release selections (TASK-05 pause after the
- * 3rd send), not that the candidate themselves was rejected — they still belong in SendPulse
- * books / candidate-facing emails (the monthly digest, see app/actions.ts runCandidateDigest()). */
+ * "Не публиковать" is a manual pause (app/actions.ts pauseCandidate()) that only excludes a
+ * candidate from new release selections, not that the candidate themselves was rejected — they
+ * still belong in SendPulse books / candidate-facing emails (the monthly digest, see
+ * app/actions.ts runCandidateDigest()). */
 export async function getConfirmedCandidates(): Promise<Candidate[]> {
   try {
     const rows = await db.select().from(candidates).where(inArray(candidates.status, ["Активный", "Не публиковать"]))
