@@ -5,7 +5,8 @@ import { requireEditorAuth } from "@/lib/auth"
 import { del } from "@vercel/blob"
 import {
   getCandidates, getCandidateById, getConfirmedCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord,
-  buildEmbeddingSourceText, getCandidatesNeedingEmbedding, setCandidateEmbedding, findSimilarCandidatePairs,
+  getCandidatesNeedingEmbedding, setCandidateEmbedding, findSimilarCandidatePairs, namesLikelyMatch,
+  getDuplicateSimilarityThreshold, setDuplicateSimilarityThreshold,
   type Candidate, type CandidateStatus,
 } from "@/lib/db/candidates"
 import {
@@ -1117,21 +1118,43 @@ export async function importCandidatesFromSheets(): Promise<ImportResult> {
   return result
 }
 
-// Cosine similarity ≥ this is flagged as a likely duplicate. Conservative default — tune based
-// on real false-positive/negative rate after the first few scans; not exposed in the UI.
-const DUPLICATE_SIMILARITY_THRESHOLD = 0.93
-
-export type DuplicatePair = { candidateAId: string; candidateBId: string; similarity: number }
+export type DuplicatePair = { candidateAId: string; candidateBId: string; similarity: number | null; nameMatch: boolean }
 export type FindDuplicatesResult =
   | { ok: true; pairs: DuplicatePair[]; candidatesById: Record<string, Candidate> }
   | { ok: false; error: string }
 
-/** Finds likely-duplicate candidate profiles via Gemini embeddings (TASK-55) — semantic matching
- * that catches the same person registered twice under different contact info/spelling, which the
- * existing email/phone UNIQUE constraints can't. Refreshes any stale/missing embedding first
- * (best-effort, chunked), then scans all pairs via pgvector in a single SQL query (see
- * findSimilarCandidatePairs()) — never pulls vectors into Node. Manual trigger only, from the
- * "Поиск дублей кандидатов" section on /editor/settings. */
+/** Current/default cosine-similarity threshold (TASK-57, editable from /editor/settings — see
+ * lib/db/candidates.ts getDuplicateSimilarityThreshold() for the data behind the default). */
+export async function getDuplicateThreshold(): Promise<number> {
+  await requireEditorAuth()
+  return getDuplicateSimilarityThreshold()
+}
+
+export async function setDuplicateThreshold(value: number): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireEditorAuth()
+  if (!Number.isFinite(value) || value <= 0 || value > 1) {
+    return { ok: false, error: "Порог должен быть числом от 0 до 1" }
+  }
+  await setDuplicateSimilarityThreshold(value)
+  revalidatePath("/editor/settings")
+  return { ok: true }
+}
+
+function pairKeyOf(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`
+}
+
+/** Finds likely-duplicate candidate profiles via two independent signals (TASK-55/57): Gemini
+ * embeddings (semantic similarity — catches the same person registered twice under different
+ * contact info/spelling/wording) and name matching (transliteration/word-order-insensitive token
+ * comparison, see namesLikelyMatch() — catches "thin" profiles whose embedding carries little
+ * signal beyond the bare name, which no embedding threshold can fix without drowning in noise,
+ * see DEFAULT_DUPLICATE_THRESHOLD's doc comment). Refreshes any stale/missing embedding first
+ * (best-effort, chunked), scans embedding pairs via pgvector in a single SQL query (see
+ * findSimilarCandidatePairs()) — never pulls vectors into Node — then merges in name-match pairs
+ * computed in-memory over the same already-fetched candidate list (pure string ops, no extra
+ * DB/API call). Manual trigger only, from the "Поиск дублей кандидатов" section on
+ * /editor/settings. */
 export async function findDuplicateCandidates(): Promise<FindDuplicatesResult> {
   await requireEditorAuth()
   if (!isGeminiConfigured()) {
@@ -1154,9 +1177,27 @@ export async function findDuplicateCandidates(): Promise<FindDuplicatesResult> {
     }
   }
 
-  const pairs = await findSimilarCandidatePairs(DUPLICATE_SIMILARITY_THRESHOLD)
+  const threshold = await getDuplicateSimilarityThreshold()
+  const embeddingPairs = await findSimilarCandidatePairs(threshold)
   const allCandidates = await getCandidates()
   const candidatesById = Object.fromEntries(allCandidates.map((c) => [c.id, c]))
+
+  const merged = new Map<string, DuplicatePair>()
+  for (const p of embeddingPairs) {
+    merged.set(pairKeyOf(p.candidateAId, p.candidateBId), { ...p, nameMatch: false })
+  }
+  for (let i = 0; i < allCandidates.length; i++) {
+    for (let j = i + 1; j < allCandidates.length; j++) {
+      const a = allCandidates[i], b = allCandidates[j]
+      if (!namesLikelyMatch(a.name, b.name)) continue
+      const key = pairKeyOf(a.id, b.id)
+      const existing = merged.get(key)
+      if (existing) existing.nameMatch = true
+      else merged.set(key, { candidateAId: a.id, candidateBId: b.id, similarity: null, nameMatch: true })
+    }
+  }
+  const pairs = [...merged.values()].sort((x, y) => (y.similarity ?? -1) - (x.similarity ?? -1))
+
   return { ok: true, pairs, candidatesById }
 }
 
