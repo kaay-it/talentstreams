@@ -32,7 +32,7 @@ const STATUS_RANK: Record<EmployerStatus, number> = {
   "Отклонён": 1,
 }
 
-type SortField = "timestamp" | "status"
+type SortField = "name" | "timestamp" | "status"
 
 /** employer.timestamp — ISO-строка (row.timestamp.toISOString(), lib/db/employers.ts), всегда заполнена. */
 function parseIsoDate(s: string): number | null {
@@ -135,6 +135,12 @@ export function EmployerSection({
         return ta - tb
       })
     }
+    if (sortField === "name") {
+      return [...filtered].sort((a, b) => {
+        const cmp = a.name.localeCompare(b.name, "ru")
+        return sortDir === "asc" ? cmp : -cmp
+      })
+    }
     const getValue = sortField === "timestamp"
       ? (e: Employer) => parseIsoDate(e.timestamp)
       : (e: Employer) => STATUS_RANK[e.status]
@@ -208,7 +214,7 @@ export function EmployerSection({
             <table className="w-full min-w-[1050px] text-left text-sm">
               <thead>
                 <tr className="border-b bg-muted/30 text-xs font-medium text-muted-foreground">
-                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Работодатель</th>
+                  <SortableHeader label="Работодатель" field="name" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                   <th className="whitespace-nowrap px-4 py-2.5 font-medium">Контакты</th>
                   <th className="whitespace-nowrap px-4 py-2.5 font-medium">Стримы</th>
                   <th className="whitespace-nowrap px-4 py-2.5 font-medium">Страна</th>
