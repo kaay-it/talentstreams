@@ -197,6 +197,13 @@
       "when": 1794135738330,
       "tag": "0027_lovely_landau",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794509820211,
+      "tag": "0028_loving_shinko_yamashiro",
+      "breakpoints": true
     }
   ]
 }

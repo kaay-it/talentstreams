@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache"
 import { requireEditorAuth } from "@/lib/auth"
 import { del } from "@vercel/blob"
-import { getCandidateById, getConfirmedCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord, type CandidateStatus } from "@/lib/db/candidates"
+import {
+  getCandidates, getCandidateById, getConfirmedCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord,
+  buildEmbeddingSourceText, getCandidatesNeedingEmbedding, setCandidateEmbedding, findSimilarCandidatePairs,
+  type Candidate, type CandidateStatus,
+} from "@/lib/db/candidates"
 import {
   getMailingLists, getMailingListMeta, getMailingList, getCandidateExposureCounts, resolveMailingListForEmployer, createMailingListRows,
   deleteMailingListRows, getMailingListsForCandidate, updateMailingListTimestamp, markMailingListSent,
@@ -15,11 +19,12 @@ import {
   updateSelection as updateSelectionRows,
   deleteSelection as deleteSelectionRows,
   detachSelection as detachSelectionRows,
+  reassignSelectionEntriesToSurvivor,
   getReleaseAudience,
   campaignNameFor, isoToRu,
 } from "@/lib/db/mailing-lists"
-import { appendContactRequest, updateContactRequestStatus, getEmployerTokensWithRequestForList, type ContactRequestStatus } from "@/lib/db/contact-requests"
-import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, type ResumeVersion } from "@/lib/db/resumes"
+import { appendContactRequest, updateContactRequestStatus, getEmployerTokensWithRequestForList, reassignContactRequestsToSurvivor, type ContactRequestStatus } from "@/lib/db/contact-requests"
+import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, reassignResumesToSurvivor, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
 import { getEmployers, getEmployerByToken, confirmedEmployersForStream, filterCandidatesForEmployer, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
@@ -41,6 +46,7 @@ import {
   type FollowUpRun,
 } from "@/lib/db/release-follow-ups"
 import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, enableTelegramContact, disableTelegramContact, deleteTelegramContact, sendTransactionalEmail, getCampaignSendDate, getCampaignEmailStatus } from "@/lib/sendpulse"
+import { isGeminiConfigured, embedTexts } from "@/lib/gemini"
 import { buildConsentRequestEmailHtml, buildDigestEmailHtml, buildFollowUpFeedbackEmailHtml, buildFollowUpReminderEmailHtml } from "@/lib/email-templates"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 import { previewCandidatesImport as previewImport, importCandidatesFromSheet, type ImportPreview, type ImportResult } from "@/lib/sheets-import"
@@ -1109,6 +1115,153 @@ export async function importCandidatesFromSheets(): Promise<ImportResult> {
     revalidatePath("/editor")
   }
   return result
+}
+
+// Cosine similarity ≥ this is flagged as a likely duplicate. Conservative default — tune based
+// on real false-positive/negative rate after the first few scans; not exposed in the UI.
+const DUPLICATE_SIMILARITY_THRESHOLD = 0.93
+
+export type DuplicatePair = { candidateAId: string; candidateBId: string; similarity: number }
+export type FindDuplicatesResult =
+  | { ok: true; pairs: DuplicatePair[]; candidatesById: Record<string, Candidate> }
+  | { ok: false; error: string }
+
+/** Finds likely-duplicate candidate profiles via Gemini embeddings (TASK-55) — semantic matching
+ * that catches the same person registered twice under different contact info/spelling, which the
+ * existing email/phone UNIQUE constraints can't. Refreshes any stale/missing embedding first
+ * (best-effort, chunked), then scans all pairs via pgvector in a single SQL query (see
+ * findSimilarCandidatePairs()) — never pulls vectors into Node. Manual trigger only, from the
+ * "Поиск дублей кандидатов" section on /editor/settings. */
+export async function findDuplicateCandidates(): Promise<FindDuplicatesResult> {
+  await requireEditorAuth()
+  if (!isGeminiConfigured()) {
+    return { ok: false, error: "Gemini не настроен — укажите GEMINI_API_KEY" }
+  }
+
+  const pending = await getCandidatesNeedingEmbedding()
+  if (pending.length > 0) {
+    const vectors = await embedTexts(pending.map((p) => p.sourceText))
+    // allSettled, not all — a single transient DB write failure for one candidate must not
+    // discard the Gemini results (and Neon writes) already succeeded for every other candidate
+    // in this same scan. Caught live: a real write failure ("fetch failed") for one candidate
+    // among dozens took down the whole scan before this fix.
+    const results = await Promise.allSettled(pending.map((p, i) => setCandidateEmbedding(p.id, vectors[i], p.sourceText)))
+    results.forEach((r, i) => {
+      if (r.status === "rejected") console.warn("[findDuplicateCandidates] failed to save embedding for candidate:", pending[i].id, r.reason)
+    })
+    if (vectors.every((v) => v === null)) {
+      return { ok: false, error: "Не удалось получить эмбеддинги — проверьте квоту/ключ в Google AI Studio" }
+    }
+  }
+
+  const pairs = await findSimilarCandidatePairs(DUPLICATE_SIMILARITY_THRESHOLD)
+  const allCandidates = await getCandidates()
+  const candidatesById = Object.fromEntries(allCandidates.map((c) => [c.id, c]))
+  return { ok: true, pairs, candidatesById }
+}
+
+type MergeFieldChoice = "survivor" | "other" | "union"
+export type MergeCandidatesInput = {
+  survivorId: string
+  droppedId: string
+  fields: {
+    name: MergeFieldChoice; title: MergeFieldChoice; email: MergeFieldChoice; phone: MergeFieldChoice
+    level: MergeFieldChoice; countryPrimary: MergeFieldChoice; countryDesired: MergeFieldChoice
+    summary: MergeFieldChoice; coverLetter: MergeFieldChoice; activeSince: MergeFieldChoice
+    stream: MergeFieldChoice; excludedCompanies: MergeFieldChoice; excludedStreams: MergeFieldChoice
+  }
+}
+export type MergeCandidatesResult = { ok: true } | { ok: false; error: string }
+
+/** Merges two candidate profiles (TASK-55) — the manager picks, per field, whether the surviving
+ * row keeps its own value or takes the other candidate's (array fields can also be unioned,
+ * deduped). `status` is deliberately not a field choice — the surviving row keeps its own current
+ * status unchanged (status is managed by approveCandidate()/rejectCandidate()/pauseCandidate(),
+ * not the edit form). Resume history, подборка membership and contact requests are never
+ * field-picked — always combined onto the survivor, never lost. No DB transaction: neon-http
+ * doesn't support one ("No transactions support in neon-http driver") — steps run sequentially,
+ * each idempotent, safe to re-run after a partial failure. */
+export async function mergeCandidates(input: MergeCandidatesInput): Promise<MergeCandidatesResult> {
+  await requireEditorAuth()
+  if (input.survivorId === input.droppedId) return { ok: false, error: "Нельзя объединить кандидата с самим собой" }
+
+  const [survivor, dropped] = await Promise.all([
+    getCandidateById(input.survivorId),
+    getCandidateById(input.droppedId),
+  ])
+  if (!survivor) return { ok: false, error: "Оставляемый кандидат не найден" }
+  if (!dropped) {
+    // Idempotency: a previous run of this exact merge already deleted the loser.
+    return { ok: true }
+  }
+
+  function pick<T>(field: MergeFieldChoice, survivorVal: T, otherVal: T, union?: () => T): T {
+    if (field === "survivor") return survivorVal
+    if (field === "other") return otherVal
+    return union!()
+  }
+
+  const merged = {
+    name: pick(input.fields.name, survivor.name, dropped.name),
+    title: pick(input.fields.title, survivor.title, dropped.title),
+    email: pick(input.fields.email, survivor.email, dropped.email),
+    phone: pick(input.fields.phone, survivor.phone, dropped.phone),
+    level: pick(input.fields.level, survivor.level, dropped.level),
+    countryPrimary: pick(input.fields.countryPrimary, survivor.countryPrimary, dropped.countryPrimary),
+    countryDesired: pick(input.fields.countryDesired, survivor.countryDesired, dropped.countryDesired),
+    summary: pick(input.fields.summary, survivor.summary, dropped.summary),
+    coverLetter: pick(input.fields.coverLetter, survivor.coverLetter, dropped.coverLetter),
+    activeSince: pick(input.fields.activeSince, survivor.activeSince, dropped.activeSince),
+    stream: pick(input.fields.stream, survivor.stream, dropped.stream, () => [...new Set([...survivor.stream, ...dropped.stream])]),
+    excludedCompanies: pick(input.fields.excludedCompanies, survivor.excludedCompanies, dropped.excludedCompanies, () => [...new Set([...survivor.excludedCompanies, ...dropped.excludedCompanies])]),
+    excludedStreams: pick(input.fields.excludedStreams, survivor.excludedStreams, dropped.excludedStreams, () => [...new Set([...survivor.excludedStreams, ...dropped.excludedStreams])]),
+  }
+
+  // Pre-check uniqueness against every OTHER candidate before touching anything. Caught live:
+  // the dropped row still exists at this point — if "other"/"union" carries dropped's own
+  // email/phone forward onto the survivor, updateCandidateFields() would collide with the
+  // dropped row's OWN still-existing value (both rows briefly holding the same email) and fail
+  // the UNIQUE constraint, even though that's not a real conflict once the merge completes. So
+  // the field update must run AFTER deleteCandidateRecord(droppedId) below, not before — this
+  // pre-check guards against a genuine THIRD-PARTY collision instead (survivor/dropped excluded).
+  const others = (await getCandidates()).filter((c) => c.id !== survivor.id && c.id !== dropped.id)
+  if (merged.email && others.some((c) => c.email === merged.email)) {
+    return { ok: false, error: "Выбранный email уже используется другим кандидатом" }
+  }
+  if (merged.phone && others.some((c) => c.phone === merged.phone)) {
+    return { ok: false, error: "Выбранный телефон уже используется другим кандидатом" }
+  }
+
+  // Order matters: these FK reassignments must happen BEFORE deleteCandidateRecord(droppedId) —
+  // otherwise cascade/set-null on the delete would empty them before they're transferred. The
+  // delete itself must happen BEFORE updateCandidateFields() below, for the reason explained above.
+  await reassignResumesToSurvivor(input.droppedId, input.survivorId)
+  await reassignSelectionEntriesToSurvivor(input.droppedId, input.survivorId)
+  await reassignContactRequestsToSurvivor(input.droppedId, input.survivorId)
+
+  await deleteCandidateRecord(input.droppedId)
+
+  try {
+    await updateCandidateFields(input.survivorId, merged)
+  } catch (err) {
+    // Safety net against a race the pre-check above can miss (same pattern as
+    // registerEmployer()/updateEmployer()) — not the primary guard, which is the pre-check.
+    const constraint = uniqueViolationConstraint(err)
+    if (constraint === "candidates_email_unique") return { ok: false, error: "Выбранный email уже используется другим кандидатом" }
+    if (constraint === "candidates_phone_unique") return { ok: false, error: "Выбранный телефон уже используется другим кандидатом" }
+    throw err
+  }
+
+  // Only remove the dropped candidate's email from SendPulse if it's genuinely abandoned — not
+  // if it's the same as the survivor's own email, and not if it ended up as the final merged
+  // email (i.e. it "survives" under the merged identity rather than being discarded).
+  if (dropped.email && dropped.email !== merged.email && dropped.email !== survivor.email) {
+    await removeCandidateFromSendPulse(dropped.email)
+  }
+
+  revalidatePath("/editor/candidates")
+  revalidatePath("/editor/settings")
+  return { ok: true }
 }
 
 /** Autocomplete source for the "Компания" field in registration/edit forms. */

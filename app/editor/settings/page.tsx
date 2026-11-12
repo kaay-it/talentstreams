@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation"
 import { isSheetsConfigured } from "@/lib/sheets"
+import { isGeminiConfigured } from "@/lib/gemini"
 import { ImportCandidatesButton } from "@/components/import-candidates-button"
 import { CandidateDigestToggle } from "@/components/candidate-digest-toggle"
 import { ReleaseFollowUpToggle } from "@/components/release-follow-up-toggle"
+import { DuplicatesSection } from "@/components/duplicates-section"
 import { getCandidateDigestSettings, getReleaseFollowUpSettings } from "@/app/actions"
 
 export const dynamic = "force-dynamic"
@@ -65,6 +67,21 @@ export default async function SettingsPage({
           предпросмотром — в разделе «Коммуникации».
         </p>
         <ReleaseFollowUpToggle initialAutoSendEnabled={followUpSettings.autoSendEnabled} />
+      </div>
+
+      <div className="mt-10 space-y-3">
+        <h2 className="text-sm font-semibold text-card-foreground">Поиск дублей кандидатов</h2>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Семантический поиск через эмбеддинги (Google AI Studio) — ловит того же человека,
+          зарегистрированного второй раз с другим email/телефоном или опечаткой в имени, в
+          отличие от точного совпадения контактов. Объединение — вручную, с выбором исходного
+          значения для каждого поля.
+        </p>
+        {isGeminiConfigured() ? (
+          <DuplicatesSection />
+        ) : (
+          <p className="text-sm text-muted-foreground">Gemini не настроен в этом окружении.</p>
+        )}
       </div>
     </div>
   )

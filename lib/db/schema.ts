@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, bigint, text, timestamp, date, unique } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, bigint, text, timestamp, date, unique, vector } from "drizzle-orm/pg-core"
 
 export const streams = pgTable("streams", {
   id:          serial("id").primaryKey(),
@@ -152,6 +152,14 @@ export const candidates = pgTable("candidates", {
   activeSince:           date("activeSince", { mode: "string" }),
   registrationTimestamp: timestamp("registrationTimestamp").defaultNow().notNull(),
   coverLetter:           text("coverLetter").notNull().default(""),
+  // Эмбеддинг Gemini для поиска дублей (TASK-55) — nullable, считается по требованию из секции
+  // «Поиск дублей кандидатов» на /editor/settings, никогда при create/update. 768 измерений
+  // (gemini-embedding-001, outputDimensionality) — компромисс между точностью и размером строки.
+  // embeddingSourceText — точная строка, которая была заэмбеддена, для дешёвой проверки
+  // устаревания: пересчитывать эмбеддинг только если текущий текст отличается от сохранённого
+  // (или эмбеддинга нет вовсе).
+  embedding:             vector("embedding", { dimensions: 768 }),
+  embeddingSourceText:   text("embeddingSourceText"),
   // Зарплатные ожидания — optional, nullable, no UI yet (groundwork only). No currency column:
   // not needed until a form actually collects these.
   salaryFrom:            integer("salaryFrom"),

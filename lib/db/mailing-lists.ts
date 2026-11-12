@@ -572,6 +572,24 @@ export async function deleteSelection(selectionId: string): Promise<void> {
   await db.delete(selections).where(eq(selections.id, selectionId))
 }
 
+/** Reassigns every selectionEntries row from droppedId to survivorId (candidate merge, TASK-55).
+ * selectionEntries has no UNIQUE(selectionId, candidateId) — a blanket UPDATE could silently
+ * create a duplicate membership row if survivorId already has a row in the same selectionId.
+ * For any such selectionId, droppedId's row is deleted instead of reassigned; everywhere else,
+ * reassigned normally. Idempotent — safe to re-run (no droppedId rows left is a no-op). */
+export async function reassignSelectionEntriesToSurvivor(droppedId: string, survivorId: string): Promise<void> {
+  const droppedRows = await db.select().from(selectionEntries).where(eq(selectionEntries.candidateId, droppedId))
+  if (droppedRows.length === 0) return
+  const survivorSelectionIds = new Set(
+    (await db.select({ selectionId: selectionEntries.selectionId }).from(selectionEntries).where(eq(selectionEntries.candidateId, survivorId)))
+      .map((r) => r.selectionId),
+  )
+  const toDelete = droppedRows.filter((r) => survivorSelectionIds.has(r.selectionId)).map((r) => r.id)
+  const toReassign = droppedRows.filter((r) => !survivorSelectionIds.has(r.selectionId)).map((r) => r.id)
+  if (toDelete.length) await db.delete(selectionEntries).where(inArray(selectionEntries.id, toDelete))
+  if (toReassign.length) await db.update(selectionEntries).set({ candidateId: survivorId }).where(inArray(selectionEntries.id, toReassign))
+}
+
 /** Attaches pool подборки to a release, picking them (not creating them) — the only way a release
  * gets any content. Callers (app/actions.ts) must already have validated that every id belongs to
  * the release's own stream, is currently unattached (or already attached to this same listId —
