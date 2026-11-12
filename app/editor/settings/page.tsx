@@ -5,7 +5,7 @@ import { ImportCandidatesButton } from "@/components/import-candidates-button"
 import { CandidateDigestToggle } from "@/components/candidate-digest-toggle"
 import { ReleaseFollowUpToggle } from "@/components/release-follow-up-toggle"
 import { DuplicatesSection } from "@/components/duplicates-section"
-import { getCandidateDigestSettings, getReleaseFollowUpSettings } from "@/app/actions"
+import { getCandidateDigestSettings, getReleaseFollowUpSettings, getDuplicateThreshold } from "@/app/actions"
 
 export const dynamic = "force-dynamic"
 
@@ -21,9 +21,10 @@ export default async function SettingsPage({
     notFound()
   }
 
-  const [digestSettings, followUpSettings] = await Promise.all([
+  const [digestSettings, followUpSettings, duplicateThreshold] = await Promise.all([
     getCandidateDigestSettings(),
     getReleaseFollowUpSettings(),
+    getDuplicateThreshold(),
   ])
 
   return (
@@ -78,7 +79,7 @@ export default async function SettingsPage({
           значения для каждого поля.
         </p>
         {isGeminiConfigured() ? (
-          <DuplicatesSection />
+          <DuplicatesSection initialThresholdPercent={Math.round(duplicateThreshold * 100)} />
         ) : (
           <p className="text-sm text-muted-foreground">Gemini не настроен в этом окружении.</p>
         )}

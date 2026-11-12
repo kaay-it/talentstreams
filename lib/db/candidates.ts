@@ -2,6 +2,7 @@ import "server-only"
 import { asc, eq, inArray, sql } from "drizzle-orm"
 import { db } from "./index"
 import { candidates } from "./schema"
+import { getSetting, setSetting } from "./settings"
 
 // Not imported from lib/db/mailing-lists.ts (which has the identical isoToRu()) because that
 // module needs getActiveCandidates() from this one — importing back would create a module cycle.
@@ -200,9 +201,12 @@ export async function deleteCandidateRecord(id: string): Promise<void> {
 /** Builds the exact string that gets embedded for duplicate detection (TASK-55) — stored verbatim
  * in embeddingSourceText so a later scan can detect staleness without re-calling Gemini. Only
  * fields that distinguish *who* a person is, not moderation/contact fields (those legitimately
- * differ between two duplicate registrations of the same person). */
-export function buildEmbeddingSourceText(c: { name: string; title: string; summary: string }): string {
-  return [c.name, c.title, c.summary].map((s) => s.trim()).filter(Boolean).join(" — ")
+ * differ between two duplicate registrations of the same person). Includes coverLetter alongside
+ * summary (TASK-57) — caught live: a real duplicate pair had summary empty on one side and
+ * coverLetter empty on the other (714 vs 875 chars, opposite fields filled), so summary-only
+ * starved one side's embedding of real content even though the person had written plenty. */
+export function buildEmbeddingSourceText(c: { name: string; title: string; summary: string; coverLetter: string }): string {
+  return [c.name, c.title, c.summary, c.coverLetter].map((s) => s.trim()).filter(Boolean).join(" — ")
 }
 
 /** Candidates whose current source text doesn't match the cached embeddingSourceText, OR who have
@@ -241,6 +245,61 @@ export async function findSimilarCandidatePairs(threshold: number): Promise<
     ORDER BY similarity DESC
   `)
   return result.rows
+}
+
+const DUPLICATE_THRESHOLD_SETTING = "candidateDuplicateSimilarityThreshold"
+// Checked live against the real candidate pool (TASK-56): 0.93 found exactly 7 pairs, all
+// genuine duplicates (100% precision) — see app/actions.ts findDuplicateCandidates() for why
+// lowering this uniformly isn't viable (315 pairs at 0.80, 2343 at 0.75, tens of thousands near
+// the 0.68 needed to catch a "thin profile" miss). Still user-adjustable (TASK-57) because the
+// right value can shift as the candidate pool grows — this default is just where it starts.
+const DEFAULT_DUPLICATE_THRESHOLD = 0.93
+
+/** User-set threshold (0..1) from /editor/settings, if any; otherwise the data-backed default. */
+export async function getDuplicateSimilarityThreshold(): Promise<number> {
+  const v = await getSetting(DUPLICATE_THRESHOLD_SETTING)
+  const n = v === null ? NaN : Number(v)
+  return Number.isFinite(n) && n > 0 && n <= 1 ? n : DEFAULT_DUPLICATE_THRESHOLD
+}
+
+export async function setDuplicateSimilarityThreshold(value: number): Promise<void> {
+  await setSetting(DUPLICATE_THRESHOLD_SETTING, "number", String(value))
+}
+
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e", "ж": "zh", "з": "z",
+  "и": "i", "й": "i", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r",
+  "с": "s", "т": "t", "у": "u", "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh",
+  "щ": "shch", "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+}
+
+function transliterate(s: string): string {
+  const latin = s.toLowerCase().split("").map((ch) => CYRILLIC_TO_LATIN[ch] ?? ch).join("")
+  // "й"/trailing "-ей"/"-ий" is transliterated inconsistently in practice as "i" or "y"
+  // (Sergei vs Sergey) — collapse both spellings to the same canonical letter, or two real
+  // spellings of the same name would fail to match.
+  return latin.replace(/[yj]/g, "i")
+}
+
+function nameTokens(name: string): string[] {
+  return name.split(/[\s-]+/).map((t) => transliterate(t).replace(/[^a-z]/g, "")).filter(Boolean)
+}
+
+/** True if the SHORTER name's token set is fully contained in the longer one's (TASK-57) — an
+ * embedding-independent signal specifically for "thin" profiles whose embedding carries little
+ * signal beyond the bare name. Catches word-order swaps (Иванов Пётр ~ Пётр Иванов),
+ * transliteration (Андрей ~ Andrei), and a missing/extra patronymic (Иванов Пётр ~ Иванов Пётр
+ * Сергеевич). Requires at least 2 tokens on the shorter side — otherwise two unrelated people who
+ * merely share one common surname would match on that single token alone. Known limitation,
+ * deliberately not addressed: no single transliteration standard for х/ц/щ (kh/h, ts/c,
+ * shch/sch) — only the common "й→i/y" ambiguity above is normalized. */
+export function namesLikelyMatch(nameA: string, nameB: string): boolean {
+  const a = new Set(nameTokens(nameA))
+  const b = new Set(nameTokens(nameB))
+  const [shorter, longer] = a.size <= b.size ? [a, b] : [b, a]
+  if (shorter.size < 2) return false
+  for (const t of shorter) if (!longer.has(t)) return false
+  return true
 }
 
 /**
