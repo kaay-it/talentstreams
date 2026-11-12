@@ -1117,8 +1117,14 @@ export async function importCandidatesFromSheets(): Promise<ImportResult> {
   return result
 }
 
-// Cosine similarity ≥ this is flagged as a likely duplicate. Conservative default — tune based
-// on real false-positive/negative rate after the first few scans; not exposed in the UI.
+// Cosine similarity ≥ this is flagged as a likely duplicate. Checked live against the real
+// candidate pool (651 embedded rows, TASK-56): 0.93 found exactly 7 pairs, all genuine duplicates
+// (100% precision). Lowering it is NOT a viable way to catch "thin profile" misses (e.g. one side
+// has empty title/summary, embedding carries almost no signal beyond the bare name, scoring only
+// ~0.68 against its true duplicate) — at 0.80 there are already 315 pairs, at 0.75 there are 2343,
+// and reaching down to ~0.68 to catch that one case yields tens of thousands: the embedding space
+// for short/thin text clusters broadly, not just with its real duplicate. A uniform threshold
+// can't fix this; it needs a separate name-similarity signal for thin profiles (not yet built).
 const DUPLICATE_SIMILARITY_THRESHOLD = 0.93
 
 export type DuplicatePair = { candidateAId: string; candidateBId: string; similarity: number }
