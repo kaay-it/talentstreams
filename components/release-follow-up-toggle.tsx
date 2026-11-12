@@ -32,7 +32,7 @@ export function ReleaseFollowUpToggle({ initialAutoSendEnabled }: { initialAutoS
           disabled={isTogglePending}
           className="size-4 shrink-0 accent-primary"
         />
-        Автоматическая отправка (ежедневная проверка, через 3–21 день после выпуска)
+        Автоматическая отправка (ежедневная проверка, через 2–14 дней после выпуска)
       </label>
 
       {error && (

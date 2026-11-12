@@ -1629,8 +1629,8 @@ export async function sendCandidateDigestToApproved(approved: DigestPreviewCandi
 // historical release backlog (23+ releases going back months) the moment this feature ships or
 // resumes after being off for a while — only releases sent in roughly the last couple weeks are
 // ever in-window, which happens to also be the realistic span for "did they open it yet".
-const FOLLOW_UP_MIN_DAYS_AFTER_SEND = 3
-const FOLLOW_UP_MAX_DAYS_AFTER_SEND = 21
+const FOLLOW_UP_MIN_DAYS_AFTER_SEND = 2
+const FOLLOW_UP_MAX_DAYS_AFTER_SEND = 14
 
 /**
  * Employer follow-ups after a release send — two kinds, decided per (release, employer) from
