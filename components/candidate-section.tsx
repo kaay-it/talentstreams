@@ -21,7 +21,7 @@ const STATUS_OPTIONS: { value: CandidateStatus | ""; label: string }[] = [
 
 const MAX_CHIPS = 3
 
-type SortField = "timestamp" | "activeSince"
+type SortField = "name" | "timestamp" | "activeSince"
 
 /** candidate.timestamp is written as new Date().toISOString() but can be left empty on manually-entered rows. */
 function parseIsoDate(s: string): number | null {
@@ -207,6 +207,16 @@ function CandidateRow({
           </div>
         </td>
 
+        <td className="max-w-xs px-4 py-3">
+          {candidate.summary ? (
+            <p title={candidate.summary} className="line-clamp-2 text-xs text-muted-foreground">
+              {candidate.summary}
+            </p>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          )}
+        </td>
+
         <td className="px-4 py-3 text-xs text-muted-foreground">
           <div className="space-y-0.5">
             {candidate.email && <p className="truncate">{candidate.email}</p>}
@@ -346,7 +356,7 @@ export function CandidateSection({
       setSortDir((d) => (d === "asc" ? "desc" : "asc"))
     } else {
       setSortField(field)
-      setSortDir("desc")
+      setSortDir(field === "name" ? "asc" : "desc")
     }
   }
 
@@ -371,6 +381,12 @@ export function CandidateSection({
 
   const sorted = useMemo(() => {
     if (!sortField) return filtered
+    if (sortField === "name") {
+      return [...filtered].sort((a, b) => {
+        const cmp = a.name.localeCompare(b.name, "ru")
+        return sortDir === "asc" ? cmp : -cmp
+      })
+    }
     const getValue = sortField === "timestamp"
       ? (c: Candidate) => parseIsoDate(c.timestamp)
       : (c: Candidate) => parseRuDate(c.activeSince)
@@ -445,7 +461,8 @@ export function CandidateSection({
             <table className="w-full min-w-[1050px] text-left text-sm">
               <thead>
                 <tr className="border-b bg-muted/30 text-xs font-medium text-muted-foreground">
-                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Кандидат</th>
+                  <SortableHeader label="Кандидат" field="name" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">Саммари</th>
                   <th className="whitespace-nowrap px-4 py-2.5 font-medium">Контакты</th>
                   <th className="whitespace-nowrap px-4 py-2.5 font-medium">Файлы</th>
                   <th className="whitespace-nowrap px-4 py-2.5 font-medium">Ссылки</th>
