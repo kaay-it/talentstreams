@@ -1,5 +1,5 @@
 import "server-only"
-import { asc, eq, inArray } from "drizzle-orm"
+import { asc, eq, inArray, sql } from "drizzle-orm"
 import { db } from "./index"
 import { candidates } from "./schema"
 
@@ -195,6 +195,52 @@ export async function updateCandidateStatus(
  * SET NULL) — that history is kept, just unlinked. Caller still handles Vercel Blob cleanup. */
 export async function deleteCandidateRecord(id: string): Promise<void> {
   await db.delete(candidates).where(eq(candidates.id, id))
+}
+
+/** Builds the exact string that gets embedded for duplicate detection (TASK-55) — stored verbatim
+ * in embeddingSourceText so a later scan can detect staleness without re-calling Gemini. Only
+ * fields that distinguish *who* a person is, not moderation/contact fields (those legitimately
+ * differ between two duplicate registrations of the same person). */
+export function buildEmbeddingSourceText(c: { name: string; title: string; summary: string }): string {
+  return [c.name, c.title, c.summary].map((s) => s.trim()).filter(Boolean).join(" — ")
+}
+
+/** Candidates whose current source text doesn't match the cached embeddingSourceText, OR who have
+ * no embedding at all (including a candidate whose previous Gemini call failed — embedding stays
+ * null but embeddingSourceText is still written, see setCandidateEmbedding(), so this must check
+ * embedding IS NULL separately or such a candidate would never be retried). Any status included —
+ * a duplicate pair isn't necessarily both "На проверке". */
+export async function getCandidatesNeedingEmbedding(): Promise<{ id: string; sourceText: string }[]> {
+  const rows = await db.select().from(candidates)
+  return rows
+    .map((r) => ({ id: r.id, sourceText: buildEmbeddingSourceText(r), embedding: r.embedding, embeddingSourceText: r.embeddingSourceText }))
+    .filter((r) => r.embedding === null || r.embeddingSourceText !== r.sourceText)
+    .map(({ id, sourceText }) => ({ id, sourceText }))
+}
+
+/** Writes a freshly computed embedding (or null, if the Gemini call failed for this candidate —
+ * still records sourceText so a retry is attempted on the next scan even if the text hasn't
+ * changed again). */
+export async function setCandidateEmbedding(id: string, embedding: number[] | null, sourceText: string): Promise<void> {
+  await db.update(candidates).set({ embedding, embeddingSourceText: sourceText }).where(eq(candidates.id, id))
+}
+
+/** All candidate pairs whose embeddings' cosine similarity is >= threshold, computed entirely in
+ * Postgres via pgvector's `<=>` (cosine distance) operator — no vectors are pulled into Node.
+ * `a.id < b.id` just avoids self-pairs and duplicate (B,A)/(A,B) pairs; pair order carries no
+ * meaning. Sorted by similarity descending. */
+export async function findSimilarCandidatePairs(threshold: number): Promise<
+  { candidateAId: string; candidateBId: string; similarity: number }[]
+> {
+  const result = await db.execute<{ candidateAId: string; candidateBId: string; similarity: number }>(sql`
+    SELECT a.id AS "candidateAId", b.id AS "candidateBId", 1 - (a.embedding <=> b.embedding) AS similarity
+    FROM ${candidates} a
+    JOIN ${candidates} b ON a.id < b.id
+    WHERE a.embedding IS NOT NULL AND b.embedding IS NOT NULL
+      AND 1 - (a.embedding <=> b.embedding) >= ${threshold}
+    ORDER BY similarity DESC
+  `)
+  return result.rows
 }
 
 /**

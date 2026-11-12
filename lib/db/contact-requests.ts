@@ -79,6 +79,13 @@ export async function updateContactRequestStatus(id: string, status: ContactRequ
   await db.update(contactRequests).set({ status }).where(eq(contactRequests.id, id))
 }
 
+/** Reassigns every contact request from droppedId to survivorId (candidate merge, TASK-55) —
+ * candidateId is nullable, not unique, so a plain reassignment can't collide. Idempotent — no
+ * droppedId rows left is a no-op. */
+export async function reassignContactRequestsToSurvivor(droppedId: string, survivorId: string): Promise<void> {
+  await db.update(contactRequests).set({ candidateId: survivorId }).where(eq(contactRequests.candidateId, droppedId))
+}
+
 /** Every employer who submitted at least one contact request tied to this exact release —
  * used by runReleaseFollowUps() (app/actions.ts) to tell "opened but never requested" (gets the
  * feedback follow-up) from "opened and already engaged" (gets neither). Scoped to `listId`, not

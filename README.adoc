@@ -46,6 +46,9 @@ SENDPULSE_CANDIDATE_FROM_NAME=TalentStreams Career
 SENDPULSE_CANDIDATE_BOOK_NAME=Candidates
 SENDPULSE_CANDIDATE_DIGEST_SEND_BOOK_NAME=Candidates Digest Manual
 
+# Google Gemini
+GEMINI_API_KEY=...
+
 # Приложение
 APP_URL=https://your-domain.com
 EDITOR_SECRET=your-secret-string
@@ -55,6 +58,8 @@ SESSION_SECRET=your-session-signing-secret
 `EDITOR_SECRET` защищает `/editor` (страницы, по `?secret=`) и `/api/publish` (заголовок `x-editor-token`) — без него страница возвращает 404, а API-роут отвечает 401.
 
 Мутации (Server Actions в `app/actions.ts`) проверяются отдельно от страниц — `requireEditorAuth()` (`lib/auth.ts`) первой строкой в каждом editor-only экшене, раньше они были не защищены вовсе. Пропускает при валидной сессионной куке (её ставит `proxy.ts` по тому же `?secret=`) либо при заголовке `x-editor-token`, совпадающем с `EDITOR_SECRET` (curl/сервер-к-серверу). `SESSION_SECRET` подписывает эту куку (JWT, `jose`) — отдельный секрет, не светится в URL; сгенерировать `openssl rand -base64 32` или аналог, разный для dev и для Vercel Production/Preview.
+
+`GEMINI_API_KEY` — ключ из Google AI Studio (бесплатный тариф), используется только для поиска дублей кандидатов (секция «Поиск дублей кандидатов» на `/editor/settings`); при отсутствии ключа или ошибке квоты секция просто показывает сообщение об ошибке, остальное приложение не затрагивается.
 
 `APP_URL` используется для формирования proxy-ссылок на резюме (`APP_URL/api/resume?url=...`) — эти ссылки сохраняются в базе, поэтому значение должно совпадать для всех, кто их открывает (даже при локальной разработке против общей базы, см. ниже).
 

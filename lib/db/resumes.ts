@@ -65,6 +65,13 @@ export async function deleteResumeVersion(id: string): Promise<void> {
   await db.delete(candidateResumes).where(eq(candidateResumes.id, id))
 }
 
+/** Reassigns every resume version from droppedId to survivorId (candidate merge, TASK-55) — resume
+ * history is always combined, never field-picked. No uniqueness constraint to worry about (a
+ * candidate can already have many versions). Idempotent — no droppedId rows left is a no-op. */
+export async function reassignResumesToSurvivor(droppedId: string, survivorId: string): Promise<void> {
+  await db.update(candidateResumes).set({ candidateId: survivorId }).where(eq(candidateResumes.candidateId, droppedId))
+}
+
 /**
  * Resume versions for many candidates at once, grouped by candidateId (each group newest
  * first) — one query instead of one-per-candidate, for list pages showing several candidates.
