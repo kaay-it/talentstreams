@@ -51,7 +51,10 @@ function isContactMethod(value: string): value is ContactMethod {
  * among those. If their choice isn't one of the deliverable ones (whatsapp today, or telegram
  * chosen but not yet connected, or linkedin — never a delivery channel), its icon still shows,
  * bold but gray — "this is what they asked for, but we can't actually send to it yet". A method
- * that's neither deliverable nor chosen isn't shown at all. */
+ * that's neither deliverable nor chosen isn't shown at all. Deliverable-but-not-chosen stays full
+ * opacity (not dimmed) — a dimmed icon read as "unavailable" to a manager checking a deliverable
+ * Telegram against this exact row, even though availability is encoded by weight/color, not by
+ * fading it out. */
 function ContactMethodIcons({ primaryContact, telegramConnected }: { primaryContact: string; telegramConnected: boolean }) {
   const deliverable = new Set<ContactMethod>(["email"])
   if (telegramConnected) deliverable.add("telegram")
@@ -70,7 +73,7 @@ function ContactMethodIcons({ primaryContact, telegramConnected }: { primaryCont
             <Icon
               aria-label={CONTACT_METHOD_LABEL[m]}
               strokeWidth={isChosen ? 2.75 : 2}
-              className={`size-3.5 ${isChosen ? (isDeliverable ? "text-primary" : "text-muted-foreground") : "text-muted-foreground/40"}`}
+              className={`size-3.5 ${isChosen && isDeliverable ? "text-primary" : "text-muted-foreground"}`}
             />
           </span>
         )
