@@ -3,7 +3,7 @@ import { notFound } from "next/navigation"
 import { headers } from "next/headers"
 import Link from "next/link"
 import { ArrowLeft, CalendarDays, Send } from "lucide-react"
-import { getMailingList, resolveMailingListForEmployer, recordReleaseView, isLikelyBotUserAgent, type MailingListEntry } from "@/lib/db/mailing-lists"
+import { getMailingList, resolveMailingListForEmployer, recordReleaseView, normalizeReleaseViewSource, isLikelyBotUserAgent, type MailingListEntry } from "@/lib/db/mailing-lists"
 import { getEmployerByToken, filterCandidatesForEmployer } from "@/lib/db/employers"
 import { getStreamsDetailed } from "@/lib/db/streams"
 import { telegramConnectUrl } from "@/lib/sendpulse"
@@ -30,9 +30,9 @@ export default async function MailingListPage({
   searchParams,
 }: {
   params: Promise<{ listId: string }>
-  searchParams: Promise<{ e?: string; secret?: string }>
+  searchParams: Promise<{ e?: string; secret?: string; src?: string }>
 }) {
-  const [{ listId }, { e: employerToken, secret }] = await Promise.all([params, searchParams])
+  const [{ listId }, { e: employerToken, secret, src }] = await Promise.all([params, searchParams])
 
   const editorSecret = process.env.EDITOR_SECRET
   const isEditor = editorSecret && secret === editorSecret
@@ -62,7 +62,7 @@ export default async function MailingListPage({
 
     const userAgent = (await headers()).get("user-agent") ?? ""
     if (!isLikelyBotUserAgent(userAgent)) {
-      await recordReleaseView(listId, employerToken)
+      await recordReleaseView(listId, employerToken, normalizeReleaseViewSource(src))
     }
 
     const resolved = resolveMailingListForEmployer(mailingList, employerToken)

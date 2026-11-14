@@ -234,6 +234,15 @@ export const releaseViews = pgTable("releaseViews", {
   listId:        text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
   employerToken: text("employerToken").notNull().references(() => employers.token, { onDelete: "cascade" }),
   viewedAt:      timestamp("viewedAt").defaultNow().notNull(),
+  // Which channel the link was opened from — "email" | "tg" | "wa" | "unknown". Tagged at the
+  // source: every place app/actions.ts builds a /list/[listId] link appends ?src=..., since we
+  // control all of them (campaign body, Telegram bot button, follow-up transactional emails).
+  // Not a Referer-header guess — mail clients mostly strip it, and it can't tell channels apart
+  // reliably anyway. "wa" has no sender yet (WhatsApp isn't a release channel today) but is a
+  // real future value, not speculative — reserved now so the column never needs a migration for
+  // it. "unknown" covers untagged real visits: a link sent before this column existed, or any
+  // future link-building path that forgets to tag.
+  source:        text("source").notNull().default("unknown"),
 }, (table) => [
   index("releaseViewsListIdEmployerTokenIdx").on(table.listId, table.employerToken),
   index("releaseViewsEmployerTokenIdx").on(table.employerToken),

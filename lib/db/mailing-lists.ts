@@ -733,13 +733,28 @@ export function isLikelyBotUserAgent(userAgent: string): boolean {
   return BOT_USER_AGENT_PATTERNS.some((p) => ua.includes(p))
 }
 
+/** Channel a release link was opened from. "wa" has no sender yet (WhatsApp isn't a release
+ * channel today) but is reserved for when it becomes one, so that future channel never needs
+ * its own migration. "unknown" covers untagged real visits — a link built before ?src= existed,
+ * or any future link-building path that forgets to tag. */
+export type ReleaseViewSource = "email" | "tg" | "wa" | "unknown"
+
+const RELEASE_VIEW_SOURCES: readonly ReleaseViewSource[] = ["email", "tg", "wa", "unknown"]
+
+/** Validates the raw `?src=` query value against the known channel set (TASK-58) — anything
+ * missing or unrecognized (typo, hand-edited link, future channel we haven't added yet) falls
+ * back to "unknown" rather than polluting the column with arbitrary strings. */
+export function normalizeReleaseViewSource(raw: string | undefined): ReleaseViewSource {
+  return RELEASE_VIEW_SOURCES.includes(raw as ReleaseViewSource) ? (raw as ReleaseViewSource) : "unknown"
+}
+
 /** Records one real view of a release by an employer (TASK-58) — every view is its own row (not
  * upserted to a single fact row), so count/history come for free; collapsing to a boolean fact at
  * read time (COUNT(*) > 0) is always possible later, the reverse isn't. Best-effort — never
  * throws, a transient DB hiccup must not break the public employer-facing page. */
-export async function recordReleaseView(listId: string, employerToken: string): Promise<void> {
+export async function recordReleaseView(listId: string, employerToken: string, source: ReleaseViewSource): Promise<void> {
   try {
-    await db.insert(releaseViews).values({ listId, employerToken })
+    await db.insert(releaseViews).values({ listId, employerToken, source })
   } catch (err) {
     console.warn("[recordReleaseView] failed:", listId, employerToken, err)
   }

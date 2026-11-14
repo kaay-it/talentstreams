@@ -1,0 +1,1 @@
+ALTER TABLE "releaseViews" ADD COLUMN "source" text DEFAULT 'unknown' NOT NULL;
