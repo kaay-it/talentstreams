@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, bigint, text, timestamp, date, unique, vector } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, bigint, text, timestamp, date, unique, vector, index } from "drizzle-orm/pg-core"
 
 export const streams = pgTable("streams", {
   id:          serial("id").primaryKey(),
@@ -219,3 +219,31 @@ export const releaseFollowUpRuns = pgTable("releaseFollowUpRuns", {
   reminderSent:     integer("reminderSent").notNull(),
   failed:           integer("failed").notNull(),
 })
+
+// One row per real page view of a release by an employer (TASK-58) — own statistics alongside
+// SendPulse's unreliable open-tracking pixel (see TASK-46: image-blocking gives opened=false even
+// for a genuinely engaged recipient). Every view gets its own row, not a single upserted fact —
+// count/history are free this way, and collapsing to a boolean fact later (COUNT(*) > 0) is always
+// possible, the reverse isn't. id is bigint identity, not uuid, same reasoning as
+// candidateDigestRuns/releaseFollowUpRuns above: never exposed in a public URL, nothing
+// FK-references it. Unlike the rest of this schema (every other table is naturally bounded — one
+// row per candidate/employer/resume-version/cron-run — so a sequential scan is fine), this is an
+// open-ended event log that grows with every page view, so it gets indexes from the start.
+export const releaseViews = pgTable("releaseViews", {
+  id:            bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  listId:        text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
+  employerToken: text("employerToken").notNull().references(() => employers.token, { onDelete: "cascade" }),
+  viewedAt:      timestamp("viewedAt").defaultNow().notNull(),
+  // Which channel the link was opened from — "email" | "tg" | "wa" | "unknown". Tagged at the
+  // source: every place app/actions.ts builds a /list/[listId] link appends ?src=..., since we
+  // control all of them (campaign body, Telegram bot button, follow-up transactional emails).
+  // Not a Referer-header guess — mail clients mostly strip it, and it can't tell channels apart
+  // reliably anyway. "wa" has no sender yet (WhatsApp isn't a release channel today) but is a
+  // real future value, not speculative — reserved now so the column never needs a migration for
+  // it. "unknown" covers untagged real visits: a link sent before this column existed, or any
+  // future link-building path that forgets to tag.
+  source:        text("source").notNull().default("unknown"),
+}, (table) => [
+  index("releaseViewsListIdEmployerTokenIdx").on(table.listId, table.employerToken),
+  index("releaseViewsEmployerTokenIdx").on(table.employerToken),
+])

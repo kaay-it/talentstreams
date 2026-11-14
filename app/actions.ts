@@ -767,7 +767,7 @@ export async function publishMailingList(listId: string, confirmed = false): Pro
   }
 
   const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")
-  const listUrl = `${appUrl}/list/${listId}?e={{employer_token}}`
+  const listUrl = `${appUrl}/list/${listId}?e={{employer_token}}&src=email`
   const subject = `Talent Stream: ${list.stream} — выпуск ${date}`
   const campaignName = campaignNameFor(list.stream, date, list.recipientLabel)
   const html = buildEmailHtml(list.stream, date, listUrl, telegramConnectUrl("{{employer_token}}"))
@@ -826,7 +826,7 @@ export async function publishMailingList(listId: string, confirmed = false): Pro
           employer.token,
           `<b>Новый выпуск Talent Stream уже готов!</b>\n\nВ поток ${escapeHtml(list.stream)} от ${escapeHtml(date)} вошли ${count} ${candidatePlural(count)}`,
           {
-            button: { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}` },
+            button: { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}&src=tg` },
             // Telegram caches an external photo per exact URL (confirmed by testing — a file
             // changed in place at the same URL kept showing the stale version). The filename is
             // versioned on purpose: bump it (public/telegram-notify-vN.png) whenever the image
@@ -1906,7 +1906,7 @@ export async function runReleaseFollowUps(triggeredBy: "cron" | "manual"): Promi
             await recordFollowUpOutcome(release.listId, employer.token, "feedback")
             feedbackSent++
           } else {
-            const listUrl = `${appUrl}/list/${release.listId}?e=${employer.token}`
+            const listUrl = `${appUrl}/list/${release.listId}?e=${employer.token}&src=email`
             await sendTransactionalEmail(
               { email: employer.email, name: employer.name },
               `Напоминаем о новой подборке кандидатов — ${release.stream}`,
@@ -2086,7 +2086,7 @@ export async function sendReleaseFollowUpsToApproved(
           feedbackSent++
         } else {
           const stream = streamByListId.get(row.listId) ?? ""
-          const listUrl = `${appUrl}/list/${row.listId}?e=${row.employerToken}`
+          const listUrl = `${appUrl}/list/${row.listId}?e=${row.employerToken}&src=email`
           await sendTransactionalEmail(
             { email: employer.email, name: employer.name },
             `Напоминаем о новой подборке кандидатов — ${stream}`,
