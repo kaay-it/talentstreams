@@ -22,6 +22,7 @@ import {
   detachSelection as detachSelectionRows,
   reassignSelectionEntriesToSurvivor,
   getReleaseAudience,
+  getEmployerTokensWithReleaseView,
   campaignNameFor, isoToRu,
 } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, getEmployerTokensWithRequestForList, reassignContactRequestsToSurvivor, type ContactRequestStatus } from "@/lib/db/contact-requests"
@@ -1828,8 +1829,11 @@ const FOLLOW_UP_MAX_DAYS_AFTER_SEND = 14
 
 /**
  * Employer follow-ups after a release send — two kinds, decided per (release, employer) from
- * SendPulse's own per-recipient open status (getCampaignEmailStatus()) and whether that employer
- * ever submitted a contact request tied to this exact release (getEmployerTokensWithRequestForList()):
+ * SendPulse's own per-recipient open status (getCampaignEmailStatus()) — or, when stronger, a real
+ * recorded view of the release in our own releaseViews log (getEmployerTokensWithReleaseView(),
+ * TASK-58/59, since a real page load can't miss an open the way an image-blocked pixel does) —
+ * and whether that employer ever submitted a contact request tied to this exact release
+ * (getEmployerTokensWithRequestForList()):
  *   - opened, no request   -> "feedback" (static "помогите нам сделать подборки точнее" letter)
  *   - never opened         -> "reminder" (personalized nudge back to the same release link)
  *   - opened AND requested -> "skipped" (already engaged, no follow-up needed)
@@ -1873,9 +1877,10 @@ export async function runReleaseFollowUps(triggeredBy: "cron" | "manual"): Promi
     const alreadyEvaluated = await getEvaluatedFollowUpKeys(qualifying.map((q) => q.listId))
 
     for (const release of qualifying) {
-      const [audience, requestedTokens] = await Promise.all([
+      const [audience, requestedTokens, viewedTokens] = await Promise.all([
         getReleaseAudience(release.listId, release.stream, allEmployers),
         getEmployerTokensWithRequestForList(release.listId),
+        getEmployerTokensWithReleaseView(release.listId),
       ])
 
       for (const employer of audience) {
@@ -1883,10 +1888,18 @@ export async function runReleaseFollowUps(triggeredBy: "cron" | "manual"): Promi
         employersEvaluated++
 
         try {
-          const emailStatus = await getCampaignEmailStatus(release.sentCampaignId, employer.email, token)
-          if (!emailStatus) { failed++; continue } // unknown — leave unrecorded, retried next run
+          // A real releaseViews row (TASK-58/59, our own page-view log) is stronger proof of
+          // engagement than SendPulse's open-tracking pixel (misses opens when images are
+          // blocked, see TASK-46) — skip the pixel lookup entirely once we already know.
+          let opened: boolean
+          if (viewedTokens.has(employer.token)) {
+            opened = true
+          } else {
+            const emailStatus = await getCampaignEmailStatus(release.sentCampaignId, employer.email, token)
+            if (!emailStatus) { failed++; continue } // unknown — leave unrecorded, retried next run
+            opened = emailStatus.detailStatus >= 3 // 3 = Opened, 4 = Link redirected (implies opened)
+          }
 
-          const opened = emailStatus.detailStatus >= 3 // 3 = Opened, 4 = Link redirected (implies opened)
           const requested = requestedTokens.has(employer.token)
 
           if (requested) {
@@ -1972,8 +1985,9 @@ export type FollowUpPreview = { releases: FollowUpPreviewRelease[] }
 
 /** Read-only computation for the "Загрузить список" button — same classification logic as
  * runReleaseFollowUps() (including the live, unavoidable getCampaignEmailStatus() calls per
- * employer), but sends nothing and records nothing. Only feedback/reminder (actionable) rows are
- * returned per-row; already-requested employers are counted in skippedCount, not listed — nothing
+ * employer not already covered by our own releaseViews), but sends nothing and records nothing.
+ * Only feedback/reminder (actionable) rows are returned per-row; already-requested employers are
+ * counted in skippedCount, not listed — nothing
  * for the manager to decide about them, they never get an email either way. */
 export async function previewReleaseFollowUps(): Promise<FollowUpPreview> {
   await requireEditorAuth()
@@ -1995,9 +2009,10 @@ export async function previewReleaseFollowUps(): Promise<FollowUpPreview> {
   const releases: FollowUpPreviewRelease[] = []
 
   for (const release of qualifying) {
-    const [audience, requestedTokens] = await Promise.all([
+    const [audience, requestedTokens, viewedTokens] = await Promise.all([
       getReleaseAudience(release.listId, release.stream, allEmployers),
       getEmployerTokensWithRequestForList(release.listId),
+      getEmployerTokensWithReleaseView(release.listId),
     ])
 
     const rows: FollowUpPreviewRow[] = []
@@ -2006,10 +2021,17 @@ export async function previewReleaseFollowUps(): Promise<FollowUpPreview> {
     for (const employer of audience) {
       if (alreadyEvaluated.has(`${release.listId}|${employer.token}`)) continue
 
-      const emailStatus = await getCampaignEmailStatus(release.sentCampaignId, employer.email, token)
-      if (!emailStatus) continue // unknown — leave out of preview, same as runReleaseFollowUps() leaves it unrecorded
+      // Same precedence as runReleaseFollowUps(): a real releaseViews row (TASK-58/59) already
+      // proves engagement, stronger than the pixel — skip the pixel lookup once we know.
+      let opened: boolean
+      if (viewedTokens.has(employer.token)) {
+        opened = true
+      } else {
+        const emailStatus = await getCampaignEmailStatus(release.sentCampaignId, employer.email, token)
+        if (!emailStatus) continue // unknown — leave out of preview, same as runReleaseFollowUps() leaves it unrecorded
+        opened = emailStatus.detailStatus >= 3
+      }
 
-      const opened = emailStatus.detailStatus >= 3
       const requested = requestedTokens.has(employer.token)
 
       if (requested) {

@@ -759,3 +759,12 @@ export async function recordReleaseView(listId: string, employerToken: string, s
     console.warn("[recordReleaseView] failed:", listId, employerToken, err)
   }
 }
+
+/** Which employers have at least one real recorded view of this release (TASK-58/59) — used by
+ * runReleaseFollowUps()/previewReleaseFollowUps() (app/actions.ts) as a stronger, same-pair-shaped
+ * signal than SendPulse's own open-tracking pixel (getCampaignEmailStatus()), the same role
+ * getEmployerTokensWithRequestForList() already plays for contact requests. */
+export async function getEmployerTokensWithReleaseView(listId: string): Promise<Set<string>> {
+  const rows = await db.select({ employerToken: releaseViews.employerToken }).from(releaseViews).where(eq(releaseViews.listId, listId))
+  return new Set(rows.map((r) => r.employerToken))
+}
