@@ -389,15 +389,6 @@ function EmployerRow({
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_BADGE[employer.status]}`}>
               {employer.status}
             </span>
-            {telegramConnected && (
-              <span
-                title="Подключён к Telegram-боту"
-                className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
-              >
-                <Send className="size-3" />
-                Telegram
-              </span>
-            )}
           </div>
         </td>
 
