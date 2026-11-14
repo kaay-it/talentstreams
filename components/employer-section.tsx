@@ -47,11 +47,15 @@ function isContactMethod(value: string): value is ContactMethod {
 
 /** Icon-only summary of an employer's delivery methods — no text (just the icon), per the
  * manager's request. Shows every method actually deliverable to THIS employer (email always,
- * telegram only if they connected the bot); their chosen primaryContact is bold + highlighted
- * among those. If their choice isn't one of the deliverable ones (whatsapp today, or telegram
- * chosen but not yet connected, or linkedin — never a delivery channel), its icon still shows,
- * bold but gray — "this is what they asked for, but we can't actually send to it yet". A method
- * that's neither deliverable nor chosen isn't shown at all. */
+ * telegram only if they connected the bot); their chosen primaryContact is bold among those. A
+ * method that's neither deliverable nor chosen isn't shown at all. Two independent dimensions,
+ * not one combined state: color is always availability (teal = deliverable, gray = not,
+ * regardless of whether it's chosen), weight is always choice (bold = their own stated
+ * preference from the registration form, regardless of whether we can deliver to it) — so a
+ * deliverable-but-not-chosen method still reads as clearly available (teal), not dimmed into
+ * looking unavailable, and a chosen-but-undeliverable one (whatsapp today, telegram chosen but
+ * not connected, linkedin) still reads as bold+gray — "this is what they asked for, but we can't
+ * actually send to it yet". */
 function ContactMethodIcons({ primaryContact, telegramConnected }: { primaryContact: string; telegramConnected: boolean }) {
   const deliverable = new Set<ContactMethod>(["email"])
   if (telegramConnected) deliverable.add("telegram")
@@ -65,12 +69,13 @@ function ContactMethodIcons({ primaryContact, telegramConnected }: { primaryCont
         const Icon = CONTACT_METHOD_ICON[m]
         const isChosen = m === chosen
         const isDeliverable = deliverable.has(m)
+        const title = isChosen ? `${CONTACT_METHOD_LABEL[m]} — предпочитаемый метод` : CONTACT_METHOD_LABEL[m]
         return (
-          <span key={m} title={CONTACT_METHOD_LABEL[m]} className="inline-flex">
+          <span key={m} title={title} className="inline-flex">
             <Icon
-              aria-label={CONTACT_METHOD_LABEL[m]}
+              aria-label={title}
               strokeWidth={isChosen ? 2.75 : 2}
-              className={`size-3.5 ${isChosen ? (isDeliverable ? "text-primary" : "text-muted-foreground") : "text-muted-foreground/40"}`}
+              className={`size-3.5 ${isDeliverable ? "text-primary" : "text-muted-foreground"}`}
             />
           </span>
         )
