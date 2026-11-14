@@ -1,8 +1,9 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
+import { headers } from "next/headers"
 import Link from "next/link"
 import { ArrowLeft, CalendarDays, Send } from "lucide-react"
-import { getMailingList, resolveMailingListForEmployer, type MailingListEntry } from "@/lib/db/mailing-lists"
+import { getMailingList, resolveMailingListForEmployer, recordReleaseView, isLikelyBotUserAgent, type MailingListEntry } from "@/lib/db/mailing-lists"
 import { getEmployerByToken, filterCandidatesForEmployer } from "@/lib/db/employers"
 import { getStreamsDetailed } from "@/lib/db/streams"
 import { telegramConnectUrl } from "@/lib/sendpulse"
@@ -58,6 +59,12 @@ export default async function MailingListPage({
   if (employerToken) {
     const employer = await getEmployerByToken(employerToken)
     if (!employer) notFound()
+
+    const userAgent = (await headers()).get("user-agent") ?? ""
+    if (!isLikelyBotUserAgent(userAgent)) {
+      await recordReleaseView(listId, employerToken)
+    }
+
     const resolved = resolveMailingListForEmployer(mailingList, employerToken)
     if (!resolved) {
       ready = false

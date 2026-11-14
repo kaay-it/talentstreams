@@ -204,6 +204,13 @@
       "when": 1794509820211,
       "tag": "0028_loving_shinko_yamashiro",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794653926554,
+      "tag": "0029_yellow_molecule_man",
+      "breakpoints": true
     }
   ]
 }

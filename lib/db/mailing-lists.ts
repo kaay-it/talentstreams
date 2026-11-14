@@ -1,7 +1,7 @@
 import "server-only"
 import { eq, inArray, isNotNull } from "drizzle-orm"
 import { db } from "./index"
-import { mailingLists, mailingListRecipients, selections, selectionEntries, selectionEmployers, streams } from "./schema"
+import { mailingLists, mailingListRecipients, selections, selectionEntries, selectionEmployers, streams, releaseViews } from "./schema"
 import { getStreamIdByName } from "./streams"
 import { getCandidates, type Candidate } from "./candidates"
 import { getEmployers, getEmployerByToken, confirmedEmployersForStream, filterCandidatesForEmployer, type Employer } from "./employers"
@@ -717,4 +717,30 @@ export async function getReleaseAudience(listId: string, stream: string, allEmpl
     return employers.filter((e) => tokenSet.has(e.token))
   }
   return confirmedEmployersForStream(employers, { name: stream })
+}
+
+/** Known link-preview-bot User-Agent substrings (TASK-58) — Telegram/WhatsApp/Slack/etc.
+ * pre-fetch a shared URL server-side to build a preview card before any human ever clicks it,
+ * which would otherwise look exactly like a real employer visit. Best-effort heuristic, not
+ * exhaustive — not a security control, just keeps the view log honest. */
+const BOT_USER_AGENT_PATTERNS = [
+  "bot", "telegrambot", "whatsapp", "facebookexternalhit", "slackbot", "linkedinbot",
+  "twitterbot", "discordbot", "skypeuripreview", "vkshare", "viber",
+]
+
+export function isLikelyBotUserAgent(userAgent: string): boolean {
+  const ua = userAgent.toLowerCase()
+  return BOT_USER_AGENT_PATTERNS.some((p) => ua.includes(p))
+}
+
+/** Records one real view of a release by an employer (TASK-58) — every view is its own row (not
+ * upserted to a single fact row), so count/history come for free; collapsing to a boolean fact at
+ * read time (COUNT(*) > 0) is always possible later, the reverse isn't. Best-effort — never
+ * throws, a transient DB hiccup must not break the public employer-facing page. */
+export async function recordReleaseView(listId: string, employerToken: string): Promise<void> {
+  try {
+    await db.insert(releaseViews).values({ listId, employerToken })
+  } catch (err) {
+    console.warn("[recordReleaseView] failed:", listId, employerToken, err)
+  }
 }

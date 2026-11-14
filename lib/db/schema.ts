@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, bigint, text, timestamp, date, unique, vector } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, bigint, text, timestamp, date, unique, vector, index } from "drizzle-orm/pg-core"
 
 export const streams = pgTable("streams", {
   id:          serial("id").primaryKey(),
@@ -219,3 +219,22 @@ export const releaseFollowUpRuns = pgTable("releaseFollowUpRuns", {
   reminderSent:     integer("reminderSent").notNull(),
   failed:           integer("failed").notNull(),
 })
+
+// One row per real page view of a release by an employer (TASK-58) — own statistics alongside
+// SendPulse's unreliable open-tracking pixel (see TASK-46: image-blocking gives opened=false even
+// for a genuinely engaged recipient). Every view gets its own row, not a single upserted fact —
+// count/history are free this way, and collapsing to a boolean fact later (COUNT(*) > 0) is always
+// possible, the reverse isn't. id is bigint identity, not uuid, same reasoning as
+// candidateDigestRuns/releaseFollowUpRuns above: never exposed in a public URL, nothing
+// FK-references it. Unlike the rest of this schema (every other table is naturally bounded — one
+// row per candidate/employer/resume-version/cron-run — so a sequential scan is fine), this is an
+// open-ended event log that grows with every page view, so it gets indexes from the start.
+export const releaseViews = pgTable("releaseViews", {
+  id:            bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  listId:        text("listId").notNull().references(() => mailingLists.id, { onDelete: "cascade" }),
+  employerToken: text("employerToken").notNull().references(() => employers.token, { onDelete: "cascade" }),
+  viewedAt:      timestamp("viewedAt").defaultNow().notNull(),
+}, (table) => [
+  index("releaseViewsListIdEmployerTokenIdx").on(table.listId, table.employerToken),
+  index("releaseViewsEmployerTokenIdx").on(table.employerToken),
+])
