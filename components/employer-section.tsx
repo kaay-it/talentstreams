@@ -45,6 +45,12 @@ function isContactMethod(value: string): value is ContactMethod {
   return (CONTACT_METHOD_ORDER as string[]).includes(value)
 }
 
+/** Methods backed by an actual bot integration with a per-employer connected/not-connected
+ * state — just telegram today. Not the same set as "deliverable": whatsapp has no bot (or any
+ * channel) at all yet, so it gets no connected/not-connected claim, only linkedin/whatsapp's
+ * plain label. */
+const BOT_METHODS = new Set<ContactMethod>(["telegram"])
+
 /** Icon-only summary of an employer's delivery methods — no text (just the icon), per the
  * manager's request. Shows every method actually deliverable to THIS employer (email always,
  * telegram only if they connected the bot); their chosen primaryContact is bold among those. A
@@ -69,12 +75,15 @@ function ContactMethodIcons({ primaryContact, telegramConnected }: { primaryCont
         const Icon = CONTACT_METHOD_ICON[m]
         const isChosen = m === chosen
         const isDeliverable = deliverable.has(m)
-        const title = isChosen ? `${CONTACT_METHOD_LABEL[m]} — предпочитаемый метод` : CONTACT_METHOD_LABEL[m]
+        const titleParts = [CONTACT_METHOD_LABEL[m]]
+        if (BOT_METHODS.has(m)) titleParts.push(isDeliverable ? "бот подключён" : "бот не подключён")
+        if (isChosen) titleParts.push("предпочитаемый метод")
+        const title = titleParts.join(" — ")
         return (
           <span key={m} title={title} className="inline-flex">
             <Icon
               aria-label={title}
-              strokeWidth={isChosen ? 2.75 : 2}
+              strokeWidth={isChosen ? 3.25 : 1.75}
               className={`size-3.5 ${isDeliverable ? "text-primary" : "text-muted-foreground"}`}
             />
           </span>
