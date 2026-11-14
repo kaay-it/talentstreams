@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { CheckCircle2, XCircle, Ban, Trash2, Pencil, Plus, Send, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { CheckCircle2, XCircle, Ban, Trash2, Pencil, Plus, Send, ArrowUp, ArrowDown, ArrowUpDown, Mail, MessageCircle, Link2, type LucideIcon } from "lucide-react"
 import { confirmEmployer, rejectEmployer, deleteEmployer } from "@/app/actions"
 import { EmployerEditModal } from "@/components/employer-edit-modal"
 import { EmployerCreateModal } from "@/components/employer-create-modal"
@@ -30,6 +30,53 @@ const STATUS_RANK: Record<EmployerStatus, number> = {
   "Подтверждён": 0,
   "На проверке": 1,
   "Отклонён": 1,
+}
+
+/** The 4 contact methods an employer can pick as primaryContact at registration. Only email and
+ * telegram are actual delivery channels today (release emails go to everyone; the Telegram bot
+ * only to employers who connected it) — whatsapp has no sender yet, linkedin is never automated.
+ * No brand icons in lucide-react (dropped for trademark reasons), so these are generic stand-ins. */
+type ContactMethod = "email" | "telegram" | "whatsapp" | "linkedin"
+const CONTACT_METHOD_ORDER: ContactMethod[] = ["email", "telegram", "whatsapp", "linkedin"]
+const CONTACT_METHOD_ICON: Record<ContactMethod, LucideIcon> = { email: Mail, telegram: Send, whatsapp: MessageCircle, linkedin: Link2 }
+const CONTACT_METHOD_LABEL: Record<ContactMethod, string> = { email: "Email", telegram: "Telegram", whatsapp: "WhatsApp", linkedin: "LinkedIn" }
+
+function isContactMethod(value: string): value is ContactMethod {
+  return (CONTACT_METHOD_ORDER as string[]).includes(value)
+}
+
+/** Icon-only summary of an employer's delivery methods — no text (just the icon), per the
+ * manager's request. Shows every method actually deliverable to THIS employer (email always,
+ * telegram only if they connected the bot); their chosen primaryContact is bold + highlighted
+ * among those. If their choice isn't one of the deliverable ones (whatsapp today, or telegram
+ * chosen but not yet connected, or linkedin — never a delivery channel), its icon still shows,
+ * bold but gray — "this is what they asked for, but we can't actually send to it yet". A method
+ * that's neither deliverable nor chosen isn't shown at all. */
+function ContactMethodIcons({ primaryContact, telegramConnected }: { primaryContact: string; telegramConnected: boolean }) {
+  const deliverable = new Set<ContactMethod>(["email"])
+  if (telegramConnected) deliverable.add("telegram")
+
+  const chosen = isContactMethod(primaryContact) ? primaryContact : null
+  const visible = CONTACT_METHOD_ORDER.filter((m) => deliverable.has(m) || m === chosen)
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {visible.map((m) => {
+        const Icon = CONTACT_METHOD_ICON[m]
+        const isChosen = m === chosen
+        const isDeliverable = deliverable.has(m)
+        return (
+          <span key={m} title={CONTACT_METHOD_LABEL[m]} className="inline-flex">
+            <Icon
+              aria-label={CONTACT_METHOD_LABEL[m]}
+              strokeWidth={isChosen ? 2.75 : 2}
+              className={`size-3.5 ${isChosen ? (isDeliverable ? "text-primary" : "text-muted-foreground") : "text-muted-foreground/40"}`}
+            />
+          </span>
+        )
+      })}
+    </div>
+  )
 }
 
 type SortField = "name" | "timestamp" | "status"
@@ -313,6 +360,9 @@ function EmployerRow({
           <div className="space-y-0.5">
             {employer.email && <p className="truncate">{employer.email}</p>}
             {employer.phone && <p className="truncate">{employer.phone}</p>}
+          </div>
+          <div className="mt-1.5">
+            <ContactMethodIcons primaryContact={employer.primaryContact} telegramConnected={telegramConnected} />
           </div>
         </td>
 
