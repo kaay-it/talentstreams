@@ -1,11 +1,13 @@
 import { notFound } from "next/navigation"
 import { isSheetsConfigured } from "@/lib/sheets"
 import { isGeminiConfigured } from "@/lib/gemini"
+import { isWhatsAppConfigured } from "@/lib/sendpulse"
 import { ImportCandidatesButton } from "@/components/import-candidates-button"
 import { CandidateDigestToggle } from "@/components/candidate-digest-toggle"
 import { ReleaseFollowUpToggle } from "@/components/release-follow-up-toggle"
+import { WhatsAppPushToggle } from "@/components/whatsapp-push-toggle"
 import { DuplicatesSection } from "@/components/duplicates-section"
-import { getCandidateDigestSettings, getReleaseFollowUpSettings, getDuplicateThreshold } from "@/app/actions"
+import { getCandidateDigestSettings, getReleaseFollowUpSettings, getWhatsAppPushSettings, getDuplicateThreshold } from "@/app/actions"
 
 export const dynamic = "force-dynamic"
 
@@ -21,9 +23,10 @@ export default async function SettingsPage({
     notFound()
   }
 
-  const [digestSettings, followUpSettings, duplicateThreshold] = await Promise.all([
+  const [digestSettings, followUpSettings, whatsappSettings, duplicateThreshold] = await Promise.all([
     getCandidateDigestSettings(),
     getReleaseFollowUpSettings(),
+    getWhatsAppPushSettings(),
     getDuplicateThreshold(),
   ])
 
@@ -68,6 +71,24 @@ export default async function SettingsPage({
           предпросмотром — в разделе «Коммуникации».
         </p>
         <ReleaseFollowUpToggle initialAutoSendEnabled={followUpSettings.autoSendEnabled} />
+      </div>
+
+      <div className="mt-10 space-y-3">
+        <h2 className="text-sm font-semibold text-card-foreground">WhatsApp-пуш «новый выпуск готов»</h2>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          При отправке выпуска — то же уведомление, что уже уходит в Telegram, но по
+          одобренному Meta-шаблону тем работодателям, кто выбрал WhatsApp предпочитаемым
+          каналом. Выключено по умолчанию — проверьте тестовой отправкой, что шаблон
+          действительно доставляется и ссылка в кнопке собирается правильно, прежде чем включать.
+        </p>
+        {isWhatsAppConfigured() ? (
+          <WhatsAppPushToggle initialEnabled={whatsappSettings.enabled} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            WhatsApp не настроен в этом окружении (нет шаблона, одобренного Meta, либо не задан
+            SENDPULSE_WA_TEMPLATE_NAME).
+          </p>
+        )}
       </div>
 
       <div className="mt-10 space-y-3">
