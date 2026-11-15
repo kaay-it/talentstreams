@@ -1,5 +1,5 @@
 import "server-only"
-import { eq, inArray, isNotNull } from "drizzle-orm"
+import { eq, inArray, isNotNull, desc, count, countDistinct } from "drizzle-orm"
 import { db } from "./index"
 import { mailingLists, mailingListRecipients, selections, selectionEntries, selectionEmployers, streams, releaseViews } from "./schema"
 import { getStreamIdByName } from "./streams"
@@ -784,4 +784,43 @@ export async function getWhatsAppPushEnabled(): Promise<boolean> {
 
 export async function setWhatsAppPushEnabled(enabled: boolean): Promise<void> {
   await setSetting(WHATSAPP_PUSH_SETTING, "boolean", String(enabled))
+}
+
+export type ReleaseViewStats = {
+  totalViews: number
+  distinctEmployers: number
+  bySource: Partial<Record<ReleaseViewSource, number>>
+}
+
+/** Aggregated view stats per release that has at least one releaseViews row — a listId missing
+ * from the returned Map was simply never viewed, the caller (app/editor/statistics/page.tsx)
+ * substitutes zeros for it. Two separate aggregations, not one GROUP BY: count(distinct
+ * employerToken) grouped by (listId, source) would count employers split across channels, not
+ * the true per-release unique count — the same employer opening via both email and WhatsApp
+ * must count once in distinctEmployers, not twice. */
+export async function getReleaseViewStatsByList(): Promise<Map<string, ReleaseViewStats>> {
+  const [totals, bySourceRows] = await Promise.all([
+    db.select({ listId: releaseViews.listId, totalViews: count(), distinctEmployers: countDistinct(releaseViews.employerToken) })
+      .from(releaseViews).groupBy(releaseViews.listId),
+    db.select({ listId: releaseViews.listId, source: releaseViews.source, cnt: count() })
+      .from(releaseViews).groupBy(releaseViews.listId, releaseViews.source),
+  ])
+  const map = new Map<string, ReleaseViewStats>()
+  for (const t of totals) map.set(t.listId, { totalViews: t.totalViews, distinctEmployers: t.distinctEmployers, bySource: {} })
+  for (const r of bySourceRows) {
+    const entry = map.get(r.listId)
+    if (entry) entry.bySource[r.source as ReleaseViewSource] = r.cnt
+  }
+  return map
+}
+
+export type ReleaseViewRow = { employerToken: string; source: ReleaseViewSource; viewedAt: string }
+
+/** Raw rows for one release, newest first — for the lazy per-release detail view (expand on
+ * click, app/actions.ts getReleaseViewDetails()), which resolves employer name/company itself
+ * via the already-loaded getEmployers() rather than joining here. */
+export async function getReleaseViewRows(listId: string): Promise<ReleaseViewRow[]> {
+  const rows = await db.select({ employerToken: releaseViews.employerToken, source: releaseViews.source, viewedAt: releaseViews.viewedAt })
+    .from(releaseViews).where(eq(releaseViews.listId, listId)).orderBy(desc(releaseViews.viewedAt))
+  return rows.map((r) => ({ ...r, source: r.source as ReleaseViewSource, viewedAt: r.viewedAt.toISOString() }))
 }
