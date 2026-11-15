@@ -5,6 +5,7 @@ import { mailingLists, mailingListRecipients, selections, selectionEntries, sele
 import { getStreamIdByName } from "./streams"
 import { getCandidates, type Candidate } from "./candidates"
 import { getEmployers, getEmployerByToken, confirmedEmployersForStream, filterCandidatesForEmployer, type Employer } from "./employers"
+import { getBooleanSetting, setSetting } from "./settings"
 
 export type MailingListEntry = {
   profile: Candidate
@@ -767,4 +768,20 @@ export async function recordReleaseView(listId: string, employerToken: string, s
 export async function getEmployerTokensWithReleaseView(listId: string): Promise<Set<string>> {
   const rows = await db.select({ employerToken: releaseViews.employerToken }).from(releaseViews).where(eq(releaseViews.listId, listId))
   return new Set(rows.map((r) => r.employerToken))
+}
+
+const WHATSAPP_PUSH_SETTING = "whatsappPushEnabled"
+
+/** Explicit opt-in gate for the real WhatsApp "release ready" push in publishMailingList()
+ * (TASK-60) — default OFF, separate from isWhatsAppConfigured() (lib/sendpulse.ts, which only
+ * checks the env vars exist). A manager flips this on only once they've confirmed via a test
+ * send (sendWhatsAppTestMessage(), app/actions.ts — deliberately bypasses this toggle, since a
+ * test send has to work BEFORE the manager would ever turn production sending on) that the
+ * approved template actually renders correctly for real recipients. */
+export async function getWhatsAppPushEnabled(): Promise<boolean> {
+  return getBooleanSetting(WHATSAPP_PUSH_SETTING, false)
+}
+
+export async function setWhatsAppPushEnabled(enabled: boolean): Promise<void> {
+  await setSetting(WHATSAPP_PUSH_SETTING, "boolean", String(enabled))
 }

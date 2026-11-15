@@ -23,6 +23,8 @@ import {
   reassignSelectionEntriesToSurvivor,
   getReleaseAudience,
   getEmployerTokensWithReleaseView,
+  getWhatsAppPushEnabled as getWhatsAppPushEnabledDb,
+  setWhatsAppPushEnabled as setWhatsAppPushEnabledDb,
   campaignNameFor, isoToRu,
 } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, getEmployerTokensWithRequestForList, reassignContactRequestsToSurvivor, type ContactRequestStatus } from "@/lib/db/contact-requests"
@@ -47,7 +49,7 @@ import {
   recordFollowUpOutcome,
   type FollowUpRun,
 } from "@/lib/db/release-follow-ups"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, enableTelegramContact, disableTelegramContact, deleteTelegramContact, sendTransactionalEmail, getCampaignSendDate, getCampaignEmailStatus } from "@/lib/sendpulse"
+import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, enableTelegramContact, disableTelegramContact, deleteTelegramContact, sendTransactionalEmail, getCampaignSendDate, getCampaignEmailStatus, sendWhatsAppReleaseTemplate } from "@/lib/sendpulse"
 import { isGeminiConfigured, embedTexts } from "@/lib/gemini"
 import { buildConsentRequestEmailHtml, buildDigestEmailHtml, buildFollowUpFeedbackEmailHtml, buildFollowUpReminderEmailHtml } from "@/lib/email-templates"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
@@ -814,7 +816,18 @@ export async function publishMailingList(listId: string, confirmed = false): Pro
   // same way filterCandidatesForEmployer does on their own /list/[listId] page, so the number in
   // the push always matches what they'll actually see when they tap the button. An employer
   // resolving to nothing ("подборка не готова") gets no ping at all — nothing to point them at yet.
-  const fullList = await getMailingList(listId)
+  //
+  // WhatsApp push (same release, same resolved count) rides along in the same map — gated on
+  // isWhatsAppConfigured() (silently inactive until a Meta-approved template exists, see
+  // lib/sendpulse.ts), employer.primaryContact === "whatsapp" (unlike Telegram's "connected the
+  // bot" opt-in, a WhatsApp template can reach ANY phone number, so the employer's own stated
+  // channel preference is the only consent signal we have), AND whatsappPushEnabled — a separate,
+  // explicit manager toggle (/editor/settings, default OFF) on top of both: a manager confirms
+  // the template actually renders correctly via sendWhatsAppTestMessage() (bypasses this toggle
+  // on purpose — the test has to work BEFORE anyone would turn production sending on) before
+  // ever flipping this on, so a newly-approved-but-unverified template can't start messaging
+  // real employers automatically the moment the env var is set.
+  const [fullList, whatsappPushEnabled] = await Promise.all([getMailingList(listId), getWhatsAppPushEnabledDb()])
   if (fullList) {
     await Promise.all(
       notifyEmployers.map((employer) => {
@@ -823,22 +836,31 @@ export async function publishMailingList(listId: string, confirmed = false): Pro
         const count = resolved.isPersonal
           ? resolved.entries.length
           : filterCandidatesForEmployer(resolved.entries.map((e) => e.profile), employer).length
-        return sendTelegramToEmployer(
-          employer.token,
-          `<b>Новый выпуск Talent Stream уже готов!</b>\n\nВ поток ${escapeHtml(list.stream)} от ${escapeHtml(date)} вошли ${count} ${candidatePlural(count)}`,
-          {
-            button: { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}&src=tg` },
-            // Telegram caches an external photo per exact URL (confirmed by testing — a file
-            // changed in place at the same URL kept showing the stale version). The filename is
-            // versioned on purpose: bump it (public/telegram-notify-vN.png) whenever the image
-            // itself changes, so Telegram is forced to fetch fresh instead of serving a cached miss.
-            // 640×180: SendPulse marks this send is_external_attachment: true, meaning Telegram
-            // renders it as a link-preview card, not a native uploaded photo, and crops/pads an
-            // off-ratio image to fit — this specific ratio (not the documented 1.91:1 Open Graph
-            // standard tried earlier) is the one confirmed clean on a real device, by eye.
-            photo: `${appUrl}/telegram-notify-v8.png`,
-          },
-        )
+        return Promise.all([
+          sendTelegramToEmployer(
+            employer.token,
+            `<b>Новый выпуск Talent Stream уже готов!</b>\n\nВ поток ${escapeHtml(list.stream)} от ${escapeHtml(date)} вошли ${count} ${candidatePlural(count)}`,
+            {
+              button: { label: `Открыть поток ${list.stream} за ${date} →`, url: `${appUrl}/list/${listId}?e=${employer.token}&src=tg` },
+              // Telegram caches an external photo per exact URL (confirmed by testing — a file
+              // changed in place at the same URL kept showing the stale version). The filename is
+              // versioned on purpose: bump it (public/telegram-notify-vN.png) whenever the image
+              // itself changes, so Telegram is forced to fetch fresh instead of serving a cached miss.
+              // 640×180: SendPulse marks this send is_external_attachment: true, meaning Telegram
+              // renders it as a link-preview card, not a native uploaded photo, and crops/pads an
+              // off-ratio image to fit — this specific ratio (not the documented 1.91:1 Open Graph
+              // standard tried earlier) is the one confirmed clean on a real device, by eye.
+              photo: `${appUrl}/telegram-notify-v8.png`,
+            },
+          ),
+          whatsappPushEnabled && employer.primaryContact === "whatsapp"
+            ? sendWhatsAppReleaseTemplate(
+                employer.phone,
+                [list.stream, date, `${count} ${candidatePlural(count)}`],
+                `${listId}?e=${employer.token}&src=wa`,
+              )
+            : null,
+        ])
       }),
     )
   }
@@ -1963,6 +1985,31 @@ export async function setReleaseFollowUpAutoSend(enabled: boolean): Promise<void
 export async function getReleaseFollowUpRuns() {
   await requireEditorAuth()
   return getReleaseFollowUpRunsDb()
+}
+
+export async function getWhatsAppPushSettings() {
+  await requireEditorAuth()
+  return { enabled: await getWhatsAppPushEnabledDb() }
+}
+
+export async function setWhatsAppPushEnabled(enabled: boolean): Promise<void> {
+  await requireEditorAuth()
+  await setWhatsAppPushEnabledDb(enabled)
+  revalidatePath("/editor/settings")
+}
+
+/** Manual test send — bypasses the whatsappPushEnabled toggle entirely (intentional: a manager
+ * verifies the approved template actually renders before ever turning production sending on,
+ * see the comment above the toggle's use in publishMailingList()). Uses the same illustrative
+ * values shown to Meta's reviewers, not real release data — this is about confirming the
+ * template/button mechanics work, not about sending a real notification. */
+export async function sendWhatsAppTestMessage(phone: string): Promise<boolean> {
+  await requireEditorAuth()
+  return sendWhatsAppReleaseTemplate(
+    phone,
+    ["Fintech & Banking", "26.10.2026", "5 кандидатов"],
+    "a1b2c3d4-0000-4fff-8aaa-123456789abc?e=f9e8d7c6-1111-4eee-9bbb-987654321fed&src=wa",
+  )
 }
 
 export type FollowUpPreviewRow = {
