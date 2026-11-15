@@ -508,6 +508,64 @@ export async function sendTelegramToEmployer(
   }
 }
 
+// ── WhatsApp chatbot ───────────────────────────────────────────────────────────
+// Unlike Telegram, WhatsApp Business has a 24-hour free-messaging window after which only a
+// Meta-approved template can be sent — so there's no WhatsApp equivalent of a connect-flow +
+// free-text push here (that's deferred: it would only be needed for free-form 1:1 messages
+// outside the window). A template, once approved, is exactly the mechanism that lets a business
+// message a phone number that never wrote to the bot first — so sending goes straight to
+// employer.phone via sendTemplateByPhone, no subscription or contact lookup required.
+
+export function isWhatsAppConfigured(): boolean {
+  return Boolean(process.env.SENDPULSE_WA_BOT_ID && process.env.SENDPULSE_WA_TEMPLATE_NAME)
+}
+
+/**
+ * Sends the approved "release ready" WhatsApp template directly to a phone number. `bodyParams`
+ * are the template's {{1}}..{{N}} body placeholders, positional, in order; `buttonUrlParam` is
+ * the one dynamic suffix appended to the template's URL button's static base (a compound string
+ * — "<listId>?e=<token>&src=wa" — not just a bare id; Meta's "one variable" rule is about count
+ * and position in the URL, not about the value itself being simple). Both must match whatever
+ * was approved in SendPulse's template builder (see docs/backlog.adoc or the PR description for
+ * the exact wording used). NOT yet confirmed whether SendPulse/Meta escapes `?`/`&`/`=` inside
+ * buttonUrlParam when substituting it into the button — verify with a live send once the
+ * template is approved; if broken, switch the template/call site to a body-text link instead.
+ * Best-effort, same contract as sendTelegramToEmployer() — never throws, returns false on any
+ * failure or if isWhatsAppConfigured() is false (silently inactive until the template exists).
+ */
+export async function sendWhatsAppReleaseTemplate(phone: string, bodyParams: string[], buttonUrlParam: string): Promise<boolean> {
+  if (!isWhatsAppConfigured()) return false
+  try {
+    const token = await getToken()
+    if (!token) return false
+
+    const payload = {
+      bot_id: process.env.SENDPULSE_WA_BOT_ID,
+      phone,
+      template: {
+        name: process.env.SENDPULSE_WA_TEMPLATE_NAME,
+        language: { code: "ru" },
+        components: [
+          { type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) },
+          { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: buttonUrlParam }] },
+        ],
+      },
+    }
+    const res = await spPost(
+      `${API}/contacts/sendTemplateByPhone`,
+      { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      JSON.stringify(payload),
+    )
+    const ok = res.status >= 200 && res.status < 300
+    if (ok) console.log(`[SendPulse] whatsapp template send status=${res.status}`)
+    else console.warn(`[SendPulse] whatsapp template send status=${res.status}`, res.text)
+    return ok
+  } catch (err) {
+    console.error("[SendPulse] sendWhatsAppReleaseTemplate failed:", err)
+    return false
+  }
+}
+
 // ── Transactional email ─────────────────────────────────────────────────────────
 
 /**
