@@ -32,7 +32,9 @@ participant "SendPulse\n(книга стрима)" as sp_stream  #fce8cc
 participant "SendPulse\nCampaigns"  as sp_camp     #fce8cc
 participant "SendPulse\n(книга «Candidates»)" as sp_cbook #fce8cc
 participant "SendPulse\n(транзакционный SMTP)" as sp_smtp #fce8cc
+participant "SendPulse\n(WhatsApp)"  as sp_wa      #fce8cc
 participant "Neon · releaseFollowUps" as neonFollow #d4f0d4
+participant "Neon · releaseViews"    as neonViews  #d4f0d4
 participant "Neon · settings / runs" as neonAuto   #d4f0d4
 
 == 1. Редактор управляет стримами ==
@@ -689,6 +691,11 @@ loop по каждому получателю письма (TASK-35 часть 2
   app -> app : resolveMailingListForEmployer(fullList, employer.token)\n+ filterCandidatesForEmployer() для дефолтной — count = то,\nчто этот конкретный работодатель реально увидит по ссылке
   app -> sp_master : sendTelegramToEmployer(token, text с count,\n{ button: персональная ссылка, photo }) — best-effort,\nбез резолва (подборка «не готова») пинг не уходит вовсе
   sp_master --> app : OK
+
+  alt isWhatsAppConfigured() && primaryContact === "whatsapp"\n&& whatsappPushEnabled (TASK-60, все три сразу)
+    app -> sp_wa : sendWhatsAppReleaseTemplate(employer.phone,\n[stream, date, count], суффикс кнопки с listId+token+src=wa) —\nодобренный Meta-шаблон СРАЗУ на телефон, БЕЗ подписки/поиска\nконтакта (в отличие от Telegram выше — шаблон именно для этого)
+    sp_wa --> app : OK
+  end
 end
 
 alt sentCampaignId === null (первая настоящая отправка)
@@ -816,6 +823,11 @@ app -> sh_mail : getMailingList("f04a9b3e-…")\nзаголовок mailingLists
 sh_mail --> app : { stream, date,\n  default: ResolvedSelection | null,\n  personal: ResolvedSelection[] }
 app -> sh_emp : getEmployerByToken("8f3a1c…")
 sh_emp --> app : employer | null (404, если не найден)
+app -> app : isLikelyBotUserAgent(User-Agent) (TASK-58) — отсеивает\nботов-превьюшек: Telegram/WhatsApp/Slack и т.п. префетчат ссылку,\nчтобы построить карточку превью, ДО того как человек по ней кликнет —\nиначе выглядело бы неотличимо от настоящего визита работодателя
+alt не бот
+  app -> neonViews : recordReleaseView(listId, token, source) —\nsource из ?src= (email/tg/wa/unknown), best-effort (никогда не\nбросает), каждый просмотр — своя строка, не один факт на пару
+  neonViews --> app : OK
+end
 app -> app : resolveMailingListForEmployer(mailingList, token)\nличная (если employerToken в её selectionEmployers) БЕЗ фильтра,\nиначе дефолтная
 alt резолвилась личная подборка
   app -> app : entries = resolved.entries (без фильтра —\nменеджер уже решил вручную, filterCandidatesForEmployer\nсюда вообще не допускается)

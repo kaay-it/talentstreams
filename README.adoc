@@ -5,17 +5,18 @@
 
 Платформа персонализированных подборок проверенных кандидатов для работодателей Центральной Азии.
 
-Работодатели получают email-рассылку с анонимными карточками кандидатов.
+Работодатели получают email-рассылку с анонимными карточками кандидатов (плюс, опционально, дублирующий пуш в Telegram и/или WhatsApp).
 Ссылка в письме персонализирована — каждый работодатель видит только тех кандидатов, кто не исключил его компанию или отрасль из своих предпочтений.
 
 == Технический стек
 
-* *Next.js 16* (App Router, Server Components, Server Actions, `proxy.ts`)
+* *Next.js 16* (App Router, Server Components, Server Actions в `app/actions.ts`; `middleware.ts` — в 16.x переименованный `proxy.ts`)
 * *TypeScript*
-* *Google Sheets* — профили кандидатов, подборки рассылок (Service Account API v4)
-* *Neon (PostgreSQL)* — работодатели, запросы на контакт, стримы, история версий резюме (Drizzle ORM + neon-http driver)
+* *Neon (PostgreSQL)* — единственное хранилище «боевых» данных: кандидаты, работодатели, компании, стримы, выпуски/подборки, запросы на контакт, история резюме, настройки и вся служебная статистика (Drizzle ORM + neon-http driver)
+* *Google Sheets* — НЕ часть боевого пути приложения; опциональный канал массового ввода кандидатов (менеджер заполняет таблицу вручную, кнопка на `/editor/settings` импортирует новые строки в Neon)
 * *Vercel Blob* — приватное хранилище файлов резюме
-* *SendPulse* — email-рассылки (адресные книги, кампании, merge-теги) и транзакционные письма кандидатам
+* *SendPulse* — email-рассылки (адресные книги, кампании, merge-теги), транзакционные письма кандидатам и фоллоу-апы работодателям (SMTP API), Telegram-бот и WhatsApp-бот работодателей
+* *Google AI Studio (Gemini)* — эмбеддинги для поиска дублей кандидатов
 * *Vercel Analytics*
 * *Tailwind CSS + lucide-react*
 
@@ -25,7 +26,7 @@
 
 [source,env]
 ----
-# Google Sheets
+# Google Sheets — опциональный канал массового ввода (не боевой путь)
 GOOGLE_SHEET_ID=...
 GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}
 
@@ -35,7 +36,7 @@ DATABASE_URL=...
 # Vercel Blob
 BLOB_READ_WRITE_TOKEN=...
 
-# SendPulse
+# SendPulse — email
 SENDPULSE_CLIENT_ID=...
 SENDPULSE_CLIENT_SECRET=...
 SENDPULSE_MASTER_BOOK_NAME=Default
@@ -46,22 +47,38 @@ SENDPULSE_CANDIDATE_FROM_NAME=TalentStreams Career
 SENDPULSE_CANDIDATE_BOOK_NAME=Candidates
 SENDPULSE_CANDIDATE_DIGEST_SEND_BOOK_NAME=Candidates Digest Manual
 
-# Google Gemini
+# SendPulse — Telegram-бот работодателей
+SENDPULSE_TG_BOT_ID=...
+SENDPULSE_TG_BOT_NAME=talentstreams_bot
+SENDPULSE_TG_START_FLOW_ID=...
+
+# SendPulse — WhatsApp-бот работодателей (пуш по одобренному Meta-шаблону)
+SENDPULSE_WA_BOT_ID=...
+SENDPULSE_WA_TEMPLATE_NAME=...
+
+# Google AI Studio (Gemini) — поиск дублей кандидатов
 GEMINI_API_KEY=...
 
 # Приложение
 APP_URL=https://your-domain.com
 EDITOR_SECRET=your-secret-string
 SESSION_SECRET=your-session-signing-secret
+CRON_SECRET=your-cron-secret
 ----
 
-`EDITOR_SECRET` защищает `/editor` (страницы, по `?secret=`) и `/api/publish` (заголовок `x-editor-token`) — без него страница возвращает 404, а API-роут отвечает 401.
+`EDITOR_SECRET` защищает `/editor/*` (страницы, по `?secret=`) и `/api/publish` (заголовок `x-editor-token`) — без него страница возвращает 404, а API-роут отвечает 401.
 
-Мутации (Server Actions в `app/actions.ts`) проверяются отдельно от страниц — `requireEditorAuth()` (`lib/auth.ts`) первой строкой в каждом editor-only экшене, раньше они были не защищены вовсе. Пропускает при валидной сессионной куке (её ставит `proxy.ts` по тому же `?secret=`) либо при заголовке `x-editor-token`, совпадающем с `EDITOR_SECRET` (curl/сервер-к-серверу). `SESSION_SECRET` подписывает эту куку (JWT, `jose`) — отдельный секрет, не светится в URL; сгенерировать `openssl rand -base64 32` или аналог, разный для dev и для Vercel Production/Preview.
+Мутации (Server Actions в `app/actions.ts`) проверяются отдельно от страниц, независимым слоем — `requireEditorAuth()` (`lib/auth.ts`) первой строкой в каждом editor-only экшене (~43 из 50 экспортов). Пропускает при валидной сессионной куке (её ставит `middleware.ts` по тому же `?secret=`) либо при заголовке `x-editor-token`, совпадающем с `EDITOR_SECRET` (curl/сервер-к-серверу). `SESSION_SECRET` подписывает эту куку (JWT, `jose`) — отдельный секрет, не светится в URL; сгенерировать `openssl rand -base64 32` или аналог, разный для dev и для Vercel Production/Preview.
 
-`GEMINI_API_KEY` — ключ из Google AI Studio (бесплатный тариф), используется только для поиска дублей кандидатов (секция «Поиск дублей кандидатов» на `/editor/settings`); при отсутствии ключа или ошибке квоты секция просто показывает сообщение об ошибке, остальное приложение не затрагивается.
+`CRON_SECRET` защищает роуты `/api/cron/*` (Vercel Cron шлёт `Authorization: Bearer <значение>`) — без него роут открыт.
 
-`APP_URL` используется для формирования proxy-ссылок на резюме (`APP_URL/api/resume?url=...`) — эти ссылки сохраняются в базе, поэтому значение должно совпадать для всех, кто их открывает (даже при локальной разработке против общей базы, см. ниже).
+`SENDPULSE_TG_BOT_ID`/`SENDPULSE_TG_BOT_NAME`/`SENDPULSE_TG_START_FLOW_ID` — Telegram-бот, созданный через @BotFather и подключённый в SendPulse; работодатель подписывается персональной `tg.pulse.is`-ссылкой, дальше получает дублирующий пуш о новом выпуске рядом с email.
+
+`SENDPULSE_WA_BOT_ID`/`SENDPULSE_WA_TEMPLATE_NAME` — WhatsApp-бот в SendPulse и имя одобренного Meta шаблона сообщения; в отличие от Telegram подписка не нужна — шаблон шлётся напрямую на телефон работодателя. Пока `SENDPULSE_WA_TEMPLATE_NAME` не задан (или шаблон не прошёл модерацию Meta), вся ветка молча неактивна. Даже при настроенных переменных реальная рассылка не включится сама — отдельный тумблер в `/editor/settings` (по умолчанию выключен), плюс независимая от тумблера тестовая отправка на произвольный номер.
+
+`GEMINI_API_KEY` — ключ из Google AI Studio (бесплатный тариф, но сам Google Cloud проект должен иметь включённый billing), используется только для поиска дублей кандидатов (секция «Поиск дублей кандидатов» на `/editor/settings`); при отсутствии ключа или ошибке квоты секция просто показывает сообщение об ошибке, остальное приложение не затрагивается.
+
+`APP_URL` используется для формирования ссылок на выпуск/резюме (`/list/[listId]`, proxy-ссылки на резюме) — эти ссылки сохраняются и рассылаются, поэтому значение должно совпадать для всех, кто их открывает (даже при локальной разработке против общей базы, см. ниже).
 
 == Запуск локально
 
@@ -73,60 +90,53 @@ npm run dev
 
 Приложение доступно на http://localhost:3000.
 
-CAUTION: Локальный `npm run dev` обычно указывает на ту же базу (Neon) и ту же таблицу Google Sheets, что и продакшн — отдельного стенда нет. Ссылки на резюме, сохранённые в базе, абсолютные (`APP_URL/api/resume?...`) и всегда ведут на `APP_URL` из `.env.local`, даже если открыты со страницы, отрендеренной локально.
+CAUTION: Локальный `npm run dev` обычно указывает на ту же базу (Neon), что и продакшн — отдельного стенда нет. Ссылки на резюме и на выпуски, сохранённые в базе, абсолютные (`APP_URL/...`) и всегда ведут на `APP_URL` из `.env.local`, даже если открыты со страницы, отрендеренной локально.
 
 == Структура проекта
+
+Подробное описание каждого файла (с обоснованиями решений) — в link:CLAUDE.md[] и link:docs/backlog.adoc[]. Здесь — только ориентир по верхнеуровневому дереву:
 
 ----
 app/
   page.tsx                     # Главная: лендинг, формы регистрации
-  list/[listId]/page.tsx       # Страница подборки (требует ?e= или ?secret=)
-  profile/[id]/page.tsx        # Полный профиль кандидата
+  list/[listId]/page.tsx       # Страница выпуска (требует ?e= или ?secret=)
+  selection/[selectionId]/page.tsx # Прямой просмотр ОДНОЙ подборки (инструмент редактора)
+  profile/[id]/page.tsx        # Профиль кандидата (полный/анонимизированный)
+  actions.ts                   # Все Server Actions ("use server")
   editor/
-    layout.tsx                 # Боковое меню редактора
-    page.tsx                   # Выпуски (Releases)
-    employers/page.tsx         # Управление работодателями
-    candidates/page.tsx        # Управление кандидатами
+    layout.tsx / page.tsx      # Боковое меню редактора; «Выпуски»
+    selections/page.tsx        # Подборки — готовятся заранее, независимо от выпуска
+    employers/page.tsx         # Работодатели
+    companies/page.tsx         # Компании работодателей
+    candidates/page.tsx        # Кандидаты
     requests/page.tsx          # Запросы на контакт
+    communications/page.tsx    # Ручная отправка с предпросмотром (дайджест/фоллоу-ап)
+    statistics/page.tsx        # Просмотры выпусков по каналам (email/Telegram/WhatsApp)
     streams/page.tsx           # CRUD стримов
-    settings/page.tsx          # Задел на будущее (пока пусто)
+    settings/page.tsx          # Импорт из Sheets, тумблеры автоматики, поиск дублей
   api/
-    publish/[listId]/route.ts  # API-роут для curl-запуска рассылки
+    publish/[listId]/route.ts  # curl-запуск рассылки (x-editor-token)
     upload/route.ts            # POST: загрузка резюме → Vercel Blob
     resume/route.ts            # GET: прокси приватных blob-файлов
-  actions.ts                   # Все Server Actions
+    cron/*/route.ts            # Vercel Cron: дайджест, фоллоу-апы, очистка книг SendPulse
 
 lib/
-  sheets.ts                    # Google Sheets: чтение, запись, типы (кандидаты, подборки)
-  sendpulse.ts                 # SendPulse: OAuth, книги, кампании
-  blob.ts                      # Хелперы для ссылок на Vercel Blob (в т.ч. имя скачиваемого файла)
+  auth.ts                      # requireEditorAuth() — второй, независимый от страниц слой защиты мутаций
+  sheets.ts / sheets-import.ts # Google Sheets: опциональный канал массового ввода кандидатов
+  gemini.ts                    # Google AI Studio — эмбеддинги для поиска дублей
+  sendpulse.ts                 # SendPulse: email, Telegram-бот, WhatsApp-бот
+  email-templates.ts           # HTML-шаблоны писем кандидату/работодателю
   db/
-    index.ts                   # Drizzle-клиент (neon-http)
-    schema.ts                  # Схемы: contactRequests, streams, employers, candidateResumes
-    contact-requests.ts        # CRUD запросов на контакт
-    streams.ts                 # CRUD стримов
-    employers.ts               # CRUD работодателей
-    resumes.ts                 # История версий резюме кандидата
+    index.ts / schema.ts       # Drizzle-клиент и схемы
+    candidates.ts / employers.ts / companies.ts / streams.ts
+    mailing-lists.ts           # Выпуски, подборки, releaseViews, настройки-тумблеры
+    contact-requests.ts / resumes.ts / release-follow-ups.ts / candidate-digest.ts / settings.ts
     migrations/                # SQL-миграции (drizzle-kit)
 
-components/
-  employer-registration-modal.tsx   # Форма работодателя (публичная)
-  employer-edit-modal.tsx           # Редактирование работодателя в редакторе
-  employer-create-modal.tsx         # Быстрое добавление работодателя из редактора
-  employer-section.tsx              # UI подтверждения/отклонения/редактирования заявок
-  candidate-registration-modal.tsx  # Форма кандидата (публичная)
-  candidate-edit-modal.tsx          # Редактирование кандидата в редакторе
-  candidate-create-modal.tsx        # Быстрое добавление кандидата из редактора
-  candidate-section.tsx             # Таблица кандидатов: фильтры, модерация, резюме
-  contact-requests-section.tsx      # UI управления запросами на контакт
-  streams-table.tsx                 # Inline-редактор стримов
-  contact-button.tsx                # Кнопка «Хочу связаться»
-  general-inquiry-button.tsx        # Кнопка «Связаться с нами» (общий запрос)
-  publish-button.tsx                # Кнопка запуска рассылки
-  editor-nav.tsx                    # Боковая навигация редактора
+components/                    # ~40 файлов — формы, секции редактора, модалки; см. CLAUDE.md
 
 docs/
-  spec.adoc                  # Техническое задание
+  spec.adoc                  # Техническое задание (исторический снимок, не отражает текущую реализацию)
   backlog.adoc               # Задачи: выполненные и активные — главный источник правды по архитектуре
   manager-playbook.adoc      # Инструкция для нетехнического менеджера
   workspace.dsl              # C4-архитектура (Structurizr)
@@ -135,49 +145,58 @@ docs/
 
 == Где что хранится
 
-Данные разделены между Google Sheets и Neon — не по историческим причинам, а по тому, кто их пишет:
+Все «боевые» данные — в Neon; Google Sheets не участвует в обычной работе приложения вовсе:
 
 [cols="2,1,3", options="header"]
 |===
 | Данные | Хранилище | Почему
 
 | Кандидаты (профили, регистрации)
-| Google Sheets
-| Часть полей всё ещё правится только напрямую в таблице (`bio`, `industry`, `func` и т. д.) — полный редактор в UI пока не построен
-
-| Стримы
 | Neon
-| Полный CRUD через `/editor/streams`, таблицу больше не открывают
+| Полный жизненный цикл через UI редактора. Google-таблица — опциональный ДОПОЛНИТЕЛЬНЫЙ канал массового ввода (кнопка на `/editor/settings` читает новые строки в Neon), не альтернативное хранилище и не редактируется приложением в ответ
 
-| Работодатели
+| Работодатели, компании, стримы
 | Neon
-| Полный жизненный цикл (регистрация → подтверждение → редактирование → отключение → удаление) через UI
+| Полный жизненный цикл (регистрация → подтверждение → редактирование → отключение/архивация → удаление) через UI
+
+| Выпуски и подборки
+| Neon
+| Заголовок выпуска (`mailingLists`) отделён от содержимого (`selections`) — подборка готовится заранее и независимо, выпуск только выбирает уже готовые
 
 | Запросы на контакт
 | Neon
-| Приложение единственный писатель — редактор никогда не правит эти строки напрямую
+| Приложение — единственный писатель, редактор никогда не правит эти строки напрямую
 
 | История версий резюме кандидата
 | Neon
-| Отдельная таблица (`candidateResumes`) — Sheets хранит только URL последней версии
+| Отдельная таблица (`candidateResumes`)
+
+| Просмотры выпуска работодателями
+| Neon
+| `releaseViews` — своя статистика «открыл/не открыл» надёжнее трекинг-пикселя SendPulse, с разбивкой по каналу (email/Telegram/WhatsApp)
+
+| Настройки и тумблеры автоматики
+| Neon
+| Генеричная key-value таблица `settings` — любая будущая настройка пишется туда же, не отдельной колонкой/таблицей
 
 | Файлы резюме
 | Vercel Blob (приватное)
 | Доступ только через прокси `/api/resume`
 |===
 
-Подробности и статус миграции оставшихся таблиц — `docs/backlog.adoc`, раздел «Приложение: переход на реляционную СУБД».
+Подробности и статус миграции — `docs/backlog.adoc`, раздел «Приложение: переход на реляционную СУБД».
 
-== Доступ к подборке `/list/[listId]`
+== Доступ к выпуску `/list/[listId]`
 
+[cols="2,3", options="header"]
 |===
 | Параметр | Результат
 
 | `?e=[employer_token]`
-| Персонализированная подборка: кандидаты фильтруются по предпочтениям работодателя (исключённые компании/отрасли, гео)
+| Всегда резолвится «как у этого работодателя»: личная подборка без фильтра, если на него заведена, иначе дефолтная с геофильтром/исключениями — независимо от того, передан ли вместе с ним `?secret=`
 
-| `?secret=[EDITOR_SECRET]`
-| Все кандидаты без фильтрации (просмотр редактора)
+| `?secret=[EDITOR_SECRET]` (без `?e=`)
+| Дефолтная подборка без фильтра — просмотр редактора; если дефолтной нет вовсе — состояние «подборка не готова» (HTTP 200, не 404)
 
 | *(без параметров)*
 | 404
@@ -185,39 +204,40 @@ docs/
 
 == Добавление новой функциональности
 
-=== Новое поле в профиле кандидата (Google Sheets)
+=== Новое поле у кандидата/работодателя
 
-. Добавьте ключ в массив `KNOWN_KEYS` (`lib/sheets.ts`).
-. Добавьте поле в тип `Profile` или `Candidate` (`lib/sheets.ts`).
-. Добавьте алиасы в `HEADER_ALIASES` (английское и русское название заголовка) — используются функцией `mapHeader()` везде при чтении/записи.
-. Заполните поле в `buildProfile()` / `rowToRecord()`.
+Кандидаты и работодатели полностью живут в Neon — поле добавляется через схему (см. ниже), не через Google Sheets. `lib/sheets.ts`/`lib/sheets-import.ts` (`HEADER_ALIASES`, `mapHeader()`) касаются только опционального канала массового импорта кандидатов — трогайте их, только если поле должно быть доступно и через импорт из таблицы.
 
 === Новая таблица или поле в Neon
 
-. Добавьте/измените схему в `lib/db/schema.ts` (Drizzle).
+. Добавьте/измените схему в `lib/db/schema.ts` (Drizzle). Для пере-ограниченной по размеру event-лог-таблицы (как `releaseViews`) — добавляйте индексы сразу, не по умолчанию: большинство таблиц в этой схеме обходятся без индексов именно потому, что их размер естественно ограничен (одна строка на кандидата/работодателя/версию резюме), это не универсальное правило.
 . `npm run db:generate` — сгенерировать миграцию (`drizzle-kit`), затем `npm run db:migrate` — применить.
 . CRUD-функции — в соответствующем файле `lib/db/*.ts` (`import "server-only"`, плоские async-функции, без классов).
 
 === Новый Server Action
 
-Добавьте async-функцию с директивой `"use server"` в `app/actions.ts`.
+Добавьте async-функцию с директивой `"use server"` в `app/actions.ts`. Если экшен editor-only и мутирует данные — первой строкой вызовите `requireEditorAuth()` (`lib/auth.ts`); постраничная защита `?secret=` эту проверку не заменяет, у мутаций отдельный, независимый слой.
+
 Для мутаций, которые должны обновить UI редактора, вызывайте `revalidatePath(...)`.
 Для ожидаемых пользовательских ошибок (валидация, дубликаты) — возвращайте `{ ok: false, error }` вместо `throw`: Next.js в production-сборке заменяет сообщение любого `throw new Error(...)` из Server Action на общий текст, чтобы не утекали детали непредвиденных ошибок — это ломает вывод ожидаемых сообщений пользователю (пример — `registerEmployer()`).
 
 === Новый раздел редактора
 
-. Создайте `app/editor/<раздел>/page.tsx` с проверкой `EDITOR_SECRET`.
+. Создайте `app/editor/<раздел>/page.tsx` с проверкой `?secret=` (страница) — она не заменяет `requireEditorAuth()` для любых мутаций, вызываемых с этой страницы.
 . Добавьте пункт в массив разделов в `components/editor-nav.tsx`.
 
-=== Новая SendPulse-переменная контакта
+=== Новая SendPulse-переменная контакта (email)
 
 Добавьте ключ в объект `variables` внутри `syncEmployerToSendPulse` (`app/actions.ts`).
 В шаблоне письма используйте `{{имя_переменной}}`.
 
+Переменные чат-бота (Telegram/WhatsApp) — отдельный механизм, не этот: см. `lib/sendpulse.ts`.
+
 == Документация
 
+* `CLAUDE.md` — основной технический контекст проекта (структура, ключевые решения, что реализовано) — поддерживается в актуальном состоянии на каждую сессию
 * `docs/backlog.adoc` — главный источник правды по архитектуре: список задач с приоритетами, статус миграции каждой таблицы, детали реализации каждой завершённой задачи
-* `docs/spec.adoc` — техническое задание (бизнес-логика, правила распределения по стримам, тексты писем)
+* `docs/spec.adoc` — техническое задание (исторический снимок на момент старта, не отражает текущую реализацию — актуальные решения смотрите в backlog.adoc)
 * `docs/manager-playbook.adoc` — инструкция для нетехнического менеджера
 * `docs/workspace.dsl` — C4-модель (открывается в https://structurizr.com/dsl[Structurizr DSL])
 * `docs/editor-stream-flow.puml` — PlantUML sequence-диаграмма жизненного цикла стрима
