@@ -25,6 +25,8 @@ import {
   getEmployerTokensWithReleaseView,
   getWhatsAppPushEnabled as getWhatsAppPushEnabledDb,
   setWhatsAppPushEnabled as setWhatsAppPushEnabledDb,
+  getReleaseViewRows,
+  type ReleaseViewSource,
   campaignNameFor, isoToRu,
 } from "@/lib/db/mailing-lists"
 import { appendContactRequest, updateContactRequestStatus, getEmployerTokensWithRequestForList, reassignContactRequestsToSurvivor, type ContactRequestStatus } from "@/lib/db/contact-requests"
@@ -2010,6 +2012,22 @@ export async function sendWhatsAppTestMessage(phone: string): Promise<boolean> {
     ["Fintech & Banking", "26.10.2026", "5 кандидатов"],
     "a1b2c3d4-0000-4fff-8aaa-123456789abc?e=f9e8d7c6-1111-4eee-9bbb-987654321fed&src=wa",
   )
+}
+
+export type ReleaseViewDetail = { employerToken: string; employerName: string; company: string; source: ReleaseViewSource; viewedAt: string }
+
+/** Lazy per-release detail for the «Статистика» section (/editor/statistics) — called only when
+ * a manager expands a release row, not on every page load, since releaseViews has no bound on
+ * row count (see TASK-58). Resolves employer name/company via the already-loaded getEmployers()
+ * instead of a join in lib/db/mailing-lists.ts. */
+export async function getReleaseViewDetails(listId: string): Promise<ReleaseViewDetail[]> {
+  await requireEditorAuth()
+  const [rows, allEmployers] = await Promise.all([getReleaseViewRows(listId), getEmployers()])
+  const employerByToken = new Map(allEmployers.map((e) => [e.token, e]))
+  return rows.map((r) => {
+    const e = employerByToken.get(r.employerToken)
+    return { employerToken: r.employerToken, employerName: e?.name ?? "—", company: e?.company ?? "", source: r.source, viewedAt: r.viewedAt }
+  })
 }
 
 export type FollowUpPreviewRow = {
