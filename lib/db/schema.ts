@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, bigint, text, timestamp, date, unique, vector, index } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, bigint, text, timestamp, date, unique, vector, index, boolean } from "drizzle-orm/pg-core"
 
 export const streams = pgTable("streams", {
   id:          serial("id").primaryKey(),
@@ -247,3 +247,59 @@ export const releaseViews = pgTable("releaseViews", {
   index("releaseViewsListIdEmployerTokenIdx").on(table.listId, table.employerToken),
   index("releaseViewsEmployerTokenIdx").on(table.employerToken),
 ])
+
+// Основа биллинга работодателей (TASK-62) — каталог тарифов, admin-управляемый, как
+// streams/companies: serial PK (не UUID — никогда не публикуется, не FK-цель, где нужна
+// неугадываемость). isActive=false скрывает план из выбора для новых подписок, но не удаляет —
+// у него могут быть уже действующие подписчики.
+export const billingPlans = pgTable("billingPlans", {
+  id:          serial("id").primaryKey(),
+  name:        text("name").notNull().unique(),
+  description: text("description").notNull().default(""),
+  isActive:    boolean("isActive").notNull().default(true),
+  createdAt:   timestamp("createdAt").defaultNow().notNull(),
+})
+
+// Цена одного плана в одной валюте — один план может стоить по-разному в разных странах
+// (работодатели платят из нескольких стран Центральной Азии, каждая — свой платёжный шлюз и
+// своя валюта). amount — целое число В ЦЕЛЫХ ЕДИНИЦАХ валюты, не в минорных: тарифы — круглые
+// суммы, плавающая точка нигде в этой схеме для денег не используется и не нужна здесь тоже.
+export const planPrices = pgTable("planPrices", {
+  id:       serial("id").primaryKey(),
+  planId:   integer("planId").notNull().references(() => billingPlans.id, { onDelete: "cascade" }),
+  currency: text("currency").notNull(), // ISO 4217: "KZT" | "UZS" | "KGS" | "USD" ...
+  amount:   integer("amount").notNull(),
+}, (table) => [unique().on(table.planId, table.currency)])
+
+// Подписка работодателя — настоящая сущность (как candidates/employers/mailingLists), UUID:
+// providerSubscriptionId/providerCustomerId со временем будут приходить в колбэках/вебхуках
+// платёжного провайдера, внутренний id должен быть неугадываемым по той же причине, что у
+// остальных UUID-таблиц. provider — текст, не хардкод типов: не обязательно навсегда Freedom Pay.
+export const employerSubscriptions = pgTable("employerSubscriptions", {
+  id:                     text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  employerToken:          text("employerToken").notNull().references(() => employers.token, { onDelete: "cascade" }),
+  planId:                 integer("planId").notNull().references(() => billingPlans.id),
+  currency:               text("currency").notNull(), // зафиксирована на момент оформления подписки, из planPrices
+  status:                 text("status").notNull().default("active"), // "active" | "past_due" | "canceled" | "trialing"
+  currentPeriodStart:     timestamp("currentPeriodStart", { mode: "string" }).notNull(),
+  currentPeriodEnd:       timestamp("currentPeriodEnd", { mode: "string" }).notNull(),
+  provider:               text("provider").notNull(),
+  providerCustomerId:     text("providerCustomerId"),
+  providerSubscriptionId: text("providerSubscriptionId"),
+  createdAt:              timestamp("createdAt").defaultNow().notNull(),
+  canceledAt:             timestamp("canceledAt", { mode: "string" }),
+})
+
+// Платёж/попытка платежа — лог, но платёжный, с UUID (как contactRequests/candidateResumes):
+// providerPaymentId будет приходить в вебхуке от провайдера и использоваться для сверки.
+export const payments = pgTable("payments", {
+  id:                     text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  employerSubscriptionId: text("employerSubscriptionId").notNull().references(() => employerSubscriptions.id, { onDelete: "cascade" }),
+  amount:                 integer("amount").notNull(),
+  currency:               text("currency").notNull(),
+  status:                 text("status").notNull().default("pending"), // "pending" | "succeeded" | "failed" | "refunded"
+  provider:               text("provider").notNull(),
+  providerPaymentId:      text("providerPaymentId"),
+  failureReason:          text("failureReason"),
+  createdAt:              timestamp("createdAt").defaultNow().notNull(),
+})

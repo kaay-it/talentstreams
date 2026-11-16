@@ -33,6 +33,17 @@ import { appendContactRequest, updateContactRequestStatus, getEmployerTokensWith
 import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResumeVersion, reassignResumesToSurvivor, type ResumeVersion } from "@/lib/db/resumes"
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
+import {
+  getBillingPlans as getBillingPlansDb,
+  createBillingPlan as createBillingPlanDb,
+  updateBillingPlan as updateBillingPlanDb,
+  setPlanPrice as setPlanPriceDb,
+  deletePlanPrice as deletePlanPriceDb,
+  planHasActiveSubscriptions,
+  deleteBillingPlanRecord,
+  type BillingCurrency,
+  type PlanPrice,
+} from "@/lib/db/billing"
 import { getEmployers, getEmployerByToken, confirmedEmployersForStream, filterCandidatesForEmployer, createEmployer, updateEmployerFields, deleteEmployer as deleteEmployerRecord, type Employer, type EmployerPickOption } from "@/lib/db/employers"
 import { searchCompanies as searchCompaniesDb, findOrCreateCompanyByName } from "@/lib/db/companies"
 import {
@@ -2200,4 +2211,64 @@ export async function sendReleaseFollowUpsToApproved(
   })
   revalidatePath("/editor/settings")
   return run
+}
+
+// ── Биллинг (TASK-62) — только каталог тарифов; создание подписок/обработка платежей нарочно
+// не реализованы ещё (см. docs/backlog.adoc TASK-62) — звать их пока неоткуда, нет интеграции
+// ни с одним платёжным провайдером (мерчант-аккаунт Freedom Pay не оформлен ни в одной стране).
+
+export async function getBillingPlans() {
+  await requireEditorAuth()
+  return getBillingPlansDb()
+}
+
+export async function createBillingPlan(name: string, description: string, prices: PlanPrice[]): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
+  await requireEditorAuth()
+  if (!name.trim()) return { ok: false, error: "Название плана обязательно" }
+  try {
+    const id = await createBillingPlanDb(name.trim(), description.trim(), prices)
+    revalidatePath("/editor/billing")
+    return { ok: true, id }
+  } catch (err) {
+    if (uniqueViolationConstraint(err) === "billingPlans_name_unique") return { ok: false, error: "План с таким названием уже существует" }
+    throw err
+  }
+}
+
+export async function updateBillingPlan(id: number, data: { name?: string; description?: string; isActive?: boolean }): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireEditorAuth()
+  if (data.name !== undefined && !data.name.trim()) return { ok: false, error: "Название плана обязательно" }
+  try {
+    await updateBillingPlanDb(id, data)
+    revalidatePath("/editor/billing")
+    return { ok: true }
+  } catch (err) {
+    if (uniqueViolationConstraint(err) === "billingPlans_name_unique") return { ok: false, error: "План с таким названием уже существует" }
+    throw err
+  }
+}
+
+export async function setPlanPrice(planId: number, currency: BillingCurrency, amount: number): Promise<void> {
+  await requireEditorAuth()
+  await setPlanPriceDb(planId, currency, amount)
+  revalidatePath("/editor/billing")
+}
+
+export async function deletePlanPrice(planId: number, currency: BillingCurrency): Promise<void> {
+  await requireEditorAuth()
+  await deletePlanPriceDb(planId, currency)
+  revalidatePath("/editor/billing")
+}
+
+/** Guard lives here, not in lib/db/billing.ts — same split as streamHasSentReleases()/
+ * deleteStream() above: the DB layer only answers "does this plan have active subscribers",
+ * the business decision of refusing the delete belongs to the Server Action. */
+export async function deleteBillingPlan(id: number): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireEditorAuth()
+  if (await planHasActiveSubscriptions(id)) {
+    return { ok: false, error: "На этом плане есть действующие подписки — удаление недоступно" }
+  }
+  await deleteBillingPlanRecord(id)
+  revalidatePath("/editor/billing")
+  return { ok: true }
 }
