@@ -4,7 +4,14 @@ import { useState } from "react"
 import { createPortal } from "react-dom"
 import { AlertCircle, X } from "lucide-react"
 import { mergeCandidates, type MergeCandidatesInput } from "@/app/actions"
-import type { Candidate } from "@/lib/db/candidates"
+import type { Candidate, CandidateStatus } from "@/lib/db/candidates"
+
+const STATUS_BADGE: Record<CandidateStatus, string> = {
+  "Активный": "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+  "На проверке": "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400",
+  "Не публиковать": "bg-slate-100 text-slate-700 dark:bg-slate-800/50 dark:text-slate-300",
+  "Отклонён": "bg-muted text-muted-foreground",
+}
 
 type ScalarField = "name" | "title" | "email" | "phone" | "level" | "countryPrimary" | "countryDesired" | "summary" | "coverLetter" | "activeSince"
 type ArrayField = "stream" | "excludedCompanies" | "excludedStreams"
@@ -99,15 +106,17 @@ export function MergeCandidatesModal({
               <div className="flex gap-2">
                 <button
                   onClick={() => setSurvivorId(candidateA.id)}
-                  className={`flex-1 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${survivorId === candidateA.id ? "border-primary bg-primary/5 font-medium text-primary" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`flex flex-1 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${survivorId === candidateA.id ? "border-primary bg-primary/5 font-medium text-primary" : "text-muted-foreground hover:bg-muted"}`}
                 >
-                  {candidateA.name}
+                  <span className="truncate">{candidateA.name}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_BADGE[candidateA.status]}`}>{candidateA.status}</span>
                 </button>
                 <button
                   onClick={() => setSurvivorId(candidateB.id)}
-                  className={`flex-1 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${survivorId === candidateB.id ? "border-primary bg-primary/5 font-medium text-primary" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`flex flex-1 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${survivorId === candidateB.id ? "border-primary bg-primary/5 font-medium text-primary" : "text-muted-foreground hover:bg-muted"}`}
                 >
-                  {candidateB.name}
+                  <span className="truncate">{candidateB.name}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_BADGE[candidateB.status]}`}>{candidateB.status}</span>
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">
