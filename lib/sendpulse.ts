@@ -562,6 +562,10 @@ export function isWhatsAppConfigured(): boolean {
  * template is approved; if broken, switch the template/call site to a body-text link instead.
  * Best-effort, same contract as sendTelegramToEmployer() — never throws, returns false on any
  * failure or if isWhatsAppConfigured() is false (silently inactive until the template exists).
+ * `/whatsapp/contacts/sendTemplateByPhone`, not `/contacts/sendTemplateByPhone` — real 404 caught
+ * on first live test post-approval: `api.sendpulse.com/.well-known/openapi/whatsapp.yaml` serves
+ * this whole resource under the `https://api.sendpulse.com/whatsapp` base, same pattern as the
+ * Telegram endpoints above (`/telegram/contacts/...`), not bare `/contacts/...` like the email API.
  */
 export async function sendWhatsAppReleaseTemplate(phone: string, bodyParams: string[], buttonUrlParam: string): Promise<boolean> {
   if (!isWhatsAppConfigured()) return false
@@ -582,7 +586,7 @@ export async function sendWhatsAppReleaseTemplate(phone: string, bodyParams: str
       },
     }
     const res = await spPost(
-      `${API}/contacts/sendTemplateByPhone`,
+      `${API}/whatsapp/contacts/sendTemplateByPhone`,
       { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       JSON.stringify(payload),
     )
