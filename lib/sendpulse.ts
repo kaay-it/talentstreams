@@ -581,7 +581,7 @@ export async function sendWhatsAppReleaseTemplate(phone: string, bodyParams: str
         language: { code: "ru" },
         components: [
           { type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) },
-          { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: buttonUrlParam }] },
+          { type: "button", sub_type: "url", index: 0, parameters: [{ type: "text", text: buttonUrlParam }] },
         ],
       },
     }
