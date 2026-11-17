@@ -55,33 +55,37 @@ function loginPage(params: AuthParams, clientName: string | null, errorMessage?:
   return new NextResponse(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } })
 }
 
-async function parseAndValidate(searchParams: URLSearchParams): Promise<{ params: AuthParams; clientName: string | null } | NextResponse> {
-  const clientId = searchParams.get("client_id") ?? ""
-  const redirectUri = searchParams.get("redirect_uri") ?? ""
-  const state = searchParams.get("state") ?? ""
-  const codeChallenge = searchParams.get("code_challenge") ?? ""
-  const codeChallengeMethod = searchParams.get("code_challenge_method") ?? ""
-  const responseType = searchParams.get("response_type") ?? ""
-
+/** Looks up the client and checks redirect_uri against its registration — shared by GET (query
+ * string) and POST (form fields), both of which build an AuthParams first so this never has to
+ * care which wire format the values came from. Invalid client_id/redirect_uri must show an
+ * error directly, never redirect to an unvalidated URI — that redirect is exactly the
+ * open-redirect vulnerability PKCE/OAuth client registration is meant to prevent. */
+async function validateAgainstClient(params: AuthParams, responseType: string): Promise<{ clientName: string | null } | NextResponse> {
   if (responseType !== "code") return errorPage("Поддерживается только response_type=code.")
-  if (!clientId || !redirectUri || !codeChallenge) return errorPage("Запрос авторизации неполный.")
-  if (codeChallengeMethod !== "S256") return errorPage("Поддерживается только code_challenge_method=S256.")
+  if (!params.clientId || !params.redirectUri || !params.codeChallenge) return errorPage("Запрос авторизации неполный.")
+  if (params.codeChallengeMethod !== "S256") return errorPage("Поддерживается только code_challenge_method=S256.")
 
-  // Invalid client_id/redirect_uri must show an error directly, never redirect to an
-  // unvalidated URI — that redirect is exactly the open-redirect vulnerability PKCE/OAuth
-  // registration is meant to prevent.
-  const client = await getClient(clientId)
+  const client = await getClient(params.clientId)
   if (!client) return errorPage("Неизвестный client_id.")
-  if (!client.redirectUris.includes(redirectUri)) return errorPage("redirect_uri не совпадает с зарегистрированным для этого клиента.")
+  if (!client.redirectUris.includes(params.redirectUri)) return errorPage("redirect_uri не совпадает с зарегистрированным для этого клиента.")
 
-  return { params: { clientId, redirectUri, state, codeChallenge, codeChallengeMethod }, clientName: client.clientName }
+  return { clientName: client.clientName }
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   void deleteExpiredCodes().catch(() => {})
-  const result = await parseAndValidate(req.nextUrl.searchParams)
+  const searchParams = req.nextUrl.searchParams
+  const params: AuthParams = {
+    clientId: searchParams.get("client_id") ?? "",
+    redirectUri: searchParams.get("redirect_uri") ?? "",
+    state: searchParams.get("state") ?? "",
+    codeChallenge: searchParams.get("code_challenge") ?? "",
+    codeChallengeMethod: searchParams.get("code_challenge_method") ?? "",
+  }
+
+  const result = await validateAgainstClient(params, searchParams.get("response_type") ?? "")
   if (result instanceof NextResponse) return result
-  return loginPage(result.params, result.clientName)
+  return loginPage(params, result.clientName)
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -94,14 +98,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     codeChallengeMethod: String(form.get("code_challenge_method") ?? ""),
   }
 
-  // Re-validate independently of what the (client-controlled) hidden fields claim.
-  const revalidated = await parseAndValidate(new URLSearchParams({ ...params, response_type: "code" }))
-  if (revalidated instanceof NextResponse) return revalidated
+  // Re-validate independently of what the (client-controlled) hidden fields claim — the form
+  // only ever submits a code flow, so response_type is fixed rather than round-tripped.
+  const result = await validateAgainstClient(params, "code")
+  if (result instanceof NextResponse) return result
 
   const editorSecret = process.env.EDITOR_SECRET
   const submittedSecret = String(form.get("secret") ?? "")
   if (editorSecret && submittedSecret !== editorSecret) {
-    return loginPage(revalidated.params, revalidated.clientName, "Неверный код доступа.")
+    return loginPage(params, result.clientName, "Неверный код доступа.")
   }
 
   const code = await createAuthorizationCode({
