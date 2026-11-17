@@ -7,6 +7,7 @@ import { CandidateDigestToggle } from "@/components/candidate-digest-toggle"
 import { ReleaseFollowUpToggle } from "@/components/release-follow-up-toggle"
 import { WhatsAppPushToggle } from "@/components/whatsapp-push-toggle"
 import { DuplicatesSection } from "@/components/duplicates-section"
+import { McpAccessSection } from "@/components/mcp-access-section"
 import { getCandidateDigestSettings, getReleaseFollowUpSettings, getWhatsAppPushSettings, getDuplicateThreshold } from "@/app/actions"
 
 export const dynamic = "force-dynamic"
@@ -104,6 +105,19 @@ export default async function SettingsPage({
         ) : (
           <p className="text-sm text-muted-foreground">Gemini не настроен в этом окружении.</p>
         )}
+      </div>
+
+      <div className="mt-10 space-y-3">
+        <h2 className="text-sm font-semibold text-card-foreground">MCP-сервер — доступ ИИ-ассистента</h2>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Позволяет подключить Claude Desktop (или другой MCP-совместимый клиент) по адресу{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">/api/mcp</code> — найти, посмотреть
+          и отредактировать кандидата, подтвердить/отклонить/поставить на паузу, прочитать резюме
+          для суммаризации. Вход — тот же код доступа редактора, что и в ссылках `?secret=`, но
+          через настоящий OAuth-логин, а не вставленный один раз токен: доступ можно отозвать
+          в любой момент кнопкой ниже.
+        </p>
+        <McpAccessSection />
       </div>
     </div>
   )

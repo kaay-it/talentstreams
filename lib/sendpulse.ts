@@ -41,6 +41,36 @@ export const spGet = (url: string, headers: Record<string, string>) =>
 export const spDelete = (url: string, headers: Record<string, string>, body: string) =>
   spRequest("DELETE", url, headers, body)
 
+/** Adds one contact (with merge-tag variables) to an address book — generic across candidates,
+ * employers and the digest books; the book-specific "which variables" decision belongs to the
+ * caller (app/actions.ts, lib/candidate-workflows.ts), not here. */
+export async function addToAddressBook(
+  email: string,
+  bookId: number,
+  variables: Record<string, string>,
+  token: string,
+): Promise<void> {
+  const payload = JSON.stringify({ emails: [{ email, variables }] })
+  console.log(`[SendPulse] addToBook bookId=${bookId}:`, payload)
+  const { status, text } = await spPost(
+    `${API}/addressbooks/${bookId}/emails`,
+    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    payload,
+  )
+  console.log(`[SendPulse] bookId=${bookId} status=${status}`, text)
+}
+
+export async function removeFromAddressBook(email: string, bookId: number, token: string): Promise<void> {
+  const payload = JSON.stringify({ emails: [email] })
+  console.log(`[SendPulse] removeFromBook bookId=${bookId}:`, payload)
+  const { status, text } = await spDelete(
+    `${API}/addressbooks/${bookId}/emails`,
+    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    payload,
+  )
+  console.log(`[SendPulse] remove bookId=${bookId} status=${status}`, text)
+}
+
 // ── Token cache ───────────────────────────────────────────────────────────────
 
 let _tokenCache: { value: string; expiresAt: number } | null = null
