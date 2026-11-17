@@ -4,10 +4,10 @@ import { revalidatePath } from "next/cache"
 import { requireEditorAuth } from "@/lib/auth"
 import { del } from "@vercel/blob"
 import {
-  getCandidates, getCandidateById, getConfirmedCandidates, createCandidateRecord, updateCandidateStatus, updateCandidateFields, deleteCandidateRecord,
+  getCandidates, getCandidateById, getConfirmedCandidates, createCandidateRecord, updateCandidateFields, deleteCandidateRecord,
   getCandidatesNeedingEmbedding, setCandidateEmbedding, findSimilarCandidatePairs, namesLikelyMatch,
   getDuplicateSimilarityThreshold, setDuplicateSimilarityThreshold,
-  type Candidate, type CandidateStatus,
+  type Candidate,
 } from "@/lib/db/candidates"
 import {
   getMailingLists, getMailingListMeta, getMailingList, getCandidateExposureCounts, resolveMailingListForEmployer, createMailingListRows,
@@ -62,12 +62,18 @@ import {
   recordFollowUpOutcome,
   type FollowUpRun,
 } from "@/lib/db/release-follow-ups"
-import { spPost, spGet, spDelete, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, enableTelegramContact, disableTelegramContact, deleteTelegramContact, sendTransactionalEmail, getCampaignSendDate, getCampaignEmailStatus, sendWhatsAppReleaseTemplate } from "@/lib/sendpulse"
+import { spPost, spGet, spDelete, addToAddressBook, removeFromAddressBook, getToken, getOrCreateBook, getBookId, telegramConnectUrl, sendTelegramToEmployer, enableTelegramContact, disableTelegramContact, deleteTelegramContact, sendTransactionalEmail, getCampaignSendDate, getCampaignEmailStatus, sendWhatsAppReleaseTemplate } from "@/lib/sendpulse"
 import { isGeminiConfigured, embedTexts } from "@/lib/gemini"
 import { buildConsentRequestEmailHtml, buildDigestEmailHtml, buildFollowUpFeedbackEmailHtml, buildFollowUpReminderEmailHtml } from "@/lib/email-templates"
 import { isOwnFileUrl, resolveBlobUrl } from "@/lib/blob"
 import { previewCandidatesImport as previewImport, importCandidatesFromSheet, type ImportPreview, type ImportResult } from "@/lib/sheets-import"
 export type { ImportPreview, ImportResult, ImportRow, ImportSkipped } from "@/lib/sheets-import"
+import {
+  approveCandidateWorkflow, rejectCandidateWorkflow, pauseCandidateWorkflow, updateCandidateWorkflow,
+  removeCandidateFromSendPulse, type RegisterCandidateResult, type UpdateCandidateData,
+} from "@/lib/candidate-workflows"
+export type { RegisterCandidateResult } from "@/lib/candidate-workflows"
+import { revokeAllTokens as revokeAllMcpTokensDb } from "@/lib/mcp-oauth"
 export type { DigestRun } from "@/lib/db/candidate-digest"
 export type { FollowUpRun } from "@/lib/db/release-follow-ups"
 
@@ -82,37 +88,6 @@ const SENDPULSE_API = "https://api.sendpulse.com"
 function uniqueViolationConstraint(err: unknown): string | undefined {
   const cause = (err as { cause?: { code?: string; constraint?: string } } | undefined)?.cause
   return cause?.code === "23505" ? cause.constraint : undefined
-}
-
-async function addToAddressBook(
-  email: string,
-  bookId: number,
-  variables: Record<string, string>,
-  token: string,
-): Promise<void> {
-  const payload = JSON.stringify({ emails: [{ email, variables }] })
-  console.log(`[SendPulse] addToBook bookId=${bookId}:`, payload)
-  const { status, text } = await spPost(
-    `${SENDPULSE_API}/addressbooks/${bookId}/emails`,
-    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    payload,
-  )
-  console.log(`[SendPulse] bookId=${bookId} status=${status}`, text)
-}
-
-async function removeFromAddressBook(
-  email: string,
-  bookId: number,
-  token: string,
-): Promise<void> {
-  const payload = JSON.stringify({ emails: [email] })
-  console.log(`[SendPulse] removeFromBook bookId=${bookId}:`, payload)
-  const { status, text } = await spDelete(
-    `${SENDPULSE_API}/addressbooks/${bookId}/emails`,
-    { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    payload,
-  )
-  console.log(`[SendPulse] remove bookId=${bookId} status=${status}`, text)
 }
 
 /** Every contact email currently in an address book — paginated at the API's own 100-per-page
@@ -206,54 +181,20 @@ async function removeEmployerFromSendPulse(employer: { email: string; streams: s
   )
 }
 
-/** Adds a confirmed candidate to the single "Candidates" SendPulse book — the only purpose is
- * to trigger a SendPulse Automation 360 flow ("contact added to book") that sends the welcome
- * email, same mechanism as the employer welcome email (TASK-10) — no HTML is built or sent by
- * this app's code. The same book is also reconciled by runCandidateDigest() (digest campaign
- * target) — one book for both, see docs/backlog.adoc for why. */
-async function syncCandidateToSendPulse(candidate: { id: string; name: string; email: string; phone: string }): Promise<void> {
-  const token = await getToken()
-  if (!token) { console.warn("[SendPulse] failed to get access token"); return }
-  const bookName = process.env.SENDPULSE_CANDIDATE_BOOK_NAME || "Candidates"
-  const bookId = await getOrCreateBook(bookName, token)
-  await addToAddressBook(candidate.email, bookId, { "Имя": candidate.name, phone: candidate.phone, candidate_id: candidate.id }, token)
-}
-
-/** Removes a candidate from the "Candidates" book — mirrors removeEmployerFromSendPulse().
- * Called on explicit rejection/deletion only, never on a manual "Не публиковать" pause
- * (pauseCandidate()) — that status doesn't mean the candidate was rejected, see getConfirmedCandidates(). */
-async function removeCandidateFromSendPulse(email: string): Promise<void> {
-  const token = await getToken()
-  if (!token) { console.warn("[SendPulse] failed to get access token"); return }
-  const bookName = process.env.SENDPULSE_CANDIDATE_BOOK_NAME || "Candidates"
-  const bookId = await getBookId(bookName, token)
-  if (bookId) await removeFromAddressBook(email, bookId, token)
-}
-
 /**
  * currentActiveSince is the value already shown in the editor for this candidate — if it's
  * already set (e.g. re-approving a previously disabled candidate), it's left untouched;
- * "Активен с" only gets today's date when the field was empty.
- */
+ * "Активен с" only gets today's date when the field was empty. The actual logic (including the
+ * SendPulse "Candidates" book sync) lives in lib/candidate-workflows.ts (TASK-64) — shared with
+ * app/api/mcp/route.ts, which authenticates its own way and can't go through requireEditorAuth(). */
 export async function approveCandidate(id: string, currentActiveSince?: string): Promise<void> {
   await requireEditorAuth()
-  const activeSince = currentActiveSince?.trim() ? undefined : new Date().toLocaleDateString("ru-RU")
-  await updateCandidateStatus(id, "Активный" as CandidateStatus, activeSince)
-  const candidate = await getCandidateById(id)
-  if (candidate?.email) {
-    await syncCandidateToSendPulse({ id: candidate.id, name: candidate.name, email: candidate.email, phone: candidate.phone })
-  }
-  revalidatePath("/editor/candidates")
+  await approveCandidateWorkflow(id, currentActiveSince)
 }
 
 export async function rejectCandidate(id: string): Promise<void> {
   await requireEditorAuth()
-  const candidate = await getCandidateById(id)
-  await updateCandidateStatus(id, "Отклонён" as CandidateStatus)
-  if (candidate?.email) {
-    await removeCandidateFromSendPulse(candidate.email)
-  }
-  revalidatePath("/editor/candidates")
+  await rejectCandidateWorkflow(id)
 }
 
 /** Manual pause — the manager decides a candidate shouldn't appear in new releases for now,
@@ -263,8 +204,7 @@ export async function rejectCandidate(id: string): Promise<void> {
  * way any other pause is — the existing "Подтвердить" button (approveCandidate()). */
 export async function pauseCandidate(id: string): Promise<void> {
   await requireEditorAuth()
-  await updateCandidateStatus(id, "Не публиковать" as CandidateStatus)
-  revalidatePath("/editor/candidates")
+  await pauseCandidateWorkflow(id)
 }
 
 /** Creates a new release ("Mailing lists" rows) for a stream — the automated alternative to
@@ -910,8 +850,6 @@ export type CandidateData = {
   coverLetter: string
 }
 
-export type RegisterCandidateResult = { ok: true } | { ok: false; error: string }
-
 /** Returns a result object instead of throwing: Next.js redacts thrown Error messages
  * from Server Actions in production builds, same reasoning as registerEmployer() below. */
 export async function registerCandidate(data: CandidateData): Promise<RegisterCandidateResult> {
@@ -1006,64 +944,9 @@ export async function createCandidate(data: NewCandidateData): Promise<RegisterC
   return { ok: true }
 }
 
-export async function updateCandidate(
-  id: string,
-  data: {
-    candidateId: string
-    name: string
-    email: string
-    phone: string
-    resumeUrl: string
-    resumeVersionChanged?: boolean
-    resumeFilename?: string
-    coverLetter: string
-    stream: string[]
-    level: string
-    countryPrimary: string
-    countryDesired: string
-    activeSince: string
-    title: string
-    summary: string
-    excludedCompanies: string[]
-    excludedStreams: string[]
-  },
-): Promise<RegisterCandidateResult> {
+export async function updateCandidate(id: string, data: UpdateCandidateData): Promise<RegisterCandidateResult> {
   await requireEditorAuth()
-  if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
-  try {
-    await updateCandidateFields(id, {
-      name: data.name,
-      email: data.email,
-      phone: data.phone,
-      coverLetter: data.coverLetter,
-      stream: data.stream,
-      level: data.level,
-      countryPrimary: data.countryPrimary,
-      countryDesired: data.countryDesired,
-      activeSince: data.activeSince,
-      title: data.title,
-      summary: data.summary,
-      excludedCompanies: data.excludedCompanies,
-      excludedStreams: data.excludedStreams,
-    })
-  } catch (err) {
-    const constraint = uniqueViolationConstraint(err)
-    if (constraint === "candidates_email_unique") return { ok: false, error: "Кандидат с таким email уже зарегистрирован" }
-    if (constraint === "candidates_phone_unique") return { ok: false, error: "Кандидат с таким номером телефона уже зарегистрирован" }
-    throw err
-  }
-
-  if (data.resumeVersionChanged && data.resumeUrl) {
-    await addResumeVersion({
-      candidateId: data.candidateId,
-      kind: isOwnFileUrl(data.resumeUrl) ? "file" : "link",
-      filename: data.resumeFilename,
-      url: data.resumeUrl,
-    })
-  }
-
-  revalidatePath("/editor/candidates")
-  return { ok: true }
+  return updateCandidateWorkflow(id, data)
 }
 
 /** Resume version history for a candidate (editor only — keyed by candidates.id). */
@@ -2271,4 +2154,14 @@ export async function deleteBillingPlan(id: number): Promise<{ ok: true } | { ok
   await deleteBillingPlanRecord(id)
   revalidatePath("/editor/billing")
   return { ok: true }
+}
+
+/** Disconnects every Claude Desktop/claude.ai connector logged into /api/mcp (TASK-64) — the
+ * manager's only way to revoke MCP access without rotating EDITOR_SECRET (which would also
+ * break every existing /editor/* link). Registered OAuth clients are left alone, so reconnecting
+ * afterwards only requires logging in again, not re-adding the connector. */
+export async function revokeAllMcpTokens(): Promise<void> {
+  await requireEditorAuth()
+  await revokeAllMcpTokensDb()
+  revalidatePath("/editor/settings")
 }

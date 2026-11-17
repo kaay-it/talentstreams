@@ -303,3 +303,40 @@ export const payments = pgTable("payments", {
   failureReason:          text("failureReason"),
   createdAt:              timestamp("createdAt").defaultNow().notNull(),
 })
+
+// MCP-сервер (TASK-64) — удалённый OAuth 2.1 (Authorization Code + PKCE) поверх /api/mcp, чтобы
+// Claude Desktop/claude.ai могли подключиться как коннектор и править кандидатов. Три таблицы —
+// клиент (Dynamic Client Registration), одноразовый код, выданные токены. id-поля здесь — САМИ
+// секреты (а не просто ссылка на секрет где-то ещё), поэтому $defaultFn(crypto.randomUUID) — та
+// же неугадываемость, что у остальных security-значимых text-PK в этой схеме.
+
+// Публичный OAuth-клиент — без client secret: подлинность клиента при обмене кода на токен
+// подтверждается PKCE (code_verifier), не статичным секретом — стандарт для MCP/native-клиентов.
+export const mcpOauthClients = pgTable("mcpOauthClients", {
+  clientId:     text("clientId").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  clientName:   text("clientName"),
+  redirectUris: text("redirectUris").array().notNull(),
+  createdAt:    timestamp("createdAt").defaultNow().notNull(),
+})
+
+// Одноразовый код авторизации — живёт несколько минут, удаляется при обмене на токены
+// (redeemAuthorizationCode() в lib/mcp-oauth.ts), поэтому у таблицы нет флага "использован".
+export const mcpOauthCodes = pgTable("mcpOauthCodes", {
+  code:                text("code").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  clientId:            text("clientId").notNull().references(() => mcpOauthClients.clientId, { onDelete: "cascade" }),
+  redirectUri:         text("redirectUri").notNull(),
+  codeChallenge:       text("codeChallenge").notNull(),
+  codeChallengeMethod: text("codeChallengeMethod").notNull(), // только "S256" — см. lib/mcp-oauth.ts
+  expiresAt:           timestamp("expiresAt").notNull(),
+  createdAt:           timestamp("createdAt").defaultNow().notNull(),
+})
+
+// Выданный доступ — короткоживущий accessToken + длинноживущий refreshToken (ротируется при
+// каждом использовании). Отзыв всего разом — revokeAllTokens() (кнопка в /editor/settings).
+export const mcpOauthTokens = pgTable("mcpOauthTokens", {
+  accessToken:  text("accessToken").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  refreshToken: text("refreshToken").notNull().unique().$defaultFn(() => crypto.randomUUID()),
+  clientId:     text("clientId").notNull().references(() => mcpOauthClients.clientId, { onDelete: "cascade" }),
+  expiresAt:    timestamp("expiresAt").notNull(),
+  createdAt:    timestamp("createdAt").defaultNow().notNull(),
+})
