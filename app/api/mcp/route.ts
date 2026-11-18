@@ -29,6 +29,18 @@ const SERVER_INSTRUCTIONS = `TalentStreams MCP.
 - Перед скринингом или отсевом кандидатов вызови get_screening_guide и следуй ему.
 - Результат скрининга — только рекомендация на ревью; reject/approve/pause — только после явного подтверждения пользователя по конкретным кандидатам.`
 
+/** Shared resolution step for prompts that take a candidate by free-text name or id (TASK-65) —
+ * a manager filling in a prompt's argument form types a name, not a UUID, so the prompt itself
+ * must tell the model how to turn that into the id every tool actually needs. */
+function candidateResolutionInstruction(candidate: string): string {
+  return (
+    `Если "${candidate}" похоже на id (UUID — 36 символов с дефисами), используй как id напрямую. ` +
+    `Иначе сначала вызови search_candidates(query: "${candidate}"), чтобы найти кандидата по имени. ` +
+    "Если найден ровно один подходящий — используй его id. Если несколько — покажи короткий список (имя, id, статус, стрим) и спроси пользователя, кого из них имели в виду, не выбирай сам. " +
+    "Если не найден ни один — сообщи об этом и не придумывай id."
+  )
+}
+
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] }
 }
@@ -279,17 +291,18 @@ function buildMcpServer(): McpServer {
     {
       title: "Candidate summary",
       description: "Написать саммари кандидата по гайду, показать черновик на ревью и сохранить только после подтверждения.",
-      argsSchema: { candidateId: z.string() },
+      argsSchema: { candidate: z.string().describe("ФИО кандидата (например «Иванов» или «Иван Иванов») или id, если он уже известен") },
     },
-    async ({ candidateId }) => ({
+    async ({ candidate }) => ({
       messages: [
         {
           role: "user" as const,
           content: {
             type: "text" as const,
             text:
-              `Напиши саммари для кандидата ${candidateId}. Сначала вызови get_summary_guide и следуй ему: ` +
-              `get_candidate(${candidateId}), затем list_candidate_resumes/get_candidate_resume для резюме. ` +
+              `Напиши саммари для кандидата: "${candidate}". ${candidateResolutionInstruction(candidate)} ` +
+              `Когда id определён: сначала вызови get_summary_guide и следуй ему, затем get_candidate(id), ` +
+              `затем list_candidate_resumes/get_candidate_resume для резюме. ` +
               `Покажи черновик саммари и предлагаемые значения title/stream/level (если они сейчас пустые) пользователю на ревью. ` +
               `Не вызывай update_candidate, пока пользователь явно не подтвердит черновик — после правок по комментариям снова покажи на ревью перед сохранением.`,
           },
@@ -317,16 +330,18 @@ function buildMcpServer(): McpServer {
     {
       title: "Candidate screening",
       description: "Проверить одного кандидата или пакет из очереди «На проверке» по гайду скрининга, показать результат на ревью — ничего не менять в базе.",
-      argsSchema: { candidateId: z.string().optional() },
+      argsSchema: { candidate: z.string().optional().describe("ФИО кандидата или id — оставить пустым, чтобы пройти первую страницу очереди «На проверке»") },
     },
-    async ({ candidateId }) => ({
+    async ({ candidate }) => ({
       messages: [
         {
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: candidateId
-              ? `Проверь кандидата ${candidateId} по гайду скрининга. Сначала вызови get_screening_guide и следуй ему, затем get_candidate(${candidateId}), list_candidate_resumes/get_candidate_resume для резюме. Покажи результат по формату гайда на ревью. Ничего не меняй в базе — reject_candidate/approve_candidate/pause_candidate только после явного подтверждения пользователя.`
+            text: candidate
+              ? `Проверь кандидата: "${candidate}" по гайду скрининга. ${candidateResolutionInstruction(candidate)} ` +
+                `Когда id определён: сначала вызови get_screening_guide и следуй ему, затем get_candidate(id), list_candidate_resumes/get_candidate_resume для резюме. ` +
+                `Покажи результат по формату гайда на ревью. Ничего не меняй в базе — reject_candidate/approve_candidate/pause_candidate только после явного подтверждения пользователя.`
               : `Пройди скрининг первой страницы кандидатов со статусом "На проверке". Сначала вызови get_screening_guide и следуй ему, затем search_candidates(status: "На проверке") за первую страницу; для каждого кандидата — get_candidate и резюме (list_candidate_resumes/get_candidate_resume), проверка по критериям гайда. Покажи пакетный отчёт (сводная таблица + детали по «рекомендую отклонить» и «нужна ручная проверка») на ревью. Ничего не меняй в базе — reject_candidate/approve_candidate/pause_candidate только после явного подтверждения пользователя по конкретным кандидатам.`,
           },
         },
