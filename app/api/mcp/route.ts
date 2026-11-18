@@ -8,7 +8,7 @@ import { getResumeVersions } from "@/lib/db/resumes"
 import { getStreams } from "@/lib/db/streams"
 import { resolveBlobUrl } from "@/lib/blob"
 import { fetchResumeBlobBytes } from "@/lib/resume-blob"
-import { loadCandidateSummaryGuideTemplate, fillCandidateSummaryGuide } from "@/lib/mcp/guide"
+import { loadCandidateSummaryGuideTemplate, fillCandidateSummaryGuide, loadGuideTemplate } from "@/lib/mcp/guide"
 import {
   approveCandidateWorkflow,
   rejectCandidateWorkflow,
@@ -25,7 +25,9 @@ const SERVER_INSTRUCTIONS = `TalentStreams MCP.
 - Перед написанием или правкой summary кандидата вызови get_summary_guide и следуй ему.
 - Никогда не вызывай update_candidate без явного подтверждения пользователя: сначала покажи черновик на ревью.
 - approve_candidate / reject_candidate / pause_candidate — только по прямой просьбе пользователя.
-- search_candidates возвращает страницы; при большом total сужай фильтры или листай offset.`
+- search_candidates возвращает страницы; при большом total сужай фильтры или листай offset.
+- Перед скринингом или отсевом кандидатов вызови get_screening_guide и следуй ему.
+- Результат скрининга — только рекомендация на ревью; reject/approve/pause — только после явного подтверждения пользователя по конкретным кандидатам.`
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] }
@@ -290,6 +292,42 @@ function buildMcpServer(): McpServer {
               `get_candidate(${candidateId}), затем list_candidate_resumes/get_candidate_resume для резюме. ` +
               `Покажи черновик саммари и предлагаемые значения title/stream/level (если они сейчас пустые) пользователю на ревью. ` +
               `Не вызывай update_candidate, пока пользователь явно не подтвердит черновик — после правок по комментариям снова покажи на ревью перед сохранением.`,
+          },
+        },
+      ],
+    }),
+  )
+
+  server.registerTool(
+    "get_screening_guide",
+    {
+      title: "Get candidate screening guide",
+      description: 'Критерии отсева, формат отчёта и правила скрининга кандидатов. Вызывать перед проверкой/отсевом кандидатов или разбором очереди "На проверке".',
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const template = loadGuideTemplate("candidate-screening")
+      if (!template) return errorResult("Гайд по скринингу недоступен на сервере — файл не найден в развёрнутом приложении.")
+      return textResult(template)
+    },
+  )
+
+  server.registerPrompt(
+    "candidate_screening",
+    {
+      title: "Candidate screening",
+      description: "Проверить одного кандидата или пакет из очереди «На проверке» по гайду скрининга, показать результат на ревью — ничего не менять в базе.",
+      argsSchema: { candidateId: z.string().optional() },
+    },
+    async ({ candidateId }) => ({
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: candidateId
+              ? `Проверь кандидата ${candidateId} по гайду скрининга. Сначала вызови get_screening_guide и следуй ему, затем get_candidate(${candidateId}), list_candidate_resumes/get_candidate_resume для резюме. Покажи результат по формату гайда на ревью. Ничего не меняй в базе — reject_candidate/approve_candidate/pause_candidate только после явного подтверждения пользователя.`
+              : `Пройди скрининг первой страницы кандидатов со статусом "На проверке". Сначала вызови get_screening_guide и следуй ему, затем search_candidates(status: "На проверке") за первую страницу; для каждого кандидата — get_candidate и резюме (list_candidate_resumes/get_candidate_resume), проверка по критериям гайда. Покажи пакетный отчёт (сводная таблица + детали по «рекомендую отклонить» и «нужна ручная проверка») на ревью. Ничего не меняй в базе — reject_candidate/approve_candidate/pause_candidate только после явного подтверждения пользователя по конкретным кандидатам.`,
           },
         },
       ],
