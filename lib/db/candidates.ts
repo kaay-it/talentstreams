@@ -1,5 +1,5 @@
 import "server-only"
-import { asc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, count, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm"
 import { db } from "./index"
 import { candidates } from "./schema"
 import { getSetting, setSetting } from "./settings"
@@ -117,25 +117,121 @@ export type CandidateSearchFilters = {
   /** Candidates with no summary written yet — the ones most worth summarizing a resume for
    * (TASK-64, added specifically for the MCP search_candidates tool, nowhere in the UI). */
   summaryEmpty?: boolean
+  /** Clamped to [1, 50], default 20 — see searchCandidates(). */
+  limit?: number
+  /** Clamped to >= 0, default 0. */
+  offset?: number
 }
 
-/** Server-side version of the filtering candidate-section.tsx has always done client-side over
- * getCandidates() — same semantics (case-insensitive substring/exact match), extended with a
- * registration-date range and a "summary still empty" flag that the UI filters never had either.
- * Added for app/api/mcp/route.ts's search_candidates tool (TASK-64); not wired into the UI. */
-export async function searchCandidates(filters: CandidateSearchFilters): Promise<Candidate[]> {
-  const all = await getCandidates()
-  const q = filters.query?.trim().toLowerCase() ?? ""
-  return all.filter((c) => {
-    if (filters.status && c.status !== filters.status) return false
-    if (filters.level && c.level !== filters.level) return false
-    if (filters.stream && !c.stream.some((s) => s.trim().toLowerCase() === filters.stream!.toLowerCase())) return false
-    if (filters.summaryEmpty && c.summary.trim() !== "") return false
-    if (q && !`${c.name} ${c.email} ${c.phone}`.toLowerCase().includes(q)) return false
-    if (filters.registeredFrom && c.timestamp < filters.registeredFrom) return false
-    if (filters.registeredTo && c.timestamp > `${filters.registeredTo}T23:59:59.999Z`) return false
-    return true
-  })
+/** Short card for list results (search_candidates) — never the full Candidate (no coverLetter/
+ * summary/email/phone), so a page of results stays small regardless of how much text a
+ * candidate's full record holds. Full detail is a separate get_candidate(id) call. */
+export type CandidateSummary = {
+  id: string
+  name: string
+  title: string
+  status: CandidateStatus
+  stream: string[]
+  level: string
+  timestamp: string
+  hasSummary: boolean
+}
+
+export type CandidateSearchResult = {
+  total: number
+  limit: number
+  offset: number
+  items: CandidateSummary[]
+}
+
+function candidateSearchConditions(filters: CandidateSearchFilters) {
+  const conditions = []
+  if (filters.status) conditions.push(eq(candidates.status, filters.status))
+  if (filters.level) conditions.push(eq(candidates.level, filters.level))
+  // btrim(...) = '' (not eq(summary, "")) so this stays consistent with hasSummary below, which
+  // treats a whitespace-only summary as "no summary" too.
+  if (filters.summaryEmpty) conditions.push(sql`btrim(${candidates.summary}) = ''`)
+  if (filters.stream?.trim()) {
+    const needle = filters.stream.trim().toLowerCase()
+    conditions.push(sql`exists (select 1 from unnest(${candidates.stream}) as elem where lower(btrim(elem)) = ${needle})`)
+  }
+  if (filters.query?.trim()) {
+    const needle = `%${filters.query.trim()}%`
+    conditions.push(or(ilike(candidates.name, needle), ilike(candidates.email, needle), ilike(candidates.phone, needle)))
+  }
+  if (filters.registeredFrom) conditions.push(gte(candidates.registrationTimestamp, new Date(`${filters.registeredFrom}T00:00:00.000Z`)))
+  if (filters.registeredTo) conditions.push(lte(candidates.registrationTimestamp, new Date(`${filters.registeredTo}T23:59:59.999Z`)))
+  return and(...conditions)
+}
+
+/**
+ * Server-side search + pagination for the MCP search_candidates tool — filtering AND
+ * LIMIT/OFFSET both happen in the SQL query, not by fetching every candidate into memory and
+ * slicing (the first TASK-64 version did that, fine for a small table but not something to keep
+ * once the candidate table grows — every search call would otherwise pull the whole table over
+ * the wire regardless of how narrow the filters or how small the requested page is).
+ * Best-effort like every other read in this module: a query failure returns an empty page
+ * rather than throwing.
+ */
+export async function searchCandidates(filters: CandidateSearchFilters): Promise<CandidateSearchResult> {
+  const limit = Math.min(Math.max(Math.trunc(filters.limit ?? 20), 1), 50)
+  const offset = Math.max(Math.trunc(filters.offset ?? 0), 0)
+  const where = candidateSearchConditions(filters)
+
+  try {
+    const [[{ total }], rows] = await Promise.all([
+      db.select({ total: count() }).from(candidates).where(where),
+      db
+        .select({
+          id: candidates.id,
+          name: candidates.name,
+          title: candidates.title,
+          status: candidates.status,
+          stream: candidates.stream,
+          level: candidates.level,
+          registrationTimestamp: candidates.registrationTimestamp,
+          summary: candidates.summary,
+        })
+        .from(candidates)
+        .where(where)
+        .orderBy(asc(candidates.registrationTimestamp))
+        .limit(limit)
+        .offset(offset),
+    ])
+
+    return {
+      total,
+      limit,
+      offset,
+      items: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        title: r.title,
+        status: r.status as CandidateStatus,
+        stream: r.stream,
+        level: r.level,
+        timestamp: r.registrationTimestamp.toISOString(),
+        hasSummary: r.summary.trim() !== "",
+      })),
+    }
+  } catch {
+    return { total: 0, limit, offset, items: [] }
+  }
+}
+
+/** Distinct non-empty `level` values across all candidates, sorted — level has no fixed enum
+ * anywhere in the app (free-text field, see candidate-form-modal.tsx), so this is the same
+ * "what values actually exist" computation candidate-section.tsx already does client-side for
+ * its level filter dropdown, just server-side. Used by the MCP get_summary_guide tool to fill
+ * in the {{LEVELS}} reference list — the guide needs to recommend real, currently-used values,
+ * not an invented fixed list. */
+export async function getDistinctLevels(): Promise<string[]> {
+  try {
+    const rows = await db.selectDistinct({ level: candidates.level }).from(candidates).where(ne(candidates.level, ""))
+    return rows.map((r) => r.level).sort((a, b) => a.localeCompare(b, "ru"))
+  } catch {
+    return []
+  }
 }
 
 /** Creates a new candidate in one INSERT (unlike the old Sheets append+update two-step). `id` is
