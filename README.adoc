@@ -17,6 +17,7 @@
 * *Vercel Blob* — приватное хранилище файлов резюме
 * *SendPulse* — email-рассылки (адресные книги, кампании, merge-теги), транзакционные письма кандидатам и фоллоу-апы работодателям (SMTP API), Telegram-бот и WhatsApp-бот работодателей
 * *Google AI Studio (Gemini)* — эмбеддинги для поиска дублей кандидатов
+* *@modelcontextprotocol/sdk* — MCP-сервер (`/api/mcp`): поиск/правка кандидатов из Claude Desktop/claude.ai, с собственным OAuth 2.1-слоем (PKCE, Dynamic Client Registration)
 * *Vercel Analytics*
 * *Tailwind CSS + lucide-react*
 
@@ -103,6 +104,7 @@ app/
   selection/[selectionId]/page.tsx # Прямой просмотр ОДНОЙ подборки (инструмент редактора)
   profile/[id]/page.tsx        # Профиль кандидата (полный/анонимизированный)
   actions.ts                   # Все Server Actions ("use server")
+  .well-known/oauth-*/route.ts # Метадата OAuth-сервера для MCP (RFC 8414/9728)
   editor/
     layout.tsx / page.tsx      # Боковое меню редактора; «Выпуски»
     selections/page.tsx        # Подборки — готовятся заранее, независимо от выпуска
@@ -115,6 +117,8 @@ app/
     streams/page.tsx           # CRUD стримов
     settings/page.tsx          # Импорт из Sheets, тумблеры автоматики, поиск дублей
   api/
+    mcp/route.ts                # MCP-сервер для правки кандидатов из ИИ-ассистента (OAuth bearer, не x-editor-token)
+    oauth/register|authorize|token/route.ts # OAuth 2.1 для MCP: DCR, логин (тот же EDITOR_SECRET), обмен/обновление токена
     publish/[listId]/route.ts  # curl-запуск рассылки (x-editor-token)
     upload/route.ts            # POST: загрузка резюме → Vercel Blob
     resume/route.ts            # GET: прокси приватных blob-файлов
@@ -122,6 +126,9 @@ app/
 
 lib/
   auth.ts                      # requireEditorAuth() — второй, независимый от страниц слой защиты мутаций
+  mcp-oauth.ts                 # OAuth-слой MCP (DCR, PKCE, токены) — отдельная граница авторизации от requireEditorAuth()
+  candidate-workflows.ts       # Бизнес-логика approve/reject/pause/update кандидата, общая для /editor и MCP
+  resume-blob.ts / mcp/guide.ts # Чтение файла резюме и markdown-гайдов (саммари/скрининг) для MCP-инструментов
   sheets.ts / sheets-import.ts # Google Sheets: опциональный канал массового ввода кандидатов
   gemini.ts                    # Google AI Studio — эмбеддинги для поиска дублей
   sendpulse.ts                 # SendPulse: email, Telegram-бот, WhatsApp-бот
@@ -201,6 +208,10 @@ docs/
 | *(без параметров)*
 | 404
 |===
+
+== MCP-сервер (ИИ-ассистент)
+
+`/api/mcp` — удалённый MCP-коннектор для Claude Desktop/claude.ai: поиск/просмотр/правка кандидатов, подтверждение/отклонение/пауза, резюме для суммаризации, плюс готовые сценарии (prompts) «саммари кандидата» и «скрининг по критериям отсева» со своими гайдами в `lib/mcp/guides/`. Авторизация — собственный OAuth 2.1 (Authorization Code + PKCE, Dynamic Client Registration), логин тем же `EDITOR_SECRET`, но через короткоживущие отзываемые токены, не статичный bearer в конфиге клиента. Подробности и устройство — `CLAUDE.md`, раздел «MCP-сервер»; как подключиться и пользоваться — `docs/manager-playbook.adoc`, раздел «Подключение ИИ-ассистента (Claude Desktop)».
 
 == Добавление новой функциональности
 
