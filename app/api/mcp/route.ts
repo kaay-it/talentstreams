@@ -3,10 +3,12 @@ import { z } from "zod"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import { verifyAccessToken } from "@/lib/mcp-oauth"
-import { searchCandidates, getCandidateById, type CandidateStatus } from "@/lib/db/candidates"
+import { searchCandidates, getCandidateById, getDistinctLevels, type CandidateStatus } from "@/lib/db/candidates"
 import { getResumeVersions } from "@/lib/db/resumes"
+import { getStreams } from "@/lib/db/streams"
 import { resolveBlobUrl } from "@/lib/blob"
 import { fetchResumeBlobBytes } from "@/lib/resume-blob"
+import { loadCandidateSummaryGuideTemplate, fillCandidateSummaryGuide, loadGuideTemplate } from "@/lib/mcp/guide"
 import {
   approveCandidateWorkflow,
   rejectCandidateWorkflow,
@@ -19,12 +21,44 @@ export const dynamic = "force-dynamic"
 
 const CANDIDATE_STATUSES = ["На проверке", "Активный", "Отклонён", "Не публиковать"] as const
 
+const SERVER_INSTRUCTIONS = `TalentStreams MCP.
+- Перед написанием или правкой summary кандидата вызови get_summary_guide и следуй ему.
+- Никогда не вызывай update_candidate без явного подтверждения пользователя: сначала покажи черновик на ревью.
+- approve_candidate / reject_candidate / pause_candidate — только по прямой просьбе пользователя.
+- search_candidates возвращает страницы; при большом total сужай фильтры или листай offset.
+- Перед скринингом или отсевом кандидатов вызови get_screening_guide и следуй ему.
+- Результат скрининга — только рекомендация на ревью; reject/approve/pause — только после явного подтверждения пользователя по конкретным кандидатам.`
+
+/** Shared resolution step for prompts that take a candidate by free-text name or id (TASK-65) —
+ * a manager filling in a prompt's argument form types a name, not a UUID, so the prompt itself
+ * must tell the model how to turn that into the id every tool actually needs. */
+function candidateResolutionInstruction(candidate: string): string {
+  return (
+    `Если "${candidate}" похоже на id (UUID — 36 символов с дефисами), используй как id напрямую. ` +
+    `Иначе сначала вызови search_candidates(query: "${candidate}"), чтобы найти кандидата по имени. ` +
+    "Если найден ровно один подходящий — используй его id. Если несколько — покажи короткий список (имя, id, статус, стрим) и спроси пользователя, кого из них имели в виду, не выбирай сам. " +
+    "Если не найден ни один — сообщи об этом и не придумывай id."
+  )
+}
+
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] }
 }
 
 function errorResult(text: string) {
   return { content: [{ type: "text" as const, text }], isError: true }
+}
+
+/** Drops "" and [] values so a compact JSON item doesn't carry empty keys — used only for
+ * search_candidates' short cards, where response size is the whole point (TASK-65). */
+function omitEmpty<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Partial<T> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === "") continue
+    if (Array.isArray(value) && value.length === 0) continue
+    out[key as keyof T] = value as T[keyof T]
+  }
+  return out
 }
 
 /**
@@ -36,11 +70,11 @@ function errorResult(text: string) {
  * gates access its own way, via the OAuth bearer token checked in the handler below).
  */
 function buildMcpServer(): McpServer {
-  const server = new McpServer({ name: "talentstreams-candidates", version: "1.0.0" })
+  const server = new McpServer({ name: "talentstreams-candidates", version: "1.0.0" }, { instructions: SERVER_INSTRUCTIONS })
 
   server.registerTool(
     "ping",
-    { title: "Ping", description: "Connectivity check — replies with pong." },
+    { title: "Ping", description: "Connectivity check — replies with pong.", annotations: { readOnlyHint: true } },
     async () => textResult("pong"),
   )
 
@@ -48,7 +82,10 @@ function buildMcpServer(): McpServer {
     "search_candidates",
     {
       title: "Search candidates",
-      description: "Searches candidates by name/email/phone substring, status, stream, level, registration date range, or missing summary.",
+      description:
+        "Searches candidates by name/email/phone substring, status, stream, level, registration date range, or missing summary. " +
+        "Paginated: returns {total, limit, offset, items} with short cards (max 50 per page, default 20) — call get_candidate(id) for full details on one candidate.",
+      annotations: { readOnlyHint: true },
       inputSchema: {
         query: z.string().optional().describe("Substring match against name, email, phone"),
         status: z.enum(CANDIDATE_STATUSES).optional(),
@@ -57,17 +94,30 @@ function buildMcpServer(): McpServer {
         registeredFrom: z.string().optional().describe("ISO date YYYY-MM-DD, inclusive"),
         registeredTo: z.string().optional().describe("ISO date YYYY-MM-DD, inclusive"),
         summaryEmpty: z.boolean().optional().describe("Only candidates with no summary written yet"),
+        limit: z.number().int().min(1).max(50).default(20).describe("Page size, max 50"),
+        offset: z.number().int().min(0).default(0).describe("Items to skip, for paging through a large total"),
       },
     },
     async (args) => {
-      const results = await searchCandidates({ ...args, status: args.status as CandidateStatus | undefined })
-      return textResult(JSON.stringify(results, null, 2))
+      const result = await searchCandidates({ ...args, status: args.status as CandidateStatus | undefined })
+      const compact = {
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+        items: result.items.map(omitEmpty),
+      }
+      return textResult(JSON.stringify(compact))
     },
   )
 
   server.registerTool(
     "get_candidate",
-    { title: "Get candidate", description: "Full details for one candidate by id.", inputSchema: { id: z.string() } },
+    {
+      title: "Get candidate",
+      description: "Full details for one candidate by id.",
+      annotations: { readOnlyHint: true },
+      inputSchema: { id: z.string() },
+    },
     async ({ id }) => {
       const candidate = await getCandidateById(id)
       if (!candidate) return errorResult(`Кандидат с id=${id} не найден.`)
@@ -80,6 +130,7 @@ function buildMcpServer(): McpServer {
     {
       title: "Update candidate",
       description: "Updates one or more fields of a candidate. Omitted fields keep their current value. Does not change status — use approve_candidate/reject_candidate/pause_candidate for that.",
+      annotations: { destructiveHint: true },
       inputSchema: {
         id: z.string(),
         name: z.string().optional(),
@@ -131,6 +182,7 @@ function buildMcpServer(): McpServer {
     {
       title: "Approve candidate",
       description: "Confirms a candidate (status → Активный) and syncs them to the SendPulse \"Candidates\" book.",
+      annotations: { destructiveHint: true },
       inputSchema: { id: z.string(), activeSince: z.string().optional().describe("ru-RU date; leave empty to default to today if not already set") },
     },
     async ({ id, activeSince }) => {
@@ -141,7 +193,12 @@ function buildMcpServer(): McpServer {
 
   server.registerTool(
     "reject_candidate",
-    { title: "Reject candidate", description: "Rejects a candidate and removes them from the SendPulse \"Candidates\" book.", inputSchema: { id: z.string() } },
+    {
+      title: "Reject candidate",
+      description: "Rejects a candidate and removes them from the SendPulse \"Candidates\" book.",
+      annotations: { destructiveHint: true },
+      inputSchema: { id: z.string() },
+    },
     async ({ id }) => {
       await rejectCandidateWorkflow(id)
       return textResult(`Кандидат ${id} отклонён.`)
@@ -153,6 +210,7 @@ function buildMcpServer(): McpServer {
     {
       title: "Pause candidate",
       description: "Manually pauses a candidate (status → Не публиковать) without rejecting them — stays in SendPulse/digest.",
+      annotations: { destructiveHint: true },
       inputSchema: { id: z.string() },
     },
     async ({ id }) => {
@@ -166,6 +224,7 @@ function buildMcpServer(): McpServer {
     {
       title: "List candidate resumes",
       description: "Metadata for every resume version a candidate has (file or link), newest first — no file content.",
+      annotations: { readOnlyHint: true },
       inputSchema: { candidateId: z.string() },
     },
     async ({ candidateId }) => {
@@ -179,6 +238,7 @@ function buildMcpServer(): McpServer {
     {
       title: "Get candidate resume",
       description: "Returns a candidate's resume for summarization: a link version comes back as plain text (the URL), a file version comes back as the actual embedded file content.",
+      annotations: { readOnlyHint: true },
       inputSchema: { candidateId: z.string(), versionId: z.string().optional().describe("Defaults to the newest version") },
     },
     async ({ candidateId, versionId }) => {
@@ -209,6 +269,84 @@ function buildMcpServer(): McpServer {
         ],
       }
     },
+  )
+
+  server.registerTool(
+    "get_summary_guide",
+    {
+      title: "Get candidate summary guide",
+      description: "Формат, правила и эталоны саммари кандидата. Вызывать перед написанием или правкой summary.",
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const template = loadCandidateSummaryGuideTemplate()
+      if (!template) return errorResult("Гайд по саммари недоступен на сервере — файл не найден в развёрнутом приложении.")
+      const [streams, levels] = await Promise.all([getStreams(), getDistinctLevels()])
+      return textResult(fillCandidateSummaryGuide(template, streams, levels))
+    },
+  )
+
+  server.registerPrompt(
+    "candidate_summary",
+    {
+      title: "Candidate summary",
+      description: "Написать саммари кандидата по гайду, показать черновик на ревью и сохранить только после подтверждения.",
+      argsSchema: { candidate: z.string().describe("ФИО кандидата (например «Иванов» или «Иван Иванов») или id, если он уже известен") },
+    },
+    async ({ candidate }) => ({
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text:
+              `Напиши саммари для кандидата: "${candidate}". ${candidateResolutionInstruction(candidate)} ` +
+              `Когда id определён: сначала вызови get_summary_guide и следуй ему, затем get_candidate(id), ` +
+              `затем list_candidate_resumes/get_candidate_resume для резюме. ` +
+              `Покажи черновик саммари и предлагаемые значения title/stream/level (если они сейчас пустые) пользователю на ревью. ` +
+              `Не вызывай update_candidate, пока пользователь явно не подтвердит черновик — после правок по комментариям снова покажи на ревью перед сохранением.`,
+          },
+        },
+      ],
+    }),
+  )
+
+  server.registerTool(
+    "get_screening_guide",
+    {
+      title: "Get candidate screening guide",
+      description: 'Критерии отсева, формат отчёта и правила скрининга кандидатов. Вызывать перед проверкой/отсевом кандидатов или разбором очереди "На проверке".',
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const template = loadGuideTemplate("candidate-screening")
+      if (!template) return errorResult("Гайд по скринингу недоступен на сервере — файл не найден в развёрнутом приложении.")
+      return textResult(template)
+    },
+  )
+
+  server.registerPrompt(
+    "candidate_screening",
+    {
+      title: "Candidate screening",
+      description: "Проверить одного кандидата или пакет из очереди «На проверке» по гайду скрининга, показать результат на ревью — ничего не менять в базе.",
+      argsSchema: { candidate: z.string().optional().describe("ФИО кандидата или id — оставить пустым, чтобы пройти первую страницу очереди «На проверке»") },
+    },
+    async ({ candidate }) => ({
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: candidate
+              ? `Проверь кандидата: "${candidate}" по гайду скрининга. ${candidateResolutionInstruction(candidate)} ` +
+                `Когда id определён: сначала вызови get_screening_guide и следуй ему, затем get_candidate(id), list_candidate_resumes/get_candidate_resume для резюме. ` +
+                `Покажи результат по формату гайда на ревью. Ничего не меняй в базе — reject_candidate/approve_candidate/pause_candidate только после явного подтверждения пользователя.`
+              : `Пройди скрининг первой страницы кандидатов со статусом "На проверке". Сначала вызови get_screening_guide и следуй ему, затем search_candidates(status: "На проверке") за первую страницу; для каждого кандидата — get_candidate и резюме (list_candidate_resumes/get_candidate_resume), проверка по критериям гайда. Покажи пакетный отчёт (сводная таблица + детали по «рекомендую отклонить» и «нужна ручная проверка») на ревью. Ничего не меняй в базе — reject_candidate/approve_candidate/pause_candidate только после явного подтверждения пользователя по конкретным кандидатам.`,
+          },
+        },
+      ],
+    }),
   )
 
   return server
