@@ -203,7 +203,7 @@ export function ReleaseDetailModal({
 
       {open && createPortal(
         <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} aria-hidden="true" />
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} aria-hidden="true" />
           <div className="flex min-h-full items-center justify-center p-4">
             <div
               role="dialog"

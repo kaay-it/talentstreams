@@ -154,11 +154,11 @@ export function EmployerCreateModal({
     ? "Рассматривает кандидатов из любой страны"
     : additionalCountries.length
     ? `Выбрано: ${additionalCountries.length}`
-    : "Если не выбрать ни одной — будет считаться «Любая»"
+    : "Не про компанию, а про кандидатов — если не выбрать ни одной, будет считаться «Любая»"
 
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div className="flex min-h-full items-center justify-center p-4">
         <div
           role="dialog"
@@ -409,7 +409,7 @@ export function EmployerCreateModal({
                 )}
               </Field>
 
-              <Field label="Дополнительные страны" hint={additionalHint}>
+              <Field label="Из каких стран рассматриваете кандидатов" hint={additionalHint}>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"

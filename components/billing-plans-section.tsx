@@ -172,7 +172,7 @@ function BillingPlanFormModal({ plan, onClose }: { plan: BillingPlan | null; onC
 
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div className="flex min-h-full items-center justify-center p-4">
         <div role="dialog" aria-modal="true" className="relative w-full max-w-lg rounded-2xl border bg-card p-6 shadow-xl">
           <div className="mb-4 flex items-center justify-between">
