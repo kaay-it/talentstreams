@@ -2,6 +2,8 @@ import { notFound } from "next/navigation"
 import { Info } from "lucide-react"
 import { getEmployers, updateEmployerFields } from "@/lib/db/employers"
 import { getStreams } from "@/lib/db/streams"
+import { getIndustries } from "@/lib/db/industries"
+import { getCompanySizes } from "@/lib/db/company-sizes"
 import { getTelegramConnectionInfo } from "@/lib/sendpulse"
 import { EmployerSection } from "@/components/employer-section"
 
@@ -20,10 +22,14 @@ export default async function EmployersPage({
   }
 
   const employers = await getEmployers()
-  const [streams, telegramInfo] = await Promise.all([
+  const [streams, industryRecords, companySizeRecords, telegramInfo] = await Promise.all([
     getStreams(),
+    getIndustries(),
+    getCompanySizes(),
     getTelegramConnectionInfo(employers.map((e) => e.token)),
   ])
+  const industries = industryRecords.map((i) => i.name)
+  const companySizes = companySizeRecords.map((s) => ({ label: s.label, rangeHint: s.rangeHint }))
 
   // Sync-on-read: keeps employers.telegramId truthful to what SendPulse reports right now —
   // written when a connection is found, cleared when one we previously stored is gone (deleted
@@ -67,7 +73,13 @@ export default async function EmployersPage({
         </p>
       </div>
 
-      <EmployerSection employers={employers} streams={streams} telegramConnectedTokens={[...telegramInfo.keys()]} />
+      <EmployerSection
+        employers={employers}
+        streams={streams}
+        industries={industries}
+        companySizes={companySizes}
+        telegramConnectedTokens={[...telegramInfo.keys()]}
+      />
     </div>
   )
 }

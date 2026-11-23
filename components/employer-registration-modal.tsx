@@ -70,7 +70,15 @@ function Field({
   )
 }
 
-export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
+export function EmployerRegistrationModal({
+  streams,
+  industries,
+  companySizes,
+}: {
+  streams: string[]
+  industries: string[]
+  companySizes: { label: string; rangeHint: string }[]
+}) {
   const { locale } = useLocale()
   const t = employerFormDict[locale]
 
@@ -87,7 +95,10 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
   const [telegram, setTelegram] = useState("")
   const [linkedin, setLinkedin] = useState("")
   const [selectedStreams, setSelectedStreams] = useState<string[]>([])
-  const [country, setCountry] = useState("")
+  const [industry, setIndustry] = useState("")
+  const [companySize, setCompanySize] = useState("")
+  const [companyUrl, setCompanyUrl] = useState("")
+  const [countriesOfPresence, setCountriesOfPresence] = useState<string[]>([])
   const [additionalCountries, setAdditionalCountries] = useState<string[]>([])
   const [consent, setConsent] = useState(false)
 
@@ -120,9 +131,16 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     setTelegram("")
     setLinkedin("")
     setSelectedStreams([])
-    setCountry("")
+    setIndustry("")
+    setCompanySize("")
+    setCompanyUrl("")
+    setCountriesOfPresence([])
     setAdditionalCountries([])
     setConsent(false)
+  }
+
+  function toggleCountryOfPresence(c: string) {
+    setCountriesOfPresence((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]))
   }
 
   function toggleAdditionalCountry(c: string) {
@@ -149,7 +167,10 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
     e.preventDefault()
     setStatus("submitting")
     try {
-      const result = await registerEmployer({ name, company, email, phone, primaryContact, telegram, linkedin, streams: selectedStreams, country, additionalCountries })
+      const result = await registerEmployer({
+        name, company, email, phone, primaryContact, telegram, linkedin,
+        streams: selectedStreams, industry, companySize, companyUrl, countriesOfPresence, additionalCountries,
+      })
       if (result.ok) {
         setTelegramUrl(result.telegramUrl ?? null)
         setStatus("success")
@@ -166,7 +187,10 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
   const canSubmit =
     name.trim().length > 0 &&
     company.trim().length > 0 &&
-    country.trim().length > 0 &&
+    industry.trim().length > 0 &&
+    companySize.trim().length > 0 &&
+    companyUrl.trim().length > 0 &&
+    countriesOfPresence.length > 0 &&
     selectedStreams.length > 0 &&
     (primaryContact !== "telegram" || telegram.trim()) &&
     (primaryContact !== "linkedin" || linkedin.trim()) &&
@@ -347,62 +371,123 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                     </Field>
                   )}
 
-                  {/* Стримы + Основная страна */}
-                  <div className="grid grid-cols-2 gap-4 items-start">
-                    <Field
-                      label={t.fields.streams.label}
-                      required
-                      hint={
-                        selectedStreams.length === 0
-                          ? t.fields.streams.chooseRange(MAX_STREAMS)
-                          : selectedStreams.length === MAX_STREAMS
-                          ? t.fields.streams.maxSelected(MAX_STREAMS)
-                          : undefined
-                      }
-                    >
-                      {streams.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {streams.map((s) => {
-                            const selected = selectedStreams.includes(s)
-                            const disabled = !selected && selectedStreams.length >= MAX_STREAMS
-                            return (
-                              <button
-                                key={s}
-                                type="button"
-                                onClick={() => toggleStream(s)}
-                                disabled={disabled}
-                                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                                  selected
-                                    ? "border-primary bg-primary/10 text-primary"
-                                    : disabled
-                                    ? "cursor-not-allowed opacity-35"
-                                    : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
-                                }`}
-                              >
-                                {s}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">{t.fields.streams.notConfigured}</p>
-                      )}
+                  {/* О компании */}
+                  <div className="space-y-4 rounded-xl border bg-muted/20 p-4">
+                    <h3 className="text-sm font-semibold text-card-foreground">{t.fields.aboutCompany.heading}</h3>
+
+                    <Field label={t.fields.industry.label} required hint={industries.length === 0 ? t.fields.industry.notConfigured : undefined}>
+                      <div className="flex flex-wrap gap-2">
+                        {industries.map((i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setIndustry(i)}
+                            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                              industry === i
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                            }`}
+                          >
+                            {i}
+                          </button>
+                        ))}
+                      </div>
                     </Field>
 
-                    <Field label={t.fields.country.label} required hint={t.fields.country.hint}>
-                      <select
-                        required
-                        value={country}
-                        onChange={(e) => setCountry(e.target.value)}
-                        className={inputCls}
-                      >
-                        <option value="">{t.fields.country.placeholder}</option>
-                        {PRIMARY_COUNTRIES.map((c) => (
-                          <option key={c} value={c}>{c}</option>
+                    <Field label={t.fields.companySize.label} required hint={companySizes.length === 0 ? t.fields.companySize.notConfigured : undefined}>
+                      <div className="grid grid-cols-2 gap-2">
+                        {companySizes.map((s) => (
+                          <button
+                            key={s.label}
+                            type="button"
+                            onClick={() => setCompanySize(s.label)}
+                            className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+                              companySize === s.label
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                            }`}
+                          >
+                            <div className="font-medium">{s.label}</div>
+                            <div className="text-muted-foreground/80">{s.rangeHint}</div>
+                          </button>
                         ))}
-                      </select>
+                      </div>
+                    </Field>
+
+                    <Field label={t.fields.countriesOfPresence.label} required hint={t.fields.countriesOfPresence.hint}>
+                      <div className="flex flex-wrap gap-2">
+                        {PRIMARY_COUNTRIES.map((c) => {
+                          const selected = countriesOfPresence.includes(c)
+                          return (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => toggleCountryOfPresence(c)}
+                              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                selected
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                              }`}
+                            >
+                              {c}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </Field>
+
+                    <Field label={t.fields.companyUrl.label} required>
+                      <input
+                        type="url"
+                        required
+                        value={companyUrl}
+                        onChange={(e) => setCompanyUrl(e.target.value)}
+                        placeholder={t.fields.companyUrl.placeholder}
+                        className={inputCls}
+                      />
                     </Field>
                   </div>
+
+                  {/* Стримы для рассылки */}
+                  <Field
+                    label={t.fields.streams.label}
+                    required
+                    hint={
+                      selectedStreams.length === 0
+                        ? t.fields.streams.chooseRange(MAX_STREAMS)
+                        : selectedStreams.length === MAX_STREAMS
+                        ? t.fields.streams.maxSelected(MAX_STREAMS)
+                        : undefined
+                    }
+                  >
+                    {streams.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {streams.map((s) => {
+                          const selected = selectedStreams.includes(s)
+                          const disabled = !selected && selectedStreams.length >= MAX_STREAMS
+                          return (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => toggleStream(s)}
+                              disabled={disabled}
+                              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                selected
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : disabled
+                                  ? "cursor-not-allowed opacity-35"
+                                  : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                              }`}
+                            >
+                              {s}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{t.fields.streams.notConfigured}</p>
+                    )}
+                  </Field>
 
                   {/* Дополнительные страны */}
                   <Field label={t.fields.additionalCountries.label} hint={additionalHint}>
@@ -418,7 +503,7 @@ export function EmployerRegistrationModal({ streams }: { streams: string[] }) {
                       >
                         {t.fields.additionalCountries.any}
                       </button>
-                      {ADDITIONAL_COUNTRIES.filter((c) => c !== country).map((c) => {
+                      {ADDITIONAL_COUNTRIES.filter((c) => !countriesOfPresence.includes(c)).map((c) => {
                         const selected = additionalCountries.includes(c)
                         return (
                           <button

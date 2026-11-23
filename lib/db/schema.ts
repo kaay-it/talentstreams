@@ -24,11 +24,11 @@ export const companies = pgTable("companies", {
 
 export const employers = pgTable("employers", {
   token:               text("token").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  // No default on name/email/phone/primaryContact/country — registerEmployer() always validates
-  // and supplies a real value for all five before the row is ever created, so '' is never a
-  // reachable state for them. A default would just let a future bug silently insert an empty
-  // value instead of Postgres loudly rejecting the missing column. telegram/linkedin keep theirs
-  // below — '' there is a real state (employer picked a different contact method).
+  // No default on name/email/phone/primaryContact/industry/companySize/companyUrl — registerEmployer()
+  // always validates and supplies a real value for all of these before the row is ever created, so
+  // '' is never a reachable state for them. A default would just let a future bug silently insert
+  // an empty value instead of Postgres loudly rejecting the missing column. telegram/linkedin keep
+  // theirs below — '' there is a real state (employer picked a different contact method).
   name:                text("name").notNull(),
   companyId:           integer("companyId").references(() => companies.id, { onDelete: "set null" }),
   email:               text("email").notNull().unique(),
@@ -38,7 +38,19 @@ export const employers = pgTable("employers", {
   linkedin:            text("linkedin").notNull().default(""),
   streams:             text("streams").array().notNull().default([]),
   status:              text("status").notNull().default("На проверке"),
-  country:             text("country").notNull(),
+  // "О компании" (TASK-66) — industry/companySize store the referenced industries/companySizes
+  // row's name/label as plain text, not an FK id: same soft-reference convention already used for
+  // streams (employers.streams / candidates.stream are names too, not stream ids) — a later rename
+  // of a reference-list entry doesn't need to cascade into every employer row that used it.
+  industry:            text("industry").notNull(),
+  companySize:         text("companySize").notNull(),
+  companyUrl:          text("companyUrl").notNull(),
+  // Replaces the old singular `country` — filterCandidatesForEmployer() already unioned
+  // `[employer.country, ...employer.additionalCountries]` into one set for the candidate geo
+  // filter, so "primary country" was never functionally different from "additional countries",
+  // just artificially capped at one value. additionalCountries itself is untouched: a genuinely
+  // separate concept ("which candidate countries we'll consider"), not merged with this.
+  countriesOfPresence: text("countriesOfPresence").array().notNull(),
   additionalCountries: text("additionalCountries").array().notNull().default([]),
   timestamp:           timestamp("timestamp").defaultNow().notNull(),
   // Telegram user id (SendPulse contact's telegram_id, numeric but stored as text — no
@@ -47,6 +59,25 @@ export const employers = pgTable("employers", {
   // Portability groundwork: this is what a future self-hosted bot would message directly via
   // the Telegram Bot API, independent of SendPulse (see lib/sendpulse.ts telegram functions).
   telegramId:          text("telegramId"),
+})
+
+// Справочник отраслей (TASK-66) — изначально копия type="Industry" стримов на момент задачи, но
+// намеренно независимый список: расширяется отдельно от стримов (которые управляют рассылками/
+// фильтрацией кандидатов, не имеют отношения к карточке "о компании" работодателя). Можно
+// опционально завести вместе со стримом через чекбокс в /editor/streams (components/streams-table.tsx).
+export const industries = pgTable("industries", {
+  id:   bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  name: text("name").notNull().unique(),
+})
+
+// Справочник категорий размера компании (TASK-66) — bigint identity, не serial (см. industries
+// выше): редактируемый в /editor/settings, чтобы дробить/схлопывать категории можно было без
+// деплоя кода. rangeHint — подпись с диапазоном по штату ("до 50 человек в штате"), только для
+// отображения в форме, не участвует ни в какой логике.
+export const companySizes = pgTable("companySizes", {
+  id:        bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  label:     text("label").notNull().unique(),
+  rangeHint: text("rangeHint").notNull().default(""),
 })
 
 // Header row for a mailing-list "выпуск" (release) — one row per listId, shared by every

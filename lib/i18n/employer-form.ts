@@ -19,7 +19,11 @@ type EmployerFormDict = {
       maxSelected: (max: number) => string
       notConfigured: string
     }
-    country: { label: string; hint: string; placeholder: string }
+    aboutCompany: { heading: string }
+    industry: { label: string; notConfigured: string }
+    companySize: { label: string; notConfigured: string }
+    countriesOfPresence: { label: string; hint: string }
+    companyUrl: { label: string; placeholder: string }
     additionalCountries: {
       label: string
       any: string
@@ -59,10 +63,16 @@ const ru: EmployerFormDict = {
       maxSelected: (max) => `Выбрано максимум (${max})`,
       notConfigured: "Стримы не настроены",
     },
-    country: {
-      label: "Страна нахождения",
-      hint: "Страна, в которой работает ваша компания",
-      placeholder: "— выберите —",
+    aboutCompany: { heading: "О компании" },
+    industry: { label: "Отрасль", notConfigured: "Список отраслей пока не настроен" },
+    companySize: { label: "Размер компании", notConfigured: "Список размеров пока не настроен" },
+    countriesOfPresence: {
+      label: "Страны присутствия",
+      hint: "Где у вашей компании есть офисы или бизнес — можно выбрать несколько",
+    },
+    companyUrl: {
+      label: "Сайт компании или LinkedIn-страница",
+      placeholder: "https://example.com или https://linkedin.com/company/...",
     },
     additionalCountries: {
       label: "Дополнительные страны",
@@ -103,10 +113,16 @@ const en: EmployerFormDict = {
       maxSelected: (max) => `Maximum selected (${max})`,
       notConfigured: "No streams configured",
     },
-    country: {
-      label: "Country",
-      hint: "The country your company operates in",
-      placeholder: "— select —",
+    aboutCompany: { heading: "About the company" },
+    industry: { label: "Industry", notConfigured: "No industries configured yet" },
+    companySize: { label: "Company size", notConfigured: "No company sizes configured yet" },
+    countriesOfPresence: {
+      label: "Countries of presence",
+      hint: "Where your company has offices or operates — choose one or more",
+    },
+    companyUrl: {
+      label: "Company website or LinkedIn page",
+      placeholder: "https://example.com or https://linkedin.com/company/...",
     },
     additionalCountries: {
       label: "Additional countries",

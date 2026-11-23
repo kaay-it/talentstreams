@@ -45,10 +45,14 @@ function Field({
 export function EmployerEditModal({
   employer,
   streams,
+  industries,
+  companySizes,
   onClose,
 }: {
   employer: Employer
   streams: string[]
+  industries: string[]
+  companySizes: { label: string; rangeHint: string }[]
   onClose: () => void
 }) {
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
@@ -64,7 +68,10 @@ export function EmployerEditModal({
   const [telegram, setTelegram] = useState(employer.telegram)
   const [linkedin, setLinkedin] = useState(employer.linkedin)
   const [selectedStreams, setSelectedStreams] = useState<string[]>(employer.streams)
-  const [country, setCountry] = useState(employer.country)
+  const [industry, setIndustry] = useState(employer.industry)
+  const [companySize, setCompanySize] = useState(employer.companySize)
+  const [companyUrl, setCompanyUrl] = useState(employer.companyUrl)
+  const [countriesOfPresence, setCountriesOfPresence] = useState<string[]>(employer.countriesOfPresence)
   const [additionalCountries, setAdditionalCountries] = useState<string[]>(employer.additionalCountries)
 
   const nameRef = useRef<HTMLInputElement>(null)
@@ -79,6 +86,10 @@ export function EmployerEditModal({
       document.removeEventListener("keydown", onKey)
     }
   }, [onClose])
+
+  function toggleCountryOfPresence(c: string) {
+    setCountriesOfPresence((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]))
+  }
 
   function toggleAdditionalCountry(c: string) {
     setAdditionalCountries((prev) => {
@@ -114,7 +125,10 @@ export function EmployerEditModal({
         telegram,
         linkedin,
         streams: selectedStreams,
-        country,
+        industry,
+        companySize,
+        companyUrl,
+        countriesOfPresence,
         additionalCountries,
       })
       if (result.ok) {
@@ -132,7 +146,10 @@ export function EmployerEditModal({
   const canSubmit =
     name.trim().length > 0 &&
     company.trim().length > 0 &&
-    country.trim().length > 0 &&
+    industry.trim().length > 0 &&
+    companySize.trim().length > 0 &&
+    companyUrl.trim().length > 0 &&
+    countriesOfPresence.length > 0 &&
     selectedStreams.length > 0 &&
     (primaryContact !== "telegram" || telegram.trim()) &&
     (primaryContact !== "linkedin" || linkedin.trim())
@@ -279,61 +296,121 @@ export function EmployerEditModal({
                 </Field>
               )}
 
-              <div className="grid grid-cols-2 gap-4 items-start">
-                <Field
-                  label="Стримы для рассылки"
-                  required
-                  hint={
-                    selectedStreams.length === 0
-                      ? `Выберите от 1 до ${MAX_STREAMS}`
-                      : selectedStreams.length === MAX_STREAMS
-                      ? `Выбрано максимум (${MAX_STREAMS})`
-                      : undefined
-                  }
-                >
-                  {streams.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {streams.map((s) => {
-                        const selected = selectedStreams.includes(s)
-                        const disabled = !selected && selectedStreams.length >= MAX_STREAMS
-                        return (
-                          <button
-                            key={s}
-                            type="button"
-                            onClick={() => toggleStream(s)}
-                            disabled={disabled}
-                            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                              selected
-                                ? "border-primary bg-primary/10 text-primary"
-                                : disabled
-                                ? "cursor-not-allowed opacity-35"
-                                : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
-                            }`}
-                          >
-                            {s}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Стримы не настроены</p>
-                  )}
+              <div className="space-y-4 rounded-xl border bg-muted/20 p-4">
+                <h3 className="text-sm font-semibold text-card-foreground">О компании</h3>
+
+                <Field label="Отрасль" required hint={industries.length === 0 ? "Список отраслей пока не настроен" : undefined}>
+                  <div className="flex flex-wrap gap-2">
+                    {industries.map((i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setIndustry(i)}
+                        className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          industry === i
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                        }`}
+                      >
+                        {i}
+                      </button>
+                    ))}
+                  </div>
                 </Field>
 
-                <Field label="Страна нахождения" required hint="Страна, в которой работает компания">
-                  <select
-                    required
-                    value={country}
-                    onChange={(e) => setCountry(e.target.value)}
-                    className={inputCls}
-                  >
-                    <option value="">— выберите —</option>
-                    {PRIMARY_COUNTRIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
+                <Field label="Размер компании" required hint={companySizes.length === 0 ? "Список размеров пока не настроен" : undefined}>
+                  <div className="grid grid-cols-2 gap-2">
+                    {companySizes.map((s) => (
+                      <button
+                        key={s.label}
+                        type="button"
+                        onClick={() => setCompanySize(s.label)}
+                        className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+                          companySize === s.label
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                        }`}
+                      >
+                        <div className="font-medium">{s.label}</div>
+                        <div className="text-muted-foreground/80">{s.rangeHint}</div>
+                      </button>
                     ))}
-                  </select>
+                  </div>
+                </Field>
+
+                <Field label="Страны присутствия" required hint="Где у компании есть офисы или бизнес — можно выбрать несколько">
+                  <div className="flex flex-wrap gap-2">
+                    {PRIMARY_COUNTRIES.map((c) => {
+                      const selected = countriesOfPresence.includes(c)
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => toggleCountryOfPresence(c)}
+                          className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                            selected
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </Field>
+
+                <Field label="Сайт компании или LinkedIn-страница" required>
+                  <input
+                    type="url"
+                    required
+                    value={companyUrl}
+                    onChange={(e) => setCompanyUrl(e.target.value)}
+                    placeholder="https://example.com"
+                    className={inputCls}
+                  />
                 </Field>
               </div>
+
+              <Field
+                label="Стримы для рассылки"
+                required
+                hint={
+                  selectedStreams.length === 0
+                    ? `Выберите от 1 до ${MAX_STREAMS}`
+                    : selectedStreams.length === MAX_STREAMS
+                    ? `Выбрано максимум (${MAX_STREAMS})`
+                    : undefined
+                }
+              >
+                {streams.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {streams.map((s) => {
+                      const selected = selectedStreams.includes(s)
+                      const disabled = !selected && selectedStreams.length >= MAX_STREAMS
+                      return (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => toggleStream(s)}
+                          disabled={disabled}
+                          className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                            selected
+                              ? "border-primary bg-primary/10 text-primary"
+                              : disabled
+                              ? "cursor-not-allowed opacity-35"
+                              : "text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
+                          }`}
+                        >
+                          {s}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Стримы не настроены</p>
+                )}
+              </Field>
 
               <Field label="Дополнительные страны" hint={additionalHint}>
                 <div className="flex flex-wrap gap-2">
@@ -348,7 +425,7 @@ export function EmployerEditModal({
                   >
                     Любая
                   </button>
-                  {ADDITIONAL_COUNTRIES.filter((c) => c !== country).map((c) => {
+                  {ADDITIONAL_COUNTRIES.filter((c) => !countriesOfPresence.includes(c)).map((c) => {
                     const selected = additionalCountries.includes(c)
                     return (
                       <button

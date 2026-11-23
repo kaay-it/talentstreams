@@ -137,10 +137,14 @@ function SortableHeader({
 export function EmployerSection({
   employers,
   streams,
+  industries,
+  companySizes,
   telegramConnectedTokens,
 }: {
   employers: Employer[]
   streams: string[]
+  industries: string[]
+  companySizes: { label: string; rangeHint: string }[]
   telegramConnectedTokens: string[]
 }) {
   const telegramConnected = useMemo(() => new Set(telegramConnectedTokens), [telegramConnectedTokens])
@@ -164,7 +168,7 @@ export function EmployerSection({
   }
 
   const countries = useMemo(
-    () => Array.from(new Set(employers.map((e) => e.country).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    () => Array.from(new Set(employers.flatMap((e) => e.countriesOfPresence).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [employers],
   )
 
@@ -172,7 +176,7 @@ export function EmployerSection({
     const q = search.trim().toLowerCase()
     return employers.filter((e) => {
       if (status && e.status !== status) return false
-      if (country && e.country !== country) return false
+      if (country && !e.countriesOfPresence.includes(country)) return false
       if (stream && !e.streams.some((s) => s.trim().toLowerCase() === stream.toLowerCase())) return false
       if (q) {
         const haystack = `${e.name} ${e.company} ${e.email}`.toLowerCase()
@@ -263,7 +267,14 @@ export function EmployerSection({
         </button>
       </div>
 
-      {creating && <EmployerCreateModal streams={streams} onClose={() => setCreating(false)} />}
+      {creating && (
+        <EmployerCreateModal
+          streams={streams}
+          industries={industries}
+          companySizes={companySizes}
+          onClose={() => setCreating(false)}
+        />
+      )}
 
       <div className="rounded-xl border bg-card overflow-hidden">
         {employers.length === 0 ? (
@@ -286,7 +297,14 @@ export function EmployerSection({
               </thead>
               <tbody>
                 {paginated.map((e) => (
-                  <EmployerRow key={e.token} employer={e} streams={streams} telegramConnected={telegramConnected.has(e.token)} />
+                  <EmployerRow
+                    key={e.token}
+                    employer={e}
+                    streams={streams}
+                    industries={industries}
+                    companySizes={companySizes}
+                    telegramConnected={telegramConnected.has(e.token)}
+                  />
                 ))}
               </tbody>
             </table>
@@ -309,10 +327,14 @@ export function EmployerSection({
 function EmployerRow({
   employer,
   streams,
+  industries,
+  companySizes,
   telegramConnected,
 }: {
   employer: Employer
   streams: string[]
+  industries: string[]
+  companySizes: { label: string; rangeHint: string }[]
   telegramConnected: boolean
 }) {
   const [isPending, startTransition] = useTransition()
@@ -362,7 +384,13 @@ function EmployerRow({
   return (
     <>
       {editing && (
-        <EmployerEditModal employer={employer} streams={streams} onClose={() => setEditing(false)} />
+        <EmployerEditModal
+          employer={employer}
+          streams={streams}
+          industries={industries}
+          companySizes={companySizes}
+          onClose={() => setEditing(false)}
+        />
       )}
       <tr className={`border-b last:border-b-0 align-top transition-opacity ${done ? "opacity-50" : ""}`}>
         <td className="px-4 py-3">
@@ -394,7 +422,7 @@ function EmployerRow({
         </td>
 
         <td className="px-4 py-3 text-xs text-muted-foreground">
-          {employer.country || "—"}
+          {employer.countriesOfPresence.join(", ") || "—"}
           {employer.additionalCountries.length ? ` (+ ${employer.additionalCountries.join(", ")})` : ""}
         </td>
 
