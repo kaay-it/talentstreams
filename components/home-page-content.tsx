@@ -19,7 +19,15 @@ import {
   Zap,
 } from "lucide-react"
 
-export function HomePageContent({ streams }: { streams: string[] }) {
+export function HomePageContent({
+  streams,
+  industries,
+  companySizes,
+}: {
+  streams: string[]
+  industries: string[]
+  companySizes: { label: string; rangeHint: string }[]
+}) {
   const { locale } = useLocale()
   const t = homeDict[locale]
 
@@ -36,7 +44,7 @@ export function HomePageContent({ streams }: { streams: string[] }) {
           </div>
           <div className="flex items-center gap-2">
             <CandidateRegistrationModal />
-            <EmployerRegistrationModal streams={streams} />
+            <EmployerRegistrationModal streams={streams} industries={industries} companySizes={companySizes} />
             <LanguageToggle />
           </div>
         </div>

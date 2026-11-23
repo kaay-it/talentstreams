@@ -34,6 +34,16 @@ import { addResumeVersion, getResumeVersions, deleteResumeVersions, deleteResume
 export type { ResumeVersion, ResumeVersionKind } from "@/lib/db/resumes"
 import { updateStreamRecord, createStreamRecord, deleteStreamRecord, getStreamIdByName, getStreamById } from "@/lib/db/streams"
 import {
+  addIndustry as addIndustryDb,
+  updateIndustry as updateIndustryDb,
+  deleteIndustry as deleteIndustryDb,
+} from "@/lib/db/industries"
+import {
+  addCompanySize as addCompanySizeDb,
+  updateCompanySize as updateCompanySizeDb,
+  deleteCompanySize as deleteCompanySizeDb,
+} from "@/lib/db/company-sizes"
+import {
   getBillingPlans as getBillingPlansDb,
   createBillingPlan as createBillingPlanDb,
   updateBillingPlan as updateBillingPlanDb,
@@ -837,7 +847,10 @@ export type EmployerData = {
   telegram: string
   linkedin: string
   streams: string[]
-  country: string
+  industry: string
+  companySize: string
+  companyUrl: string
+  countriesOfPresence: string[]
   additionalCountries: string[]
 }
 
@@ -1239,7 +1252,10 @@ export type RegisterEmployerResult =
 export async function registerEmployer(data: EmployerData): Promise<RegisterEmployerResult> {
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
   if (!data.company.trim()) return { ok: false, error: "Укажите компанию" }
-  if (!data.country.trim()) return { ok: false, error: "Укажите страну" }
+  if (!data.countriesOfPresence.length) return { ok: false, error: "Укажите хотя бы одну страну присутствия" }
+  if (!data.industry.trim()) return { ok: false, error: "Укажите отрасль" }
+  if (!data.companySize.trim()) return { ok: false, error: "Укажите размер компании" }
+  if (!data.companyUrl.trim()) return { ok: false, error: "Укажите ссылку на сайт или LinkedIn компании" }
   if (!data.email || !data.phone) return { ok: false, error: "Email и телефон обязательны" }
   if (!data.streams.length) return { ok: false, error: "Выберите хотя бы один стрим" }
   if (data.primaryContact === "telegram" && !data.telegram.trim()) {
@@ -1276,7 +1292,10 @@ export async function registerEmployer(data: EmployerData): Promise<RegisterEmpl
       linkedin: data.linkedin || "",
       streams: data.streams,
       status: "На проверке",
-      country: data.country,
+      industry: data.industry,
+      companySize: data.companySize,
+      companyUrl: data.companyUrl,
+      countriesOfPresence: data.countriesOfPresence,
       additionalCountries: data.additionalCountries.length ? data.additionalCountries : ["Любая"],
     })
   } catch (err) {
@@ -1302,14 +1321,20 @@ export async function updateEmployer(
     telegram: string
     linkedin: string
     streams: string[]
-    country: string
+    industry: string
+    companySize: string
+    companyUrl: string
+    countriesOfPresence: string[]
     additionalCountries: string[]
   },
 ): Promise<RegisterEmployerResult> {
   await requireEditorAuth()
   if (!data.name.trim()) return { ok: false, error: "Укажите имя" }
   if (!data.company.trim()) return { ok: false, error: "Укажите компанию" }
-  if (!data.country.trim()) return { ok: false, error: "Укажите страну" }
+  if (!data.countriesOfPresence.length) return { ok: false, error: "Укажите хотя бы одну страну присутствия" }
+  if (!data.industry.trim()) return { ok: false, error: "Укажите отрасль" }
+  if (!data.companySize.trim()) return { ok: false, error: "Укажите размер компании" }
+  if (!data.companyUrl.trim()) return { ok: false, error: "Укажите ссылку на сайт или LinkedIn компании" }
   if (!data.email.trim()) return { ok: false, error: "Укажите email" }
   if (!data.phone.trim()) return { ok: false, error: "Укажите телефон" }
   if (!data.streams.length) return { ok: false, error: "Выберите хотя бы один стрим" }
@@ -1333,7 +1358,10 @@ export async function updateEmployer(
       telegram: data.telegram,
       linkedin: data.linkedin,
       streams: data.streams,
-      country: data.country,
+      industry: data.industry,
+      companySize: data.companySize,
+      companyUrl: data.companyUrl,
+      countriesOfPresence: data.countriesOfPresence,
       additionalCountries: data.additionalCountries.length ? data.additionalCountries : ["Любая"],
     })
   } catch (err) {
@@ -1520,6 +1548,49 @@ export async function unarchiveStream(id: number): Promise<void> {
   await requireEditorAuth()
   await updateStreamRecord(id, { status: "Активный" })
   revalidatePath("/editor/streams")
+}
+
+/** Справочник отраслей (TASK-66) — используется и формами регистрации работодателя (выбор
+ * отрасли), и редактором справочника в /editor/settings. Список для отображения читается
+ * напрямую из lib/db/industries.ts в соответствующих server components (как getStreams()) —
+ * здесь только мутации, которым нужен requireEditorAuth(). */
+export async function addIndustry(name: string): Promise<void> {
+  await requireEditorAuth()
+  await addIndustryDb(name)
+  revalidatePath("/editor/streams")
+  revalidatePath("/editor/settings")
+}
+
+export async function updateIndustryName(id: number, name: string): Promise<void> {
+  await requireEditorAuth()
+  await updateIndustryDb(id, name)
+  revalidatePath("/editor/settings")
+}
+
+export async function deleteIndustry(id: number): Promise<void> {
+  await requireEditorAuth()
+  await deleteIndustryDb(id)
+  revalidatePath("/editor/settings")
+}
+
+/** Справочник категорий размера компании (TASK-66) — редактируется в /editor/settings, чтобы
+ * дробить/схлопывать категории можно было без деплоя кода. */
+export async function addCompanySize(label: string, rangeHint: string): Promise<void> {
+  await requireEditorAuth()
+  await addCompanySizeDb(label, rangeHint)
+  revalidatePath("/editor/settings")
+}
+
+export async function updateCompanySizeRecord(id: number, label: string, rangeHint: string): Promise<void> {
+  await requireEditorAuth()
+  await updateCompanySizeDb(id, { label, rangeHint })
+  revalidatePath("/editor/settings")
+}
+
+export async function deleteCompanySize(id: number): Promise<void> {
+  await requireEditorAuth()
+  await deleteCompanySizeDb(id)
+  revalidatePath("/editor/settings")
 }
 
 /**

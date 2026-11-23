@@ -21,7 +21,14 @@ export type Employer = {
   linkedin: string
   streams: string[]
   status: EmployerStatus
-  country: string
+  industry: string
+  companySize: string
+  companyUrl: string
+  /** Countries the company itself is present in (TASK-66) — replaces the old singular `country`;
+   * unioned with additionalCountries for the candidate geo filter, see filterCandidatesForEmployer(). */
+  countriesOfPresence: string[]
+  /** Separate concept from countriesOfPresence: candidate origin countries this employer will
+   * also consider, not where the company itself operates. */
   additionalCountries: string[]
   timestamp: string
   /** Telegram user id (SendPulse contact's telegram_id) — null if never connected, or no
@@ -48,7 +55,10 @@ function toEmployer(row: { employers: typeof employers.$inferSelect; companies: 
     linkedin: e.linkedin,
     streams: e.streams,
     status: e.status as EmployerStatus,
-    country: e.country,
+    industry: e.industry,
+    companySize: e.companySize,
+    companyUrl: e.companyUrl,
+    countriesOfPresence: e.countriesOfPresence,
     additionalCountries: e.additionalCountries,
     timestamp: e.timestamp.toISOString(),
     telegramId: e.telegramId,
@@ -110,7 +120,7 @@ export function filterCandidatesForEmployer(candidates: Candidate[], employer: E
   const employerCountries = anyCountry
     ? null
     : new Set(
-        [employer.country, ...employer.additionalCountries]
+        [...employer.countriesOfPresence, ...employer.additionalCountries]
           .map((c) => c.trim().toLowerCase())
           .filter(Boolean),
       )
@@ -147,7 +157,10 @@ export async function createEmployer(data: {
   linkedin: string
   streams: string[]
   status: EmployerStatus
-  country: string
+  industry: string
+  companySize: string
+  companyUrl: string
+  countriesOfPresence: string[]
   additionalCountries: string[]
   timestamp?: Date
 }): Promise<void> {
@@ -167,7 +180,10 @@ export async function updateEmployerFields(
     linkedin: string
     streams: string[]
     status: EmployerStatus
-    country: string
+    industry: string
+    companySize: string
+    companyUrl: string
+    countriesOfPresence: string[]
     additionalCountries: string[]
     telegramId: string | null
   }>,

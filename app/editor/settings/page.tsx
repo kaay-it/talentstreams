@@ -8,7 +8,10 @@ import { ReleaseFollowUpToggle } from "@/components/release-follow-up-toggle"
 import { WhatsAppPushToggle } from "@/components/whatsapp-push-toggle"
 import { DuplicatesSection } from "@/components/duplicates-section"
 import { McpAccessSection } from "@/components/mcp-access-section"
-import { getCandidateDigestSettings, getReleaseFollowUpSettings, getWhatsAppPushSettings, getDuplicateThreshold } from "@/app/actions"
+import { ReferenceListEditor } from "@/components/reference-list-editor"
+import { getCandidateDigestSettings, getReleaseFollowUpSettings, getWhatsAppPushSettings, getDuplicateThreshold, addIndustry, updateIndustryName, deleteIndustry, addCompanySize, updateCompanySizeRecord, deleteCompanySize } from "@/app/actions"
+import { getIndustries } from "@/lib/db/industries"
+import { getCompanySizes } from "@/lib/db/company-sizes"
 
 export const dynamic = "force-dynamic"
 
@@ -24,11 +27,13 @@ export default async function SettingsPage({
     notFound()
   }
 
-  const [digestSettings, followUpSettings, whatsappSettings, duplicateThreshold] = await Promise.all([
+  const [digestSettings, followUpSettings, whatsappSettings, duplicateThreshold, industries, companySizes] = await Promise.all([
     getCandidateDigestSettings(),
     getReleaseFollowUpSettings(),
     getWhatsAppPushSettings(),
     getDuplicateThreshold(),
+    getIndustries(),
+    getCompanySizes(),
   ])
 
   return (
@@ -118,6 +123,45 @@ export default async function SettingsPage({
           в любой момент кнопкой ниже.
         </p>
         <McpAccessSection />
+      </div>
+
+      <div className="mt-10 space-y-6">
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-card-foreground">Справочники — «О компании» в регистрации работодателя</h2>
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            Отрасль и размер компании работодатель выбирает только из этих списков при регистрации —
+            пополняются здесь (отрасль можно добавить и прямо со страницы «Стримы», галочкой при
+            создании индустриального стрима). Удаление записи не меняет уже сохранённые анкеты
+            работодателей — только убирает вариант из формы для новых регистраций.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Отрасли</h3>
+          <ReferenceListEditor
+            items={industries.map((i) => ({ id: i.id, label: i.name }))}
+            showHint={false}
+            addAction={addIndustry}
+            updateAction={updateIndustryName}
+            deleteAction={deleteIndustry}
+            addButtonLabel="Добавить отрасль"
+            labelPlaceholder="Название отрасли"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Размер компании</h3>
+          <ReferenceListEditor
+            items={companySizes.map((s) => ({ id: s.id, label: s.label, hint: s.rangeHint }))}
+            showHint
+            addAction={addCompanySize}
+            updateAction={updateCompanySizeRecord}
+            deleteAction={deleteCompanySize}
+            addButtonLabel="Добавить категорию"
+            labelPlaceholder="Название категории"
+            hintPlaceholder="Подсказка, например «до 50 человек в штате»"
+          />
+        </div>
       </div>
     </div>
   )

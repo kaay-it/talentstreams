@@ -2,7 +2,7 @@
 
 import { Fragment, useState, useTransition } from "react"
 import { Layers, Pencil, Check, X, Copy, CheckCheck, Trash2, Plus, Archive, ChevronDown, ChevronUp } from "lucide-react"
-import { updateStream, createStream, deleteStream, archiveStream } from "@/app/actions"
+import { updateStream, createStream, deleteStream, archiveStream, addIndustry } from "@/app/actions"
 import type { StreamRecord } from "@/lib/db/streams"
 import type { MailingListSummary } from "@/lib/db/mailing-lists"
 
@@ -14,6 +14,7 @@ const TYPE_STYLE: Record<string, string> = {
 }
 
 const EMPTY_FORM = { name: "", type: "Industry", description: "" }
+const EMPTY_ADD_FORM = { ...EMPTY_FORM, alsoIndustry: false }
 
 type StreamMailingHistoryEntry = MailingListSummary & { sent: boolean }
 
@@ -33,7 +34,7 @@ export function StreamsTable({
   const [editingId, setEditingId]   = useState<number | null>(null)
   const [editData, setEditData]     = useState<typeof EMPTY_FORM | null>(null)
   const [showAdd, setShowAdd]       = useState(false)
-  const [addData, setAddData]       = useState(EMPTY_FORM)
+  const [addData, setAddData]       = useState(EMPTY_ADD_FORM)
   const [copied, setCopied]         = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
   const [isPending, startTransition] = useTransition()
@@ -71,14 +72,18 @@ export function StreamsTable({
     })
   }
 
-  const openAdd = () => { cancelEdit(); setShowAdd(true); setAddData(EMPTY_FORM) }
+  const openAdd = () => { cancelEdit(); setShowAdd(true); setAddData(EMPTY_ADD_FORM) }
 
   const saveAdd = () => {
     if (!addData.name.trim()) return
     startTransition(async () => {
-      await createStream(addData)
+      const { alsoIndustry, ...streamData } = addData
+      await createStream(streamData)
+      if (streamData.type === "Industry" && alsoIndustry) {
+        await addIndustry(streamData.name)
+      }
       setShowAdd(false)
-      setAddData(EMPTY_FORM)
+      setAddData(EMPTY_ADD_FORM)
     })
   }
 
@@ -303,6 +308,24 @@ export function StreamsTable({
                 </td>
               </tr>
             )}
+
+            {showAdd && addData.type === "Industry" && (
+              <tr className="bg-muted/20">
+                <td colSpan={7} className="px-4 pb-3 pt-0">
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={addData.alsoIndustry}
+                      onChange={(e) => setAddData((d) => ({ ...d, alsoIndustry: e.target.checked }))}
+                      disabled={isPending}
+                      className="size-3.5 accent-primary"
+                    />
+                    Также добавить в список отраслей (для «О компании» в регистрации работодателя)
+                  </label>
+                </td>
+              </tr>
+            )}
+
           </tbody>
         </table>
       </div>
